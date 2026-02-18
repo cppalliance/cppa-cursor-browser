@@ -21,7 +21,33 @@ from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, 
 from utils.text_extract import extract_text_from_bubble, format_tool_action
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 
+from urllib.parse import unquote as _url_unquote
+
 bp = Blueprint("workspaces", __name__)
+
+
+def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
+    """
+    Return a human-readable display name for a workspace.
+
+    Reads the workspace's ``workspace.json`` to extract the last path segment
+    of the first configured folder, URL-decodes it, and returns it.  Falls back
+    to ``"Other chats"`` for the virtual ``"global"`` workspace and to
+    *workspace_id* if the JSON cannot be read.
+    """
+    if workspace_id == "global":
+        return "Other chats"
+    wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
+    try:
+        wd = _read_json_file(wj_path)
+        first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+        if first_folder:
+            fn = first_folder.replace("\\", "/").split("/")[-1]
+            if fn:
+                return _url_unquote(fn)
+    except Exception:
+        pass
+    return workspace_id
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +383,6 @@ def list_workspaces():
         rules = current_app.config.get("EXCLUSION_RULES") or []
 
         # Build project list — merge workspace entries sharing the same folder
-        from urllib.parse import unquote as _unquote
 
         # Group workspace entries by normalized folder path
         folder_to_entries: dict[str, list] = {}
@@ -399,17 +424,13 @@ def list_workspaces():
             except Exception:
                 mtime = 0
 
-            workspace_name = f"Project {primary['name'][:8]}"
-            try:
-                wd = _read_json_file(primary["workspaceJsonPath"])
-                first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
-                if first_folder:
-                    parts = first_folder.replace("\\", "/").split("/")
-                    fn = parts[-1] if parts else None
-                    if fn:
-                        workspace_name = _unquote(fn)
-            except Exception:
-                pass
+            workspace_name = _get_workspace_display_name(workspace_path, primary["name"])
+            if workspace_name == primary["name"]:
+                workspace_name = f"Project {primary['name'][:8]}"
+
+            # Skip entire workspace before iterating conversations
+            if is_excluded_by_rules(rules, workspace_name):
+                continue
 
             # Merge conversations from all workspace IDs in the group; apply exclusion rules
             convos = []
@@ -421,9 +442,6 @@ def list_workspaces():
                     )
                     if not is_excluded_by_rules(rules, searchable):
                         convos.append(c)
-
-            if is_excluded_by_rules(rules, workspace_name):
-                continue
 
             projects.append({
                 "id": primary["name"],
@@ -574,22 +592,7 @@ def get_workspace_tabs(workspace_id):
         if not os.path.isfile(global_db_path):
             return jsonify({"error": "Global storage not found"}), 404
 
-        # Workspace display name for exclusion rules
-        workspace_display_name = "Other chats" if workspace_id == "global" else workspace_id
-        if workspace_id != "global":
-            wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
-            try:
-                wd = _read_json_file(wj_path)
-                first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
-                if first_folder:
-                    from urllib.parse import unquote as _unquote
-                    parts = first_folder.replace("\\", "/").split("/")
-                    fn = parts[-1] if parts else None
-                    if fn:
-                        workspace_display_name = _unquote(fn)
-            except Exception:
-                pass
-
+        workspace_display_name = _get_workspace_display_name(workspace_path, workspace_id)
         rules = current_app.config.get("EXCLUSION_RULES") or []
 
         global_db = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
@@ -832,6 +835,17 @@ def get_workspace_tabs(workspace_id):
                             if len(title) == 100:
                                 title += "..."
 
+                # Early exclusion check — run before expensive metadata aggregation
+                _early_model_config = cd.get("modelConfig") or {}
+                _early_model_name = _early_model_config.get("modelName")
+                _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
+                if is_excluded_by_rules(rules, build_searchable_text(
+                    project_name=workspace_display_name,
+                    chat_title=title,
+                    model_names=_early_model_names,
+                )):
+                    continue
+
                 # Code block diffs as extra bubbles
                 diffs = code_block_diff_map.get(composer_id, [])
                 for diff in diffs:
@@ -956,13 +970,7 @@ def get_workspace_tabs(workspace_id):
                 if tab_meta:
                     tab["metadata"] = tab_meta
 
-                searchable = build_searchable_text(
-                    project_name=workspace_display_name,
-                    chat_title=title,
-                    model_names=tab_meta.get("modelsUsed") if tab_meta else None,
-                )
-                if not is_excluded_by_rules(rules, searchable):
-                    response["tabs"].append(tab)
+                response["tabs"].append(tab)
 
             except Exception as e:
                 print(f"Error parsing composer data for {composer_id}: {e}")

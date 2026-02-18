@@ -16,46 +16,62 @@ Example exclusion-rules.txt:
   secret OR internal
   "project alpha" AND confidential
   password
+
+Note: Rules are loaded once at startup (or at the start of a CLI export run).
+Changes to the exclusion rules file require an application restart (or re-running
+the CLI export) to take effect.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 
+_logger = logging.getLogger(__name__)
 
 # Default path when no --exclude-rules is given: ~/.cursor-chat-browser/exclusion-rules.txt
 DEFAULT_EXCLUSION_RULES_FILENAME = "exclusion-rules.txt"
 
 
 def get_default_exclusion_rules_path() -> str:
-    """Path to the default exclusion rules file in user config dir."""
+    """Return the path to the default exclusion rules file in the user config directory."""
     return os.path.join(str(Path.home()), ".cursor-chat-browser", DEFAULT_EXCLUSION_RULES_FILENAME)
 
 
 def resolve_exclusion_rules_path(cli_path: str | None) -> str | None:
     """
     Resolve the exclusion rules file path.
-    - If cli_path is given and the file exists, return it (absolute or cwd-relative).
-    - Else if the default file exists in ~/.cursor-chat-browser/, return that path.
-    - Else return None (no filtering).
+
+    - If *cli_path* is given: expand and return its absolute path.  If the
+      file doesn't exist a warning is emitted so the user knows their rules
+      aren't being applied (the path is still returned so load_rules can
+      explain the absence).
+    - If *cli_path* is None and the default file
+      (``~/.cursor-chat-browser/exclusion-rules.txt``) exists, return that.
+    - Otherwise return None (no filtering).
     """
     if cli_path:
         p = os.path.abspath(os.path.expanduser(cli_path))
-        if os.path.isfile(p):
-            return p
-        return p  # still use it; loader will report missing file
+        if not os.path.isfile(p):
+            _logger.warning(
+                "Exclusion rules file not found: %s — no filtering will be applied.", p
+            )
+        return p
     default = get_default_exclusion_rules_path()
     if os.path.isfile(default):
         return default
     return None
 
 
-def _tokenize_rule(line: str) -> list[str]:
+def _tokenize_rule(line: str) -> list:
     """
     Tokenize a rule line into terms and operators.
-    Returns a list of tokens: "AND", "OR", or term (keyword or "phrase").
+
+    Returns a list of tokens where each token is either the string ``"AND"``,
+    the string ``"OR"``, or a ``(kind, value)`` tuple where *kind* is
+    ``"word"`` or ``"phrase"``.
     """
     tokens = []
     rest = line.strip()
@@ -63,14 +79,14 @@ def _tokenize_rule(line: str) -> list[str]:
         # Skip whitespace
         m = re.match(r"\s+", rest)
         if m:
-            rest = rest[m.end() :]
+            rest = rest[m.end():]
             continue
-        # AND (word boundary)
+        # AND keyword (word boundary, case-insensitive)
         if re.match(r"\bAND\b", rest, re.IGNORECASE):
             tokens.append("AND")
             rest = rest[3:].lstrip()
             continue
-        # OR (word boundary)
+        # OR keyword (word boundary, case-insensitive)
         if re.match(r"\bOR\b", rest, re.IGNORECASE):
             tokens.append("OR")
             rest = rest[2:].lstrip()
@@ -79,51 +95,61 @@ def _tokenize_rule(line: str) -> list[str]:
         if rest.startswith('"'):
             end = rest.find('"', 1)
             if end == -1:
-                # Unclosed quote: treat remainder as one word term
+                # Unclosed quote: treat remainder as a word term
                 tokens.append(("word", rest[1:].strip()))
                 break
             tokens.append(("phrase", rest[1:end]))
-            rest = rest[end + 1 :].lstrip()
+            rest = rest[end + 1:].lstrip()
             continue
-        # Single word (until space or end)
+        # Unquoted word (until next whitespace)
         m = re.match(r"\S+", rest)
         if m:
             tokens.append(("word", m.group(0)))
-            rest = rest[m.end() :].lstrip()
+            rest = rest[m.end():].lstrip()
             continue
         break
     return tokens
 
 
-def _term_matches(term: tuple[str, str], text: str) -> bool:
-    """Check if a term (word or phrase) matches in text (case-insensitive)."""
-    kind, value = term
+def _term_matches(term: tuple, text: str) -> bool:
+    """
+    Return True if *term* matches anywhere in *text* (case-insensitive).
+
+    Both ``"word"`` and ``"phrase"`` terms use a case-insensitive substring
+    check.  A ``"phrase"`` term matches when the quoted string appears as a
+    contiguous substring (spaces included).
+
+    .. note::
+        Future versions may tighten ``"phrase"`` matching to require exact
+        word-boundary anchoring (e.g. via a regex) for stricter phrase
+        semantics.
+    """
+    _kind, value = term
     if not value:
         return False
-    text_lower = text.lower()
-    if kind == "word":
-        return value.lower() in text_lower
-    # phrase: exact substring (case-insensitive)
-    return value.lower() in text_lower
+    return value.lower() in text.lower()
 
 
 def _rule_matches(tokens: list, text: str) -> bool:
     """
-    Evaluate a tokenized rule against text.
-    AND has higher precedence: a OR b AND c => (a) OR (b AND c).
+    Evaluate a tokenized rule against *text*.
+
+    Operator precedence: AND binds tighter than OR, so
+    ``a OR b AND c`` is parsed as ``(a) OR (b AND c)``.
+    Adjacent terms without an explicit operator are treated as AND.
     """
     if not tokens:
         return False
-    # Split by OR into clauses; each clause is AND of terms
-    clauses = []
-    current = []
+    # Split by OR into clauses; each clause is the AND of its terms
+    clauses: list[list] = []
+    current: list = []
     for t in tokens:
         if t == "OR":
             if current:
                 clauses.append(current)
             current = []
         elif t == "AND":
-            # just skip; we collect terms, AND is implicit between them
+            # Explicit AND: terms are already collected sequentially, skip token
             continue
         else:
             current.append(t)
@@ -133,7 +159,7 @@ def _rule_matches(tokens: list, text: str) -> bool:
     for clause in clauses:
         if not clause:
             continue
-        # Clause matches if all terms match (AND)
+        # Clause matches when every term in it matches (implicit AND)
         if all(_term_matches(term, text) for term in clause if isinstance(term, tuple)):
             return True
     return False
@@ -141,9 +167,11 @@ def _rule_matches(tokens: list, text: str) -> bool:
 
 def load_rules(path: str | None) -> list[list]:
     """
-    Load and parse the exclusion rule file.
-    Returns a list of tokenized rules (each is a list of tokens).
-    If path is None or file is missing/unreadable, returns [].
+    Load and parse the exclusion rule file at *path*.
+
+    Returns a list of tokenized rules (each rule is a list of tokens as
+    produced by :func:`_tokenize_rule`).  Returns an empty list when *path*
+    is ``None``, the file doesn't exist, or the file cannot be read.
     """
     if not path or not os.path.isfile(path):
         return []
@@ -158,14 +186,18 @@ def load_rules(path: str | None) -> list[list]:
                 if tokens:
                     rules.append(tokens)
     except Exception:
+        _logger.warning("Failed to read exclusion rules from %s", path, exc_info=True)
         return []
     return rules
 
 
 def is_excluded_by_rules(rules: list[list], searchable_text: str) -> bool:
     """
-    Return True if searchable_text should be excluded (any rule matches).
-    searchable_text is typically a combination of project name, chat title, model names, etc.
+    Return ``True`` if *searchable_text* matches any exclusion rule.
+
+    *searchable_text* is typically a combination of project name, chat title,
+    model names, etc., joined by newlines via :func:`build_searchable_text`.
+    Returns ``False`` when *rules* is empty or *searchable_text* is empty.
     """
     if not searchable_text or not rules:
         return False
@@ -182,7 +214,13 @@ def build_searchable_text(
     model_names: list[str] | None = None,
     chat_content_snippet: str | None = None,
 ) -> str:
-    """Build a single string to run exclusion rules against (e.g. for a chat or project)."""
+    """
+    Combine chat/project metadata into a single string for rule matching.
+
+    All non-empty, non-None parts are joined with newlines.  A
+    *chat_content_snippet* longer than 50 000 characters is truncated since
+    keyword/phrase presence can be detected from the first portion alone.
+    """
     parts = []
     if project_name:
         parts.append(project_name)
@@ -191,7 +229,6 @@ def build_searchable_text(
     if model_names:
         parts.extend(model_names)
     if chat_content_snippet:
-        # Limit size to avoid huge strings; first N chars is enough for keyword/phrase match
         snippet = chat_content_snippet
         parts.append(snippet[:50_000] if len(snippet) > 50_000 else snippet)
     return "\n".join(p for p in parts if p)

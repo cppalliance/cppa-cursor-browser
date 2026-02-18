@@ -71,6 +71,13 @@ def get_export_state():
 
 @bp.route("/api/export", methods=["POST"])
 def export_chats():
+    """Export chats as a zip archive.
+
+    Exclusion rules (``EXCLUSION_RULES`` app config key) are evaluated against
+    each chat's project name, title, and model.  Rules are loaded once at
+    application startup; an app restart is required to pick up changes to the
+    exclusion rules file.
+    """
     try:
         body = request.get_json(silent=True) or {}
         since = "last" if body.get("since") == "last" else "all"
@@ -276,8 +283,6 @@ def export_chats():
                 md += f"updated_at: {datetime.fromtimestamp(updated_at_ms / 1000).isoformat() if updated_at_ms else datetime.now().isoformat()}\n"
                 md += f"workspace: {ws_slug}\n"
                 md += f"message_count: {len(bubbles)}\n"
-                model_config = cd.get("modelConfig") or {}
-                model_name = model_config.get("modelName")
                 if model_name:
                     md += f"model: {model_name}\n"
                 if total_response_ms:

@@ -226,8 +226,7 @@ def main():
     since = opts["since"]
     out_dir = os.path.abspath(opts["out_dir"])
     use_zip = opts["zip"]
-    exclusion_path = resolve_exclusion_rules_path(opts.get("exclusion_rules_path"))
-    exclusion_rules = load_rules(exclusion_path) if exclusion_path and os.path.isfile(exclusion_path or "") else []
+    exclusion_rules = load_rules(resolve_exclusion_rules_path(opts.get("exclusion_rules_path")))
     workspace_path = resolve_workspace_path()
     global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
@@ -266,15 +265,18 @@ def main():
     workspace_path_to_id = {}
     project_name_to_ws = {}
     workspace_id_to_slug = {}
+    workspace_id_to_display_name: dict[str, str] = {}  # human-readable, URL-decoded folder name
     for e in workspace_entries:
         try:
             with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
                 wd = json.load(f)
             first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
             if first_folder:
+                from urllib.parse import unquote as _unquote
                 fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
                 if fn:
                     workspace_id_to_slug[e["name"]] = slug(fn)
+                    workspace_id_to_display_name[e["name"]] = _unquote(fn)
             for folder in get_workspace_folder_paths(wd):
                 norm = normalize_file_path(folder)
                 workspace_path_to_id[norm] = e["name"]
@@ -442,12 +444,13 @@ def main():
 
         ws_id = assign_workspace(cd, composer_id)
         ws_slug = "other-chats" if ws_id == "global" else (workspace_id_to_slug.get(ws_id) or slug(ws_id[:12]))
+        ws_display_name = "Other chats" if ws_id == "global" else (workspace_id_to_display_name.get(ws_id) or ws_slug)
         title = cd.get("name") or f"Chat {composer_id[:8]}"
         model_config = cd.get("modelConfig") or {}
         model_name = model_config.get("modelName")
         model_names = [model_name] if model_name and model_name != "default" else None
         searchable = build_searchable_text(
-            project_name=ws_slug,
+            project_name=ws_display_name,
             chat_title=title,
             model_names=model_names,
         )

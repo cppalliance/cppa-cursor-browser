@@ -4,8 +4,6 @@ A Flask web application for browsing and managing chat histories
 from the Cursor editor's AI chat feature.
 """
 
-import os
-
 from flask import Flask, render_template, send_from_directory
 
 from api.workspaces import bp as workspaces_bp
@@ -22,10 +20,11 @@ def create_app(exclusion_rules_path=None):
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
 
-    # Exclusion rules: optional path (CLI or default ~/.cursor-chat-browser/exclusion-rules.txt)
+    # Exclusion rules: optional path (CLI or default ~/.cursor-chat-browser/exclusion-rules.txt).
+    # Rules are loaded once at startup; an app restart is required to pick up changes to the file.
     resolved = resolve_exclusion_rules_path(exclusion_rules_path)
     app.config["EXCLUSION_RULES_PATH"] = resolved
-    app.config["EXCLUSION_RULES"] = load_rules(resolved) if resolved and os.path.isfile(resolved) else []
+    app.config["EXCLUSION_RULES"] = load_rules(resolved)
 
     # Register API blueprints
     app.register_blueprint(workspaces_bp)
