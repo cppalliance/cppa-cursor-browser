@@ -14,12 +14,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
+from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 
 bp = Blueprint("export_api", __name__)
 
@@ -155,6 +156,7 @@ def export_chats():
 
         today = datetime.now().strftime("%Y-%m-%d")
         exported = []
+        rules = current_app.config.get("EXCLUSION_RULES") or []
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
@@ -171,6 +173,16 @@ def export_chats():
                 ws_id = composer_id_to_ws.get(composer_id, "global")
                 ws_slug = "other-chats" if ws_id == "global" else (ws_id_to_slug.get(ws_id) or _slug(ws_id[:12]))
                 title = cd.get("name") or f"Chat {composer_id[:8]}"
+                model_config = cd.get("modelConfig") or {}
+                model_name = model_config.get("modelName")
+                model_names = [model_name] if model_name and model_name != "default" else None
+                searchable = build_searchable_text(
+                    project_name=ws_slug,
+                    chat_title=title,
+                    model_names=model_names,
+                )
+                if is_excluded_by_rules(rules, searchable):
+                    continue
                 title_slug = _slug(title)
                 ts_ms = updated_at_ms or int(datetime.now().timestamp() * 1000)
                 ts_str = datetime.fromtimestamp(ts_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S")

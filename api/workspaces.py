@@ -14,11 +14,12 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble, format_tool_action
+from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 
 bp = Blueprint("workspaces", __name__)
 
@@ -352,6 +353,9 @@ def list_workspaces():
                 if global_db:
                     global_db.close()
 
+        # Exclusion rules (optional)
+        rules = current_app.config.get("EXCLUSION_RULES") or []
+
         # Build project list — merge workspace entries sharing the same folder
         from urllib.parse import unquote as _unquote
 
@@ -407,10 +411,19 @@ def list_workspaces():
             except Exception:
                 pass
 
-            # Merge conversations from all workspace IDs in the group
+            # Merge conversations from all workspace IDs in the group; apply exclusion rules
             convos = []
             for ws_id in all_ws_ids:
-                convos.extend(conversation_map.get(ws_id, []))
+                for c in conversation_map.get(ws_id, []):
+                    searchable = build_searchable_text(
+                        project_name=workspace_name,
+                        chat_title=c.get("name"),
+                    )
+                    if not is_excluded_by_rules(rules, searchable):
+                        convos.append(c)
+
+            if is_excluded_by_rules(rules, workspace_name):
+                continue
 
             projects.append({
                 "id": primary["name"],
@@ -422,8 +435,11 @@ def list_workspaces():
                 **({"aliasIds": all_ws_ids} if len(all_ws_ids) > 1 else {}),
             })
 
-        # Global (unmatched) conversations
-        global_convos = conversation_map.get("global", [])
+        # Global (unmatched) conversations; apply exclusion rules
+        global_convos = [
+            c for c in conversation_map.get("global", [])
+            if not is_excluded_by_rules(rules, c.get("name") or "")
+        ]
         if global_convos:
             last_updated = max((c.get("lastUpdatedAt") or 0 for c in global_convos), default=0)
             projects.append({
@@ -557,6 +573,24 @@ def get_workspace_tabs(workspace_id):
 
         if not os.path.isfile(global_db_path):
             return jsonify({"error": "Global storage not found"}), 404
+
+        # Workspace display name for exclusion rules
+        workspace_display_name = "Other chats" if workspace_id == "global" else workspace_id
+        if workspace_id != "global":
+            wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
+            try:
+                wd = _read_json_file(wj_path)
+                first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+                if first_folder:
+                    from urllib.parse import unquote as _unquote
+                    parts = first_folder.replace("\\", "/").split("/")
+                    fn = parts[-1] if parts else None
+                    if fn:
+                        workspace_display_name = _unquote(fn)
+            except Exception:
+                pass
+
+        rules = current_app.config.get("EXCLUSION_RULES") or []
 
         global_db = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
         global_db.row_factory = sqlite3.Row
@@ -922,7 +956,13 @@ def get_workspace_tabs(workspace_id):
                 if tab_meta:
                     tab["metadata"] = tab_meta
 
-                response["tabs"].append(tab)
+                searchable = build_searchable_text(
+                    project_name=workspace_display_name,
+                    chat_title=title,
+                    model_names=tab_meta.get("modelsUsed") if tab_meta else None,
+                )
+                if not is_excluded_by_rules(rules, searchable):
+                    response["tabs"].append(tab)
 
             except Exception as e:
                 print(f"Error parsing composer data for {composer_id}: {e}")

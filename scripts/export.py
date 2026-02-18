@@ -15,6 +15,18 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+# Ensure project root is on path when run as python scripts/export.py
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from utils.exclusion_rules import (
+    resolve_exclusion_rules_path,
+    load_rules,
+    build_searchable_text,
+    is_excluded_by_rules,
+)
+
 
 def get_default_workspace_path() -> str:
     home = str(Path.home())
@@ -178,13 +190,15 @@ Options:
   --out DIR          Output directory. Default: current working directory (.)
   --no-zip           Write individual Markdown files instead of a zip archive.
   --no-composer      Exclude composer logs (export only chat logs).
+  --exclude-rules P  Path to exclusion rules file (sensitive projects/chats are omitted).
+                     If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.
   --help             Show this help message and exit.
 """
 
 
 def parse_args():
     args = sys.argv[1:]
-    out = {"since": "all", "out_dir": ".", "include_composer": True, "zip": True}
+    out = {"since": "all", "out_dir": ".", "include_composer": True, "zip": True, "exclusion_rules_path": None}
     i = 0
     while i < len(args):
         if args[i] in ("--help", "-h"):
@@ -196,6 +210,9 @@ def parse_args():
         elif args[i] == "--out" and i + 1 < len(args):
             i += 1
             out["out_dir"] = args[i]
+        elif args[i] in ("--exclude-rules", "-e") and i + 1 < len(args):
+            i += 1
+            out["exclusion_rules_path"] = args[i]
         elif args[i] == "--no-composer":
             out["include_composer"] = False
         elif args[i] == "--no-zip":
@@ -209,6 +226,8 @@ def main():
     since = opts["since"]
     out_dir = os.path.abspath(opts["out_dir"])
     use_zip = opts["zip"]
+    exclusion_path = resolve_exclusion_rules_path(opts.get("exclusion_rules_path"))
+    exclusion_rules = load_rules(exclusion_path) if exclusion_path and os.path.isfile(exclusion_path or "") else []
     workspace_path = resolve_workspace_path()
     global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
@@ -424,6 +443,16 @@ def main():
         ws_id = assign_workspace(cd, composer_id)
         ws_slug = "other-chats" if ws_id == "global" else (workspace_id_to_slug.get(ws_id) or slug(ws_id[:12]))
         title = cd.get("name") or f"Chat {composer_id[:8]}"
+        model_config = cd.get("modelConfig") or {}
+        model_name = model_config.get("modelName")
+        model_names = [model_name] if model_name and model_name != "default" else None
+        searchable = build_searchable_text(
+            project_name=ws_slug,
+            chat_title=title,
+            model_names=model_names,
+        )
+        if is_excluded_by_rules(exclusion_rules, searchable):
+            continue
         title_slug = slug(title)
         ts = updated_at or int(datetime.now().timestamp() * 1000)
         ts_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%dT%H-%M-%S")
