@@ -114,7 +114,8 @@ def export_chats():
                 try:
                     with open(wj, "r", encoding="utf-8") as f:
                         wd = json.load(f)
-                    first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+                    folders = get_workspace_folder_paths(wd)
+                    first_folder = wd.get("folder") or (folders[0] if folders else None)
                     if first_folder:
                         fn = first_folder.replace("\\", "/").split("/")[-1]
                         if fn:

@@ -8,6 +8,7 @@ Run:
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,8 +17,8 @@ from flask import Flask
 
 # Ensure project root is importable when running directly.
 _root = Path(__file__).resolve().parent.parent
-if str(_root) not in os.sys.path:
-    os.sys.path.insert(0, str(_root))
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from api.search import bp as search_bp
 from utils.exclusion_rules import load_rules

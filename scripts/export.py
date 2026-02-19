@@ -27,6 +27,7 @@ from utils.exclusion_rules import (
     build_searchable_text,
     is_excluded_by_rules,
 )
+from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths
 
 
 def _json_dump_safe(value) -> str:
@@ -204,15 +205,7 @@ def extract_text_from_bubble(bubble) -> str:
 
 
 def get_workspace_folder_paths(wd) -> list:
-    paths = []
-    if wd.get("folder"):
-        paths.append(wd["folder"])
-    folders = wd.get("folders")
-    if isinstance(folders, list):
-        for f in folders:
-            if isinstance(f, dict) and f.get("path"):
-                paths.append(f["path"])
-    return paths
+    return _shared_get_workspace_folder_paths(wd)
 
 
 HELP_TEXT = """\
@@ -310,7 +303,8 @@ def main():
         try:
             with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
                 wd = json.load(f)
-            first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+            folders = get_workspace_folder_paths(wd)
+            first_folder = wd.get("folder") or (folders[0] if folders else None)
             if first_folder:
                 fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
                 if fn:
