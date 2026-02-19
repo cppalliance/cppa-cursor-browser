@@ -3,6 +3,7 @@
 import os
 import sys
 from datetime import datetime
+from urllib.parse import unquote
 
 
 def expand_tilde_path(input_path: str) -> str:
@@ -83,13 +84,56 @@ def to_epoch_ms(value) -> int:
 
 
 def get_workspace_folder_paths(workspace_data: dict) -> list:
-    """Extract folder paths from workspace.json data."""
+    """Extract folder paths from workspace.json data.
+
+    Supports legacy and newer multi-root entry shapes:
+      - {"folder": "<path>"}
+      - {"folder": {"path": "<path>"}}  (defensive)
+      - {"folders": [{"path": "<path>"}]}
+      - {"folders": [{"uri": {"path": "<path>"}}]}
+      - {"folders": ["<path>"]}         (defensive)
+    """
+
+    def _extract_path(entry) -> str | None:
+        if isinstance(entry, str):
+            return entry
+        if not isinstance(entry, dict):
+            return None
+        if isinstance(entry.get("path"), str):
+            return entry["path"]
+        uri = entry.get("uri")
+        if isinstance(uri, str):
+            return uri
+        if isinstance(uri, dict):
+            if isinstance(uri.get("path"), str):
+                return uri["path"]
+            if isinstance(uri.get("fsPath"), str):
+                return uri["fsPath"]
+        return None
+
     paths = []
-    if workspace_data.get("folder"):
-        paths.append(workspace_data["folder"])
+    folder = workspace_data.get("folder")
+    folder_path = _extract_path(folder)
+    if folder_path:
+        paths.append(folder_path)
+
     folders = workspace_data.get("folders")
     if isinstance(folders, list):
         for f in folders:
-            if isinstance(f, dict) and f.get("path"):
-                paths.append(f["path"])
+            p = _extract_path(f)
+            if p:
+                paths.append(p)
     return paths
+
+
+def get_workspace_display_name(workspace_data: dict, fallback: str | None = None) -> str:
+    """Return a user-friendly workspace name from workspace.json data."""
+    for folder in get_workspace_folder_paths(workspace_data):
+        raw = str(folder).strip()
+        cleaned = raw.replace("\\", "/").rstrip("/")
+        leaf = cleaned.split("/")[-1] if cleaned else ""
+        if leaf:
+            decoded = unquote(leaf)
+            if decoded:
+                return decoded
+    return fallback or ""

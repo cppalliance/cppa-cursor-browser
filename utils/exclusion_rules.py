@@ -219,9 +219,11 @@ def build_searchable_text(
     """
     Combine chat/project metadata into a single string for rule matching.
 
-    All non-empty, non-None parts are joined with newlines.  A
-    *chat_content_snippet* longer than 50 000 characters is truncated since
-    keyword/phrase presence can be detected from the first portion alone.
+    All non-empty, non-None parts are joined with newlines.
+
+    The full *chat_content_snippet* is preserved so exclusion matching can
+    catch terms anywhere in rendered output, including long transcripts and
+    tool outputs.
     """
     parts = []
     if project_name:
@@ -231,6 +233,5 @@ def build_searchable_text(
     if model_names:
         parts.extend(model_names)
     if chat_content_snippet:
-        snippet = chat_content_snippet
-        parts.append(snippet[:50_000] if len(snippet) > 50_000 else snippet)
+        parts.append(chat_content_snippet)
     return "\n".join(p for p in parts if p)

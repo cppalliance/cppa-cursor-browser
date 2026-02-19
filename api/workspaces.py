@@ -13,15 +13,19 @@ import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from urllib.parse import unquote, urlparse
 
 from flask import Blueprint, current_app, jsonify
 
 from utils.workspace_path import resolve_workspace_path
-from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
+from utils.path_helpers import (
+    normalize_file_path,
+    get_workspace_folder_paths,
+    get_workspace_display_name,
+    to_epoch_ms,
+)
 from utils.text_extract import extract_text_from_bubble, format_tool_action
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
-
-from urllib.parse import unquote as _url_unquote
 
 bp = Blueprint("workspaces", __name__)
 
@@ -40,11 +44,9 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
     try:
         wd = _read_json_file(wj_path)
-        first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
-        if first_folder:
-            fn = first_folder.replace("\\", "/").split("/")[-1]
-            if fn:
-                return _url_unquote(fn)
+        name = get_workspace_display_name(wd)
+        if name:
+            return name
     except Exception:
         pass
     return workspace_id
@@ -55,8 +57,157 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _read_json_file(path: str):
+    return _resolve_workspace_descriptor(path)
+
+
+def _uri_or_path_to_fs_path(value: str, base_dir: str | None = None) -> str:
+    """Convert a file URI or plain path to a filesystem path."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+
+    if raw.startswith("file://"):
+        parsed = urlparse(raw)
+        path = unquote(parsed.path or "")
+        if sys.platform == "win32" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+            path = path[1:]
+        return os.path.normpath(path)
+
+    expanded = os.path.expanduser(raw)
+    if base_dir and not os.path.isabs(expanded):
+        expanded = os.path.join(base_dir, expanded)
+    return os.path.normpath(expanded)
+
+
+def _resolve_workspace_descriptor(path: str, depth: int = 0):
+    """
+    Read and normalize a workspace descriptor.
+
+    Handles indirection via {"workspace": "<uri|path>"} and resolves relative
+    folder paths in multi-root workspace files against the file's directory.
+    """
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+
+    # Cursor workspaceStorage entry may point to an external workspace file.
+    if (
+        isinstance(data, dict)
+        and data.get("workspace")
+        and not data.get("folder")
+        and not data.get("folders")
+        and depth < 3
+    ):
+        target = _uri_or_path_to_fs_path(str(data.get("workspace", "")), base_dir=os.path.dirname(path))
+        if target and os.path.isfile(target):
+            return _resolve_workspace_descriptor(target, depth + 1)
+
+    if not isinstance(data, dict):
+        return data
+
+    out = dict(data)
+    base_dir = os.path.dirname(path)
+    folders = out.get("folders")
+    if isinstance(folders, list):
+        normalized = []
+        for folder in folders:
+            if isinstance(folder, dict):
+                fd = dict(folder)
+                p = fd.get("path")
+                if isinstance(p, str) and p:
+                    if not p.startswith("file://") and not os.path.isabs(p):
+                        fd["path"] = os.path.normpath(os.path.join(base_dir, p))
+                normalized.append(fd)
+            else:
+                normalized.append(folder)
+        out["folders"] = normalized
+    return out
+
+
+def _basename_from_pathish(path_value: str | None) -> str | None:
+    """Extract a readable leaf folder name from file URI or filesystem path."""
+    if not path_value:
+        return None
+    cleaned = re.sub(r"^file://", "", str(path_value).strip())
+    cleaned = unquote(cleaned).replace("\\", "/").rstrip("/")
+    if not cleaned:
+        return None
+    parts = [p for p in cleaned.split("/") if p]
+    if not parts:
+        return None
+    leaf = parts[-1]
+    return leaf or None
+
+
+def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -> str | None:
+    """
+    Infer workspace display name from projectLayouts of chats in this workspace.
+
+    Useful when workspace.json only references a deleted/opaque workspace file.
+    """
+    if workspace_id == "global":
+        return "Other chats"
+
+    # Composer IDs from per-workspace state db
+    local_db_path = os.path.join(workspace_path, workspace_id, "state.vscdb")
+    if not os.path.isfile(local_db_path):
+        return None
+    composer_ids: list[str] = []
+    try:
+        lconn = sqlite3.connect(f"file:{local_db_path}?mode=ro", uri=True)
+        row = lconn.execute(
+            "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+        ).fetchone()
+        if row and row[0]:
+            data = json.loads(row[0])
+            for c in (data.get("allComposers") or []):
+                cid = c.get("composerId") if isinstance(c, dict) else None
+                if cid:
+                    composer_ids.append(cid)
+        lconn.close()
+    except Exception:
+        return None
+    if not composer_ids:
+        return None
+
+    # Gather folder-name hints from global messageRequestContext.projectLayouts
+    gconn, _ = _open_global_db(workspace_path)
+    if not gconn:
+        return None
+    counts: dict[str, int] = {}
+    try:
+        for cid in composer_ids:
+            rows = gconn.execute(
+                "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
+                (f"messageRequestContext:{cid}:%",),
+            ).fetchall()
+            for row in rows:
+                try:
+                    ctx = json.loads(row["value"])
+                except Exception:
+                    continue
+                layouts = ctx.get("projectLayouts")
+                if not isinstance(layouts, list):
+                    continue
+                for layout in layouts:
+                    obj = None
+                    if isinstance(layout, str):
+                        try:
+                            obj = json.loads(layout)
+                        except Exception:
+                            obj = None
+                    elif isinstance(layout, dict):
+                        obj = layout
+                    if not isinstance(obj, dict):
+                        continue
+                    hint = _basename_from_pathish(obj.get("rootPath"))
+                    if hint:
+                        counts[hint] = counts.get(hint, 0) + 1
+    finally:
+        gconn.close()
+
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
 def _get_project_from_file_path(
@@ -117,10 +268,13 @@ def _determine_project_for_conversation(
     workspace_entries: list,
     bubble_map: dict,
     composer_id_to_workspace_id: dict | None = None,
+    invalid_workspace_ids: set[str] | None = None,
 ) -> str | None:
     # Primary: definitive per-workspace mapping
     if composer_id_to_workspace_id and composer_id in composer_id_to_workspace_id:
-        return composer_id_to_workspace_id[composer_id]
+        mapped = composer_id_to_workspace_id[composer_id]
+        if not invalid_workspace_ids or mapped not in invalid_workspace_ids:
+            return mapped
 
     # Try projectLayouts
     project_layouts = project_layouts_map.get(composer_id, [])
@@ -244,6 +398,70 @@ def _collect_workspace_entries(workspace_path: str) -> list[dict]:
     return entries
 
 
+def _collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
+    """Workspace IDs whose descriptors have no resolvable folder paths."""
+    invalid: set[str] = set()
+    for entry in workspace_entries:
+        try:
+            wd = _read_json_file(entry["workspaceJsonPath"])
+            folders = get_workspace_folder_paths(wd)
+            if not folders:
+                invalid.add(entry["name"])
+        except Exception:
+            invalid.add(entry["name"])
+    return invalid
+
+
+def _infer_invalid_workspace_aliases(
+    composer_rows: list,
+    project_layouts_map: dict,
+    project_name_map: dict,
+    workspace_path_map: dict,
+    workspace_entries: list,
+    bubble_map: dict,
+    composer_id_to_ws: dict,
+    invalid_workspace_ids: set[str],
+) -> dict[str, str]:
+    """
+    Infer replacement workspace IDs for invalid workspace entries.
+
+    For each composer mapped to an invalid workspace ID, compute an evidence-
+    based assignment (without trusting composer_id_to_ws). Use majority voting
+    to map each invalid workspace ID to the most likely valid workspace ID.
+    """
+    votes: dict[str, dict[str, int]] = {}
+    for row in composer_rows:
+        cid = row["key"].split(":")[1]
+        mapped = composer_id_to_ws.get(cid)
+        if mapped not in invalid_workspace_ids:
+            continue
+        try:
+            cd = json.loads(row["value"])
+        except Exception:
+            continue
+        inferred = _determine_project_for_conversation(
+            cd,
+            cid,
+            project_layouts_map,
+            project_name_map,
+            workspace_path_map,
+            workspace_entries,
+            bubble_map,
+            composer_id_to_workspace_id=None,
+            invalid_workspace_ids=None,
+        )
+        if inferred and inferred not in invalid_workspace_ids:
+            votes.setdefault(mapped, {})
+            votes[mapped][inferred] = votes[mapped].get(inferred, 0) + 1
+
+    aliases: dict[str, str] = {}
+    for invalid_id, counts in votes.items():
+        if not counts:
+            continue
+        aliases[invalid_id] = max(counts.items(), key=lambda kv: kv[1])[0]
+    return aliases
+
+
 def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: list) -> dict:
     """Build mapping: composerId -> workspaceId from per-workspace state.vscdb."""
     mapping = {}
@@ -290,6 +508,7 @@ def list_workspaces():
     try:
         workspace_path = resolve_workspace_path()
         workspace_entries = _collect_workspace_entries(workspace_path)
+        invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
 
         project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
         workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
@@ -349,6 +568,16 @@ def list_workspaces():
                             pass
 
                 # Process each composer
+                invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                    composer_rows=composer_rows,
+                    project_layouts_map=project_layouts_map,
+                    project_name_map=project_name_map,
+                    workspace_path_map=workspace_path_map,
+                    workspace_entries=workspace_entries,
+                    bubble_map=bubble_map,
+                    composer_id_to_ws=composer_id_to_ws,
+                    invalid_workspace_ids=invalid_workspace_ids,
+                )
                 for row in composer_rows:
                     cid = row["key"].split(":")[1]
                     try:
@@ -356,8 +585,11 @@ def list_workspaces():
                         pid = _determine_project_for_conversation(
                             cd, cid, project_layouts_map,
                             project_name_map, workspace_path_map,
-                            workspace_entries, bubble_map, composer_id_to_ws
+                            workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
                         )
+                        mapped_ws = composer_id_to_ws.get(cid)
+                        if not pid and mapped_ws in invalid_workspace_ids:
+                            pid = invalid_workspace_aliases.get(mapped_ws)
                         assigned = pid if pid else "global"
 
                         headers = cd.get("fullConversationHeadersOnly") or []
@@ -391,7 +623,8 @@ def list_workspaces():
             norm_folder = ""
             try:
                 wd = _read_json_file(entry["workspaceJsonPath"])
-                first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+                folders = get_workspace_folder_paths(wd)
+                first_folder = folders[0] if folders else None
                 if first_folder:
                     norm_folder = normalize_file_path(first_folder)
             except Exception:
@@ -426,7 +659,8 @@ def list_workspaces():
 
             workspace_name = _get_workspace_display_name(workspace_path, primary["name"])
             if workspace_name == primary["name"]:
-                workspace_name = f"Project {primary['name'][:8]}"
+                inferred = _infer_workspace_name_from_context(workspace_path, primary["name"])
+                workspace_name = inferred or f"Project {primary['name'][:8]}"
 
             # Skip entire workspace before iterating conversations
             if is_excluded_by_rules(rules, workspace_name):
@@ -442,6 +676,10 @@ def list_workspaces():
                     )
                     if not is_excluded_by_rules(rules, searchable):
                         convos.append(c)
+
+            # Hide workspace shells that currently have no visible conversations.
+            if not convos:
+                continue
 
             projects.append({
                 "id": primary["name"],
@@ -509,17 +747,20 @@ def get_workspace(workspace_id):
         folder = None
         workspace_name = workspace_id
         try:
-            from urllib.parse import unquote
             wd = _read_json_file(wj_path)
-            folder = wd.get("folder")
-            first_folder = folder or (wd.get("folders", [{}])[0] or {}).get("path")
-            if first_folder:
-                parts = first_folder.replace("\\", "/").split("/")
-                fn = parts[-1] if parts else None
-                if fn:
-                    workspace_name = unquote(fn)
+            folder_paths = get_workspace_folder_paths(wd)
+            folder = folder_paths[0] if folder_paths else wd.get("folder")
+            derived_name = get_workspace_display_name(wd)
+            if derived_name:
+                workspace_name = derived_name
+            elif workspace_name == workspace_id:
+                inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+                if inferred:
+                    workspace_name = inferred
         except Exception:
-            pass
+            inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+            if inferred:
+                workspace_name = inferred
 
         return jsonify({
             "id": workspace_id,
@@ -561,6 +802,7 @@ def get_workspace_tabs(workspace_id):
         response = {"tabs": []}
 
         workspace_entries = _collect_workspace_entries(workspace_path)
+        invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
         project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
         workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
         composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
@@ -573,7 +815,8 @@ def get_workspace_tabs(workspace_id):
             wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
             try:
                 wd = _read_json_file(wj_path)
-                first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
+                folders = get_workspace_folder_paths(wd)
+                first_folder = folders[0] if folders else None
                 if first_folder:
                     target_folder = normalize_file_path(first_folder)
             except Exception:
@@ -582,7 +825,8 @@ def get_workspace_tabs(workspace_id):
                 for entry in workspace_entries:
                     try:
                         wd2 = _read_json_file(entry["workspaceJsonPath"])
-                        f2 = wd2.get("folder") or (wd2.get("folders", [{}])[0] or {}).get("path")
+                        folders2 = get_workspace_folder_paths(wd2)
+                        f2 = folders2[0] if folders2 else None
                         if f2 and normalize_file_path(f2) == target_folder:
                             matching_ws_ids.add(entry["name"])
                     except Exception:
@@ -671,6 +915,17 @@ def get_workspace_tabs(workspace_id):
             " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
         ).fetchall()
 
+        invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+            composer_rows=composer_rows,
+            project_layouts_map=project_layouts_map,
+            project_name_map=project_name_map,
+            workspace_path_map=workspace_path_map,
+            workspace_entries=workspace_entries,
+            bubble_map=bubble_map,
+            composer_id_to_ws=composer_id_to_ws,
+            invalid_workspace_ids=invalid_workspace_ids,
+        )
+
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
             try:
@@ -680,8 +935,11 @@ def get_workspace_tabs(workspace_id):
                 pid = _determine_project_for_conversation(
                     cd, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
-                    workspace_entries, bubble_map, composer_id_to_ws
+                    workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
                 )
+                mapped_ws = composer_id_to_ws.get(composer_id)
+                if not pid and mapped_ws in invalid_workspace_ids:
+                    pid = invalid_workspace_aliases.get(mapped_ws)
                 assigned = pid if pid else "global"
 
                 if assigned not in matching_ws_ids:
