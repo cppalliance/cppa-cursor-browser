@@ -7,6 +7,7 @@ Env: WORKSPACE_PATH for Cursor workspaceStorage path.
 """
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -14,6 +15,61 @@ import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote as _url_unquote
+
+# Ensure project root is on path when run as python scripts/export.py
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from utils.exclusion_rules import (
+    resolve_exclusion_rules_path,
+    load_rules,
+    build_searchable_text,
+    is_excluded_by_rules,
+)
+from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths
+
+_logger = logging.getLogger(__name__)
+
+
+def _json_dump_safe(value) -> str:
+    """Best-effort JSON serialization for exclusion matching."""
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(value) if value is not None else ""
+
+
+def _load_manifest_entries(manifest_path: str) -> dict:
+    """Load manifest entries keyed by log_id from a JSONL file."""
+    existing = {}
+    if not os.path.isfile(manifest_path):
+        return existing
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    log_id = entry.get("log_id")
+                    if log_id:
+                        existing[log_id] = entry
+                except Exception as e:
+                    _logger.debug("Skipping malformed manifest line in %s: %s", manifest_path, e)
+    except Exception as e:
+        _logger.debug("Failed to read manifest %s: %s", manifest_path, e)
+    return existing
+
+
+def _write_manifest_entries(manifest_path: str, entries_by_id: dict):
+    """Write manifest entries to JSONL."""
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        for entry in entries_by_id.values():
+            f.write(json.dumps(entry) + "\n")
 
 
 def get_default_workspace_path() -> str:
@@ -152,15 +208,7 @@ def extract_text_from_bubble(bubble) -> str:
 
 
 def get_workspace_folder_paths(wd) -> list:
-    paths = []
-    if wd.get("folder"):
-        paths.append(wd["folder"])
-    folders = wd.get("folders")
-    if isinstance(folders, list):
-        for f in folders:
-            if isinstance(f, dict) and f.get("path"):
-                paths.append(f["path"])
-    return paths
+    return _shared_get_workspace_folder_paths(wd)
 
 
 HELP_TEXT = """\
@@ -178,13 +226,15 @@ Options:
   --out DIR          Output directory. Default: current working directory (.)
   --no-zip           Write individual Markdown files instead of a zip archive.
   --no-composer      Exclude composer logs (export only chat logs).
+  --exclude-rules P  Path to exclusion rules file (sensitive projects/chats are omitted).
+                     If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.
   --help             Show this help message and exit.
 """
 
 
 def parse_args():
     args = sys.argv[1:]
-    out = {"since": "all", "out_dir": ".", "include_composer": True, "zip": True}
+    out = {"since": "all", "out_dir": ".", "include_composer": True, "zip": True, "exclusion_rules_path": None}
     i = 0
     while i < len(args):
         if args[i] in ("--help", "-h"):
@@ -196,6 +246,9 @@ def parse_args():
         elif args[i] == "--out" and i + 1 < len(args):
             i += 1
             out["out_dir"] = args[i]
+        elif args[i] in ("--exclude-rules", "-e") and i + 1 < len(args):
+            i += 1
+            out["exclusion_rules_path"] = args[i]
         elif args[i] == "--no-composer":
             out["include_composer"] = False
         elif args[i] == "--no-zip":
@@ -209,6 +262,7 @@ def main():
     since = opts["since"]
     out_dir = os.path.abspath(opts["out_dir"])
     use_zip = opts["zip"]
+    exclusion_rules = load_rules(resolve_exclusion_rules_path(opts.get("exclusion_rules_path")))
     workspace_path = resolve_workspace_path()
     global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
@@ -247,15 +301,18 @@ def main():
     workspace_path_to_id = {}
     project_name_to_ws = {}
     workspace_id_to_slug = {}
+    workspace_id_to_display_name: dict[str, str] = {}  # human-readable, URL-decoded folder name
     for e in workspace_entries:
         try:
             with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
                 wd = json.load(f)
-            first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
-            if first_folder:
+            folders = get_workspace_folder_paths(wd)
+            first_folder = folders[0] if folders else None
+            if isinstance(first_folder, str) and first_folder:
                 fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
                 if fn:
                     workspace_id_to_slug[e["name"]] = slug(fn)
+                    workspace_id_to_display_name[e["name"]] = _url_unquote(fn)
             for folder in get_workspace_folder_paths(wd):
                 norm = normalize_file_path(folder)
                 workspace_path_to_id[norm] = e["name"]
@@ -423,7 +480,47 @@ def main():
 
         ws_id = assign_workspace(cd, composer_id)
         ws_slug = "other-chats" if ws_id == "global" else (workspace_id_to_slug.get(ws_id) or slug(ws_id[:12]))
+        ws_display_name = "Other chats" if ws_id == "global" else (workspace_id_to_display_name.get(ws_id) or ws_slug)
         title = cd.get("name") or f"Chat {composer_id[:8]}"
+        model_config = cd.get("modelConfig") or {}
+        model_name = model_config.get("modelName")
+        model_names = [model_name] if model_name and model_name != "default" else None
+
+        # Build broad text for exclusion checks so any visible output term can match.
+        # CLI export intentionally includes metadata/tool payload text in addition to
+        # bubble text because these fields are emitted into exported markdown.
+        bubble_texts = []
+        bubble_meta_parts = []
+        for h in headers:
+            b = bubble_map.get(h.get("bubbleId"))
+            if not b:
+                continue
+            text = extract_text_from_bubble(b)
+            if text:
+                bubble_texts.append(text)
+            bubble_meta_parts.append(_json_dump_safe(b))
+
+        code_diff_parts = [_json_dump_safe(d) for d in code_block_diff_map.get(composer_id, [])]
+        searchable = build_searchable_text(
+            project_name=ws_display_name,
+            chat_title=title,
+            model_names=model_names,
+            chat_content_snippet="\n\n".join(
+                p
+                for p in (
+                    bubble_texts
+                    + bubble_meta_parts
+                    + code_diff_parts
+                    + [
+                        _json_dump_safe(model_config),
+                        _json_dump_safe(cd),
+                    ]
+                )
+                if p
+            ),
+        )
+        if is_excluded_by_rules(exclusion_rules, searchable):
+            continue
         title_slug = slug(title)
         ts = updated_at or int(datetime.now().timestamp() * 1000)
         ts_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%dT%H-%M-%S")
@@ -568,23 +665,9 @@ def main():
             with open(e["out_path"], "w", encoding="utf-8") as f:
                 f.write(e["content"])
 
-        # Manifest
+        # Manifest in output directory
         manifest_path = os.path.join(out_dir, "manifest.jsonl")
-        existing = {}
-        if os.path.isfile(manifest_path):
-            try:
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                entry = json.loads(line)
-                                if entry.get("log_id"):
-                                    existing[entry["log_id"]] = entry
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+        existing = _load_manifest_entries(manifest_path)
 
         for e in exported:
             existing[e["id"]] = {
@@ -592,10 +675,21 @@ def main():
                 "path": os.path.relpath(e["out_path"], out_dir),
                 "updated_at": datetime.fromtimestamp(e["updatedAt"] / 1000).isoformat() if e["updatedAt"] else datetime.now().isoformat(),
             }
+
         if existing:
-            with open(manifest_path, "w", encoding="utf-8") as f:
-                for entry in existing.values():
-                    f.write(json.dumps(entry) + "\n")
+            _write_manifest_entries(manifest_path, existing)
+
+        # Canonical manifest in user state dir so tracking survives changing --out paths
+        global_manifest_path = os.path.join(state_dir, "manifest.jsonl")
+        global_existing = _load_manifest_entries(global_manifest_path)
+        for e in exported:
+            global_existing[e["id"]] = {
+                "log_id": e["id"],
+                "path": e["out_path"],
+                "updated_at": datetime.fromtimestamp(e["updatedAt"] / 1000).isoformat() if e["updatedAt"] else datetime.now().isoformat(),
+            }
+        if global_existing:
+            _write_manifest_entries(global_manifest_path, global_existing)
         print(f"Exported {count} chat(s) to {out_dir}")
 
     # Save state

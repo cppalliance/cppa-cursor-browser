@@ -13,11 +13,18 @@ from api.search import bp as search_bp
 from api.export_api import bp as export_bp
 from api.pdf import bp as pdf_bp
 from api.config_api import bp as config_bp
+from utils.exclusion_rules import resolve_exclusion_rules_path, load_rules
 
 
-def create_app():
+def create_app(exclusion_rules_path=None):
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
+
+    # Exclusion rules: optional path (CLI or default ~/.cursor-chat-browser/exclusion-rules.txt).
+    # Rules are loaded once at startup; an app restart is required to pick up changes to the file.
+    resolved = resolve_exclusion_rules_path(exclusion_rules_path)
+    app.config["EXCLUSION_RULES_PATH"] = resolved
+    app.config["EXCLUSION_RULES"] = load_rules(resolved)
 
     # Register API blueprints
     app.register_blueprint(workspaces_bp)
@@ -57,7 +64,17 @@ def create_app():
 if __name__ == "__main__":
     import sys
 
-    app = create_app()
+    exclusion_path = None
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("--exclude-rules", "-e") and i + 1 < len(argv):
+            exclusion_path = argv[i + 1]
+            i += 2
+            continue
+        i += 1
+
+    app = create_app(exclusion_rules_path=exclusion_path)
     print("Cursor Chat Browser (Python) running at http://localhost:3000")
     # use_reloader=False avoids a Windows socket issue with Flask's stat reloader
     app.run(

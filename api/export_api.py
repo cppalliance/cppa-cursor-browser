@@ -14,12 +14,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
+from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 
 bp = Blueprint("export_api", __name__)
 
@@ -70,6 +71,13 @@ def get_export_state():
 
 @bp.route("/api/export", methods=["POST"])
 def export_chats():
+    """Export chats as a zip archive.
+
+    Exclusion rules (``EXCLUSION_RULES`` app config key) are evaluated against
+    each chat's project name, title, and model.  Rules are loaded once at
+    application startup; an app restart is required to pick up changes to the
+    exclusion rules file.
+    """
     try:
         body = request.get_json(silent=True) or {}
         since = "last" if body.get("since") == "last" else "all"
@@ -94,8 +102,10 @@ def export_chats():
         conn.row_factory = sqlite3.Row
 
         # Build workspace mapping
+        from urllib.parse import unquote as _url_unquote
         workspace_entries = []
         ws_id_to_slug = {}
+        ws_id_to_display_name = {}  # human-readable, URL-decoded folder name
         for name in os.listdir(workspace_path):
             full = os.path.join(workspace_path, name)
             wj = os.path.join(full, "workspace.json")
@@ -104,11 +114,13 @@ def export_chats():
                 try:
                     with open(wj, "r", encoding="utf-8") as f:
                         wd = json.load(f)
-                    first_folder = wd.get("folder") or (wd.get("folders", [{}])[0] or {}).get("path")
-                    if first_folder:
+                    folders = get_workspace_folder_paths(wd)
+                    first_folder = folders[0] if folders else None
+                    if isinstance(first_folder, str) and first_folder:
                         fn = first_folder.replace("\\", "/").split("/")[-1]
                         if fn:
                             ws_id_to_slug[name] = _slug(fn)
+                            ws_id_to_display_name[name] = _url_unquote(fn)
                 except Exception:
                     pass
 
@@ -155,6 +167,7 @@ def export_chats():
 
         today = datetime.now().strftime("%Y-%m-%d")
         exported = []
+        rules = current_app.config.get("EXCLUSION_RULES") or []
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
@@ -170,7 +183,27 @@ def export_chats():
 
                 ws_id = composer_id_to_ws.get(composer_id, "global")
                 ws_slug = "other-chats" if ws_id == "global" else (ws_id_to_slug.get(ws_id) or _slug(ws_id[:12]))
+                ws_display_name = "Other chats" if ws_id == "global" else (ws_id_to_display_name.get(ws_id) or ws_slug)
                 title = cd.get("name") or f"Chat {composer_id[:8]}"
+                model_config = cd.get("modelConfig") or {}
+                model_name = model_config.get("modelName")
+                model_names = [model_name] if model_name and model_name != "default" else None
+                bubble_texts = []
+                for h in headers:
+                    b = bubble_map.get(h.get("bubbleId"))
+                    if not b:
+                        continue
+                    bt = extract_text_from_bubble(b)
+                    if bt:
+                        bubble_texts.append(bt)
+                searchable = build_searchable_text(
+                    project_name=ws_display_name,
+                    chat_title=title,
+                    model_names=model_names,
+                    chat_content_snippet="\n\n".join(bubble_texts) if bubble_texts else None,
+                )
+                if is_excluded_by_rules(rules, searchable):
+                    continue
                 title_slug = _slug(title)
                 ts_ms = updated_at_ms or int(datetime.now().timestamp() * 1000)
                 ts_str = datetime.fromtimestamp(ts_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S")
@@ -264,8 +297,6 @@ def export_chats():
                 md += f"updated_at: {datetime.fromtimestamp(updated_at_ms / 1000).isoformat() if updated_at_ms else datetime.now().isoformat()}\n"
                 md += f"workspace: {ws_slug}\n"
                 md += f"message_count: {len(bubbles)}\n"
-                model_config = cd.get("modelConfig") or {}
-                model_name = model_config.get("modelName")
                 if model_name:
                     md += f"model: {model_name}\n"
                 if total_response_ms:

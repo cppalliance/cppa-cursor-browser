@@ -8,9 +8,11 @@ import os
 import re
 import sqlite3
 from datetime import datetime
+from urllib.parse import unquote as _url_unquote
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
+from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
@@ -18,11 +20,54 @@ from utils.text_extract import extract_text_from_bubble
 bp = Blueprint("search", __name__)
 
 
+def _json_dump_safe(value) -> str:
+    """Best-effort JSON string conversion for exclusion matching."""
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(value) if value is not None else ""
+
+
+def _workspace_display_name_from_folder(folder: str | None, fallback: str | None = None) -> str:
+    """Extract a human-readable workspace name from workspace folder path."""
+    if folder:
+        raw = str(folder).strip()
+        cleaned = re.sub(r"^file://", "", raw).replace("\\", "/")
+        parts = cleaned.split("/")
+        leaf = parts[-1] if parts else ""
+        if leaf:
+            return _url_unquote(leaf)
+    return fallback or "Other chats"
+
+
+def _build_exclusion_searchable(
+    *,
+    project_name: str | None,
+    chat_title: str | None,
+    model_names: list[str] | None = None,
+    content_parts: list[str] | None = None,
+    metadata_parts: list[str] | None = None,
+) -> str:
+    """Build broad searchable text so exclusion rules cover visible output."""
+    combined = []
+    if content_parts:
+        combined.extend(p for p in content_parts if p)
+    if metadata_parts:
+        combined.extend(p for p in metadata_parts if p)
+    return build_searchable_text(
+        project_name=project_name,
+        chat_title=chat_title,
+        model_names=model_names,
+        chat_content_snippet="\n\n".join(combined) if combined else None,
+    )
+
+
 @bp.route("/api/search")
 def search():
     try:
         query = request.args.get("q", "").strip()
         search_type = request.args.get("type", "all")
+        rules = current_app.config.get("EXCLUSION_RULES") or []
 
         if not query:
             return jsonify({"error": "No search query provided"}), 400
@@ -58,7 +103,7 @@ def search():
                                     parts = first_folder.replace("\\", "/").split("/")
                                     fn = parts[-1] if parts else None
                                     if fn:
-                                        ws_id_to_name[name] = fn
+                                        ws_id_to_name[name] = _url_unquote(fn)
                             except Exception:
                                 pass
                 except Exception:
@@ -114,11 +159,49 @@ def search():
                         if not headers:
                             continue
 
+                        title = cd.get("name") or ""
+                        ws_id = composer_id_to_ws.get(composer_id, "global")
+                        ws_name = ws_id_to_name.get(ws_id)
+                        project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
+
+                        model_config = cd.get("modelConfig") or {}
+                        model_name = model_config.get("modelName")
+                        model_names = [model_name] if model_name and model_name != "default" else None
+
+                        bubble_texts = []
+                        bubble_meta = []
+                        for header in headers:
+                            bid = header.get("bubbleId")
+                            bubble_entry = bubble_map.get(bid)
+                            if not bubble_entry:
+                                continue
+                            text = bubble_entry.get("text") or ""
+                            if text:
+                                bubble_texts.append(text)
+                            raw_bubble = bubble_entry.get("raw")
+                            if raw_bubble:
+                                bubble_meta.append(_json_dump_safe(raw_bubble))
+
+                        exclusion_text = _build_exclusion_searchable(
+                            project_name=project_name,
+                            chat_title=title,
+                            model_names=model_names,
+                            content_parts=bubble_texts,
+                            metadata_parts=[
+                                _json_dump_safe(model_config),
+                                _json_dump_safe(cd.get("conversationSummary")),
+                                _json_dump_safe(cd.get("usage")),
+                                _json_dump_safe(cd.get("requestMetadata")),
+                                _json_dump_safe(cd),
+                                "\n".join(bubble_meta),
+                            ],
+                        )
+                        if is_excluded_by_rules(rules, exclusion_text):
+                            continue
+
                         # Check if any bubble text matches
                         has_match = False
                         matching_text = ""
-                        title = cd.get("name") or ""
-
                         # Check title
                         if title and query_lower in title.lower():
                             has_match = True
@@ -126,29 +209,22 @@ def search():
 
                         # Check bubble texts
                         if not has_match:
-                            for header in headers:
-                                bid = header.get("bubbleId")
-                                bubble_entry = bubble_map.get(bid)
-                                if bubble_entry:
-                                    text = bubble_entry["text"]
-                                    if text and query_lower in text.lower():
-                                        has_match = True
-                                        # Extract a snippet around the match
-                                        idx = text.lower().find(query_lower)
-                                        start = max(0, idx - 80)
-                                        end = min(len(text), idx + len(query) + 120)
-                                        matching_text = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
-                                        break
+                            for text in bubble_texts:
+                                if text and query_lower in text.lower():
+                                    has_match = True
+                                    # Extract a snippet around the match
+                                    idx = text.lower().find(query_lower)
+                                    start = max(0, idx - 80)
+                                    end = min(len(text), idx + len(query) + 120)
+                                    matching_text = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+                                    break
 
                         if has_match:
-                            ws_id = composer_id_to_ws.get(composer_id, "global")
-                            ws_name = ws_id_to_name.get(ws_id)
                             if not title:
                                 # Derive title from first bubble
-                                for header in headers:
-                                    be = bubble_map.get(header.get("bubbleId"))
-                                    if be and be["text"]:
-                                        first_lines = [l for l in be["text"].split("\n") if l.strip()]
+                                for text in bubble_texts:
+                                    if text:
+                                        first_lines = [l for l in text.split("\n") if l.strip()]
                                         if first_lines:
                                             title = first_lines[0][:100]
                                         break
@@ -191,6 +267,7 @@ def search():
                     workspace_folder = wd.get("folder")
                 except Exception:
                     pass
+                workspace_name = _workspace_display_name_from_folder(workspace_folder, fallback=name)
 
                 try:
                     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -203,10 +280,38 @@ def search():
                         if chat_row and chat_row[0]:
                             data = json.loads(chat_row[0])
                             for tab in (data.get("tabs") or []):
+                                ct = tab.get("chatTitle") or ""
+                                tab_model_names = None
+                                tab_meta = tab.get("metadata")
+                                if isinstance(tab_meta, dict):
+                                    models_used = tab_meta.get("modelsUsed")
+                                    if isinstance(models_used, list):
+                                        tab_model_names = [str(m) for m in models_used if m]
+                                    elif tab_meta.get("model"):
+                                        tab_model_names = [str(tab_meta.get("model"))]
+
+                                tab_bubble_texts = []
+                                for bubble in (tab.get("bubbles") or []):
+                                    text = bubble.get("text") or ""
+                                    if text:
+                                        tab_bubble_texts.append(text)
+
+                                exclusion_text = _build_exclusion_searchable(
+                                    project_name=workspace_name,
+                                    chat_title=ct,
+                                    model_names=tab_model_names,
+                                    content_parts=tab_bubble_texts,
+                                    metadata_parts=[
+                                        _json_dump_safe(tab),
+                                        _json_dump_safe(workspace_folder),
+                                    ],
+                                )
+                                if is_excluded_by_rules(rules, exclusion_text):
+                                    continue
+
                                 has_match = False
                                 matching_text = ""
 
-                                ct = tab.get("chatTitle") or ""
                                 if ct.lower().find(query_lower) != -1:
                                     has_match = True
                                     matching_text = ct
