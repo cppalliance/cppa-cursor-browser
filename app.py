@@ -62,24 +62,33 @@ def create_app(exclusion_rules_path=None):
 
 
 if __name__ == "__main__":
+    import argparse
     import sys
 
-    exclusion_path = None
-    argv = sys.argv[1:]
-    i = 0
-    while i < len(argv):
-        if argv[i] in ("--exclude-rules", "-e") and i + 1 < len(argv):
-            exclusion_path = argv[i + 1]
-            i += 2
-            continue
-        i += 1
+    parser = argparse.ArgumentParser(description="Cursor Chat Browser (Python)")
+    parser.add_argument("--port", type=int, default=3000)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--base-dir", default=None,
+                        help="Override Cursor workspaceStorage path")
+    parser.add_argument(
+        "--exclude-rules", "-e",
+        default=None,
+        metavar="PATH",
+        help="Path to exclusion rules file (sensitive projects/chats are omitted). "
+             "If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.",
+    )
+    args = parser.parse_args()
 
-    app = create_app(exclusion_rules_path=exclusion_path)
-    print("Cursor Chat Browser (Python) running at http://localhost:3000")
-    # use_reloader=False avoids a Windows socket issue with Flask's stat reloader
+    if args.base_dir:
+        from utils.workspace_path import set_workspace_path_override
+        set_workspace_path_override(args.base_dir)
+
+    app = create_app(exclusion_rules_path=args.exclude_rules)
+    print(f"Cursor Chat Browser (Python) running at http://{args.host}:{args.port}")
+    # Disable reloader on Windows to avoid a socket conflict with Flask's stat reloader.
     app.run(
-        host="0.0.0.0",
-        port=3000,
+        host=args.host,
+        port=args.port,
         debug=True,
         use_reloader=(sys.platform != "win32"),
     )

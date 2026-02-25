@@ -211,50 +211,44 @@ def get_workspace_folder_paths(wd) -> list:
     return _shared_get_workspace_folder_paths(wd)
 
 
-HELP_TEXT = """\
-Export Cursor chat history to Markdown files.
-
-By default exports ALL chats (including composer logs) as a zip archive
-into the current directory. Use the flags below to narrow the export.
-
-Usage:
-  python scripts/export.py [OPTIONS]
-
-Options:
-  --since all|last   Export all chats or only those updated since last export.
-                     Default: all
-  --out DIR          Output directory. Default: current working directory (.)
-  --no-zip           Write individual Markdown files instead of a zip archive.
-  --no-composer      Exclude composer logs (export only chat logs).
-  --exclude-rules P  Path to exclusion rules file (sensitive projects/chats are omitted).
-                     If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.
-  --help             Show this help message and exit.
-"""
-
-
 def parse_args():
-    args = sys.argv[1:]
-    out = {"since": "all", "out_dir": ".", "include_composer": True, "zip": True, "exclusion_rules_path": None}
-    i = 0
-    while i < len(args):
-        if args[i] in ("--help", "-h"):
-            print(HELP_TEXT)
-            sys.exit(0)
-        elif args[i] == "--since" and i + 1 < len(args):
-            i += 1
-            out["since"] = args[i]
-        elif args[i] == "--out" and i + 1 < len(args):
-            i += 1
-            out["out_dir"] = args[i]
-        elif args[i] in ("--exclude-rules", "-e") and i + 1 < len(args):
-            i += 1
-            out["exclusion_rules_path"] = args[i]
-        elif args[i] == "--no-composer":
-            out["include_composer"] = False
-        elif args[i] == "--no-zip":
-            out["zip"] = False
-        i += 1
-    return out
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Export Cursor chat history to Markdown files.",
+        epilog=(
+            "By default exports ALL chats (including composer logs) as a zip archive\n"
+            "into the current directory. Use the flags below to narrow the export.\n\n"
+            "Env: WORKSPACE_PATH overrides the Cursor workspaceStorage path."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--since", choices=["all", "last"], default="all",
+                        help="Export all chats or only those updated since last export. Default: all")
+    parser.add_argument("--out", default=".",
+                        help="Output directory. Default: current working directory (.)")
+    parser.add_argument("--no-zip", action="store_true", default=False,
+                        help="Write individual Markdown files instead of a zip archive.")
+    parser.add_argument("--no-composer", action="store_true", default=False,
+                        help="Exclude composer logs (export only chat logs).")
+    parser.add_argument("--base-dir", default=None,
+                        help="Override Cursor workspaceStorage path (also settable via WORKSPACE_PATH env var).")
+    parser.add_argument(
+        "--exclude-rules", "-e",
+        default=None,
+        metavar="PATH",
+        dest="exclude_rules",
+        help="Path to exclusion rules file (sensitive projects/chats are omitted). "
+             "If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.",
+    )
+    args = parser.parse_args()
+    return {
+        "since": args.since,
+        "out_dir": args.out,
+        "include_composer": not args.no_composer,
+        "zip": not args.no_zip,
+        "exclusion_rules_path": args.exclude_rules,
+        "base_dir": args.base_dir,
+    }
 
 
 def main():
@@ -263,6 +257,8 @@ def main():
     out_dir = os.path.abspath(opts["out_dir"])
     use_zip = opts["zip"]
     exclusion_rules = load_rules(resolve_exclusion_rules_path(opts.get("exclusion_rules_path")))
+    if opts.get("base_dir"):
+        os.environ["WORKSPACE_PATH"] = opts["base_dir"]
     workspace_path = resolve_workspace_path()
     global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
