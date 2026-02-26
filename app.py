@@ -4,6 +4,8 @@ A Flask web application for browsing and managing chat histories
 from the Cursor editor's AI chat feature.
 """
 
+from datetime import datetime
+
 from flask import Flask, render_template, send_from_directory
 
 from api.workspaces import bp as workspaces_bp
@@ -25,6 +27,10 @@ def create_app(exclusion_rules_path=None):
     resolved = resolve_exclusion_rules_path(exclusion_rules_path)
     app.config["EXCLUSION_RULES_PATH"] = resolved
     app.config["EXCLUSION_RULES"] = load_rules(resolved)
+
+    @app.context_processor
+    def inject_year():
+        return {"current_year": datetime.now().year}
 
     # Register API blueprints
     app.register_blueprint(workspaces_bp)
