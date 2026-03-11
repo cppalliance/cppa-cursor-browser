@@ -65,3 +65,17 @@ def resolve_workspace_path() -> str:
     if env_path:
         return expand_tilde_path(env_path)
     return get_default_workspace_path()
+
+
+def get_cli_chats_path() -> str:
+    """Return the Cursor CLI chats directory (~/.cursor/chats).
+
+    This is where the ``agent`` CLI stores chat sessions, independent of
+    platform and completely separate from the IDE workspace storage.
+
+    Override with the ``CLI_CHATS_PATH`` environment variable (useful in tests).
+    """
+    env_path = os.environ.get("CLI_CHATS_PATH")
+    if env_path:
+        return env_path
+    return os.path.join(os.path.expanduser("~"), ".cursor", "chats")

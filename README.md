@@ -8,6 +8,7 @@ Inspired by [cursor-chat-browser](https://github.com/thomas-pedersen/cursor-chat
 
 - Browse and search all workspaces with Cursor chat history
 - Support for both workspace-specific and global storage (newer Cursor versions)
+- **Cursor CLI agent sessions** — browses and exports sessions from `cursor agent` (stored in `~/.cursor/chats/`)
 - View AI chat and Composer/Agent logs
 - Organize chats by workspace/project
 - Full-text search with filters for chat/composer logs
@@ -101,7 +102,9 @@ python scripts/export.py --no-composer
 
 - **Zip mode** (default): A single `cursor-export-YYYY-MM-DD.zip` file containing all Markdown files organized by date, workspace, and chat.
 - **File mode** (`--no-zip`): Individual Markdown files at `<out>/YYYY-MM-DD/<workspace>/chat/<timestamp>__<title>__<id>.md`, plus a `manifest.jsonl` index.
-- Each Markdown file includes YAML frontmatter (log ID, title, timestamps, message count, model, token usage, etc.) and the full conversation transcript.
+- Each Markdown file includes YAML frontmatter (log ID, title, timestamps, message count, model, token usage, tool calls, etc.) and the full conversation transcript.
+- IDE chats are written under `<workspace>/chat/`; Cursor CLI agent sessions are written under `<workspace>/cli/`.
+- If the Cursor IDE database is absent (e.g. on a machine with only `cursor agent` installed), only CLI sessions are exported — the script no longer exits with an error.
 
 Export state is saved to `~/.cursor-chat-browser/export_state.json` so that `--since last` works across runs.
 
@@ -119,6 +122,8 @@ The application automatically detects your Cursor workspace storage location:
 
 To override, set the `WORKSPACE_PATH` environment variable or use the Configuration page in the web UI.
 
+Cursor CLI agent sessions are read from `~/.cursor/chats/` (the default path used by the `cursor agent` CLI). Override with the `CLI_CHATS_PATH` environment variable.
+
 ## Project Structure
 
 ```
@@ -134,7 +139,9 @@ cursor-chat-browser-python/
 │   ├── pdf.py              # /api/generate-pdf endpoint
 │   └── config_api.py       # Config-related endpoints
 ├── utils/                  # Utility modules
-│   ├── workspace_path.py   # Workspace path detection
+│   ├── workspace_path.py   # Workspace path detection (IDE + CLI)
+│   ├── cli_chat_reader.py  # Reader for Cursor CLI agent sessions (~/.cursor/chats/)
+│   ├── cursor_md_exporter.py # Markdown exporter for CLI agent sessions
 │   ├── path_helpers.py     # Path normalization helpers
 │   ├── text_extract.py     # Text extraction from bubbles
 │   └── tool_parser.py      # Tool call parsing

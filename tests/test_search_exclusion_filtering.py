@@ -51,6 +51,12 @@ class TestSearchExclusionFiltering(unittest.TestCase):
         self._old_workspace_path = os.environ.get("WORKSPACE_PATH")
         os.environ["WORKSPACE_PATH"] = self.workspace_path
 
+        # Point CLI chats path at an empty temp dir so real sessions don't leak in.
+        self._cli_chats_path = os.path.join(self.base_dir, "cli_chats")
+        os.makedirs(self._cli_chats_path, exist_ok=True)
+        self._old_cli_chats_path = os.environ.get("CLI_CHATS_PATH")
+        os.environ["CLI_CHATS_PATH"] = self._cli_chats_path
+
         app = Flask(__name__)
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
@@ -63,6 +69,10 @@ class TestSearchExclusionFiltering(unittest.TestCase):
             os.environ.pop("WORKSPACE_PATH", None)
         else:
             os.environ["WORKSPACE_PATH"] = self._old_workspace_path
+        if self._old_cli_chats_path is None:
+            os.environ.pop("CLI_CHATS_PATH", None)
+        else:
+            os.environ["CLI_CHATS_PATH"] = self._old_cli_chats_path
         self._tmp.cleanup()
 
     def _build_workspace_dbs(self):

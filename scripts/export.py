@@ -30,6 +30,13 @@ from utils.exclusion_rules import (
 )
 from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths
 from utils.tool_parser import parse_tool_call
+from utils.workspace_path import get_cli_chats_path
+from utils.cli_chat_reader import (
+    list_cli_projects,
+    traverse_blobs,
+    messages_to_bubbles,
+    aggregate_session_stats,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -263,10 +270,6 @@ def main():
     workspace_path = resolve_workspace_path()
     global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
-    if not os.path.isfile(global_path):
-        print(f"Cursor global storage not found: {global_path}", file=sys.stderr)
-        sys.exit(1)
-
     state_dir = get_global_state_dir()
     state_path = os.path.join(state_dir, "export_state.json")
     last_export = 0
@@ -280,101 +283,128 @@ def main():
         except Exception:
             pass
 
-    conn = sqlite3.connect(f"file:{global_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    # Pre-initialize IDE data — populated below only if the IDE database is accessible.
+    workspace_entries: list = []
+    workspace_path_to_id: dict = {}
+    project_name_to_ws: dict = {}
+    workspace_id_to_slug: dict = {}
+    workspace_id_to_display_name: dict[str, str] = {}
+    project_layouts_map: dict = {}
+    bubble_map: dict = {}
+    code_block_diff_map: dict = {}
+    ide_composer_rows: list = []
 
-    # Build workspace entries
-    workspace_entries = []
-    try:
-        for name in os.listdir(workspace_path):
-            full = os.path.join(workspace_path, name)
-            if os.path.isdir(full):
-                wp = os.path.join(full, "workspace.json")
-                if os.path.isfile(wp):
-                    workspace_entries.append({"name": name, "workspaceJsonPath": wp})
-    except Exception:
-        pass
-
-    workspace_path_to_id = {}
-    project_name_to_ws = {}
-    workspace_id_to_slug = {}
-    workspace_id_to_display_name: dict[str, str] = {}  # human-readable, URL-decoded folder name
-    for e in workspace_entries:
+    # Load IDE chat data — skipped gracefully when the database is absent or locked.
+    if not os.path.isfile(global_path):
+        print(f"Note: Cursor IDE global storage not found at {global_path} — skipping IDE chats.", file=sys.stderr)
+    else:
+        _conn = None
         try:
-            with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
-                wd = json.load(f)
-            folders = get_workspace_folder_paths(wd)
-            first_folder = folders[0] if folders else None
-            if isinstance(first_folder, str) and first_folder:
-                fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
-                if fn:
-                    workspace_id_to_slug[e["name"]] = slug(fn)
-                    workspace_id_to_display_name[e["name"]] = _url_unquote(fn)
-            for folder in get_workspace_folder_paths(wd):
-                norm = normalize_file_path(folder)
-                workspace_path_to_id[norm] = e["name"]
-                fn2 = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
-                if fn2:
-                    project_name_to_ws[fn2] = e["name"]
-        except Exception:
-            pass
+            _conn = sqlite3.connect(f"file:{global_path}?mode=ro", uri=True)
+            _conn.row_factory = sqlite3.Row
 
-    # Project layouts
-    project_layouts_map = {}
-    try:
-        for row in conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
-            parts = row["key"].split(":")
-            if len(parts) < 2:
-                continue
-            cid = parts[1]
+            # Build workspace entries
             try:
-                ctx = json.loads(row["value"])
-                layouts = ctx.get("projectLayouts")
-                if isinstance(layouts, list):
-                    project_layouts_map.setdefault(cid, [])
-                    for l in layouts:
+                for name in os.listdir(workspace_path):
+                    full = os.path.join(workspace_path, name)
+                    if os.path.isdir(full):
+                        wp = os.path.join(full, "workspace.json")
+                        if os.path.isfile(wp):
+                            workspace_entries.append({"name": name, "workspaceJsonPath": wp})
+            except Exception:
+                pass
+
+            for e in workspace_entries:
+                try:
+                    with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
+                        wd = json.load(f)
+                    folders = get_workspace_folder_paths(wd)
+                    first_folder = folders[0] if folders else None
+                    if isinstance(first_folder, str) and first_folder:
+                        fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
+                        if fn:
+                            workspace_id_to_slug[e["name"]] = slug(fn)
+                            workspace_id_to_display_name[e["name"]] = _url_unquote(fn)
+                    for folder in get_workspace_folder_paths(wd):
+                        norm = normalize_file_path(folder)
+                        workspace_path_to_id[norm] = e["name"]
+                        fn2 = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
+                        if fn2:
+                            project_name_to_ws[fn2] = e["name"]
+                except Exception:
+                    pass
+
+            # Project layouts
+            try:
+                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+                    parts = row["key"].split(":")
+                    if len(parts) < 2:
+                        continue
+                    cid = parts[1]
+                    try:
+                        ctx = json.loads(row["value"])
+                        layouts = ctx.get("projectLayouts")
+                        if isinstance(layouts, list):
+                            project_layouts_map.setdefault(cid, [])
+                            for l in layouts:
+                                try:
+                                    o = json.loads(l) if isinstance(l, str) else l
+                                    if isinstance(o, dict) and o.get("rootPath"):
+                                        project_layouts_map[cid].append(o["rootPath"])
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Bubble map
+            try:
+                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
+                    parts = row["key"].split(":")
+                    if len(parts) >= 3:
+                        bid = parts[2]
                         try:
-                            o = json.loads(l) if isinstance(l, str) else l
-                            if isinstance(o, dict) and o.get("rootPath"):
-                                project_layouts_map[cid].append(o["rootPath"])
+                            b = json.loads(row["value"])
+                            if isinstance(b, dict):
+                                bubble_map[bid] = b
                         except Exception:
                             pass
             except Exception:
                 pass
-    except Exception:
-        pass
 
-    # Bubble map
-    bubble_map = {}
-    for row in conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
-        parts = row["key"].split(":")
-        if len(parts) >= 3:
-            bid = parts[2]
+            # Code block diffs
             try:
-                b = json.loads(row["value"])
-                if isinstance(b, dict):
-                    bubble_map[bid] = b
+                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
+                    parts = row["key"].split(":")
+                    cid = parts[1] if len(parts) > 1 else None
+                    if not cid:
+                        continue
+                    try:
+                        d = json.loads(row["value"])
+                        code_block_diff_map.setdefault(cid, []).append({
+                            **d,
+                            "diffId": parts[2] if len(parts) > 2 else None,
+                        })
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
-    # Code block diffs
-    code_block_diff_map = {}
-    try:
-        for row in conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
-            parts = row["key"].split(":")
-            cid = parts[1] if len(parts) > 1 else None
-            if not cid:
-                continue
-            try:
-                d = json.loads(row["value"])
-                code_block_diff_map.setdefault(cid, []).append({
-                    **d,
-                    "diffId": parts[2] if len(parts) > 2 else None,
-                })
-            except Exception:
-                pass
-    except Exception:
-        pass
+            ide_composer_rows = _conn.execute(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+                " AND value LIKE '%fullConversationHeadersOnly%'"
+            ).fetchall()
+
+            _conn.close()
+            _conn = None
+        except Exception as e:
+            print(f"Warning: Could not read Cursor IDE chats ({e}) — skipping.", file=sys.stderr)
+            if _conn is not None:
+                try:
+                    _conn.close()
+                except Exception:
+                    pass
 
     def get_project_from_file_path(fp):
         np = normalize_file_path(fp)
@@ -451,16 +481,12 @@ def main():
                     pass
         return best_id or "global"
 
-    # Process composers
-    composer_rows = conn.execute(
-        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND value LIKE '%fullConversationHeadersOnly%'"
-    ).fetchall()
-
     today = datetime.now().strftime("%Y-%m-%d")
     exported = []
     count = 0
 
-    for row in composer_rows:
+    # Process IDE composers
+    for row in ide_composer_rows:
         composer_id = row["key"].split(":")[1]
         try:
             cd = json.loads(row["value"])
@@ -794,7 +820,136 @@ def main():
                          "out_path": out_path, "updatedAt": updated_at})
         count += 1
 
-    conn.close()
+    # --- Cursor CLI sessions ---
+    try:
+        cli_projects = list_cli_projects(get_cli_chats_path())
+    except Exception as e:
+        print(f"Warning: Could not enumerate CLI chats ({e}) — skipping.", file=sys.stderr)
+        cli_projects = []
+
+    for cp in cli_projects:
+        ws_name = cp["workspace_name"] or cp["project_id"][:12]
+        ws_slug_cli = slug(ws_name)
+
+        if is_excluded_by_rules(exclusion_rules, build_searchable_text(project_name=ws_name)):
+            continue
+
+        for session in cp["sessions"]:
+            meta = session.get("meta", {})
+            session_id = session["session_id"]
+            created_ms: int = meta.get("createdAt") or int(datetime.now().timestamp() * 1000)
+            session_name = meta.get("name") or f"Session {session_id[:8]}"
+
+            if since == "last" and created_ms <= last_export:
+                continue
+
+            try:
+                messages = traverse_blobs(session["db_path"])
+                bubbles = messages_to_bubbles(messages, created_ms)
+            except Exception as e:
+                print(f"Warning: Could not read CLI session {session_id}: {e}", file=sys.stderr)
+                continue
+
+            if not bubbles:
+                continue
+
+            # Derive title from first user bubble
+            title = session_name
+            if not title or title.startswith("New Agent"):
+                for b in bubbles:
+                    if b["type"] == "user" and b.get("text"):
+                        first_lines = [l for l in b["text"].split("\n") if l.strip()]
+                        if first_lines:
+                            title = first_lines[0][:100]
+                            if len(title) == 100:
+                                title += "..."
+                        break
+
+            bubble_texts = [b["text"] for b in bubbles if b.get("text")]
+            searchable = build_searchable_text(
+                project_name=ws_name,
+                chat_title=title,
+                chat_content_snippet="\n\n".join(bubble_texts[:5]),
+            )
+            if is_excluded_by_rules(exclusion_rules, searchable):
+                continue
+
+            # Aggregate statistics
+            total_tool_calls = 0
+            tool_breakdown: dict = {}
+            for b in bubbles:
+                tcs = (b.get("metadata") or {}).get("toolCalls") or []
+                total_tool_calls += len(tcs)
+                for tc in tcs:
+                    tn = tc.get("name", "unknown")
+                    tool_breakdown[tn] = tool_breakdown.get(tn, 0) + 1
+
+            title_slug = slug(title)
+            ts_str = datetime.fromtimestamp(created_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S")
+            filename = f"{ts_str}__{title_slug}__{session_id[:8]}.md"
+            rel_dir = os.path.join(today, ws_slug_cli, "cli")
+            out_path = os.path.join(out_dir, rel_dir, filename)
+
+            # Frontmatter
+            fm_lines = ["---"]
+            fm_lines.append(f"log_id: {session_id}")
+            fm_lines.append(f"log_type: cli_agent")
+            fm_lines.append(f'title: "{title.replace(chr(34), chr(92)+chr(34))}"')
+            fm_lines.append(f"created_at: {datetime.fromtimestamp(created_ms / 1000).isoformat()}")
+            fm_lines.append(f"workspace: {ws_slug_cli}")
+            fm_lines.append(f'workspace_name: "{ws_name}"')
+            if cp.get("workspace_path"):
+                fm_lines.append(f"workspace_path: {cp['workspace_path']}")
+            fm_lines.append(f"project_id: {cp['project_id']}")
+            fm_lines.append(f"session_id: {session_id}")
+            if meta.get("mode"):
+                fm_lines.append(f"mode: {meta['mode']}")
+            fm_lines.append(f"message_count: {len(bubbles)}")
+            if total_tool_calls:
+                fm_lines.append(f"total_tool_calls: {total_tool_calls}")
+            if tool_breakdown:
+                fm_lines.append("tool_call_breakdown:")
+                for tn, cnt in sorted(tool_breakdown.items(), key=lambda x: -x[1]):
+                    fm_lines.append(f"  {tn}: {cnt}")
+            fm_lines.append("---")
+            fm_str = "\n".join(fm_lines) + "\n\n"
+
+            # Header
+            header_meta = [f"Created: {datetime.fromtimestamp(created_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')}"]
+            if meta.get("mode"):
+                header_meta.append(f"Mode: {meta['mode']}")
+            if total_tool_calls:
+                header_meta.append(f"Tool calls: {total_tool_calls}")
+            header = f"# {title}\n\n_{' | '.join(header_meta)}_\n\n---\n\n"
+
+            # Body
+            body = ""
+            for b in bubbles:
+                role_label = "User" if b["type"] == "user" else "Assistant"
+                body += f"### {role_label}\n\n"
+                body += b.get("text", "") + "\n\n"
+                tool_calls = (b.get("metadata") or {}).get("toolCalls") or []
+                for tc in tool_calls:
+                    summary = tc.get("summary") or tc.get("name") or "unknown"
+                    body += f"> **Tool: {summary}**\n"
+                    if tc.get("input"):
+                        body += "> **INPUT:**\n> ```\n"
+                        for iline in str(tc["input"]).split("\n"):
+                            body += f"> {iline}\n"
+                        body += "> ```\n"
+                    body += "\n"
+                body += "---\n\n"
+
+            md = fm_str + header + body
+            rel_path = os.path.join(today, ws_slug_cli, "cli", filename)
+            exported.append({
+                "id": session_id,
+                "rel_path": rel_path,
+                "content": md,
+                "out_path": out_path,
+                "updatedAt": created_ms,
+            })
+            count += 1
 
     if count == 0:
         label = " since last export" if since == "last" else ""

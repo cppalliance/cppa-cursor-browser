@@ -17,7 +17,12 @@ from urllib.parse import unquote, urlparse
 
 from flask import Blueprint, current_app, jsonify
 
-from utils.workspace_path import resolve_workspace_path
+from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
+from utils.cli_chat_reader import (
+    list_cli_projects,
+    traverse_blobs,
+    messages_to_bubbles,
+)
 from utils.path_helpers import (
     normalize_file_path,
     get_workspace_folder_paths,
@@ -712,6 +717,39 @@ def list_workspaces():
                 ),
             })
 
+        # --- Cursor CLI projects ---
+        try:
+            cli_projects = list_cli_projects(get_cli_chats_path())
+            for cp in cli_projects:
+                ws_name = cp["workspace_name"] or cp["project_id"][:12]
+                if is_excluded_by_rules(rules, ws_name):
+                    continue
+                convos = []
+                for s in cp["sessions"]:
+                    session_name = s["meta"].get("name") or f"Session {s['session_id'][:8]}"
+                    searchable = build_searchable_text(
+                        project_name=ws_name,
+                        chat_title=session_name,
+                    )
+                    if not is_excluded_by_rules(rules, searchable):
+                        convos.append(session_name)
+                if not convos:
+                    continue
+                last_ms = cp["last_updated_ms"]
+                projects.append({
+                    "id": f"cli:{cp['project_id']}",
+                    "name": ws_name,
+                    "conversationCount": len(convos),
+                    "lastModified": (
+                        datetime.fromtimestamp(last_ms / 1000, tz=timezone.utc).isoformat()
+                        if last_ms
+                        else datetime.now(tz=timezone.utc).isoformat()
+                    ),
+                    "source": "cli",
+                })
+        except Exception as e:
+            print(f"Failed to load CLI projects: {e}")
+
         projects.sort(key=lambda p: p["lastModified"], reverse=True)
         return jsonify(projects)
 
@@ -735,6 +773,26 @@ def get_workspace(workspace_id):
                 "folder": None,
                 "lastModified": datetime.now(tz=timezone.utc).isoformat(),
             })
+
+        if workspace_id.startswith("cli:"):
+            project_id = workspace_id[4:]
+            cli_projects = list_cli_projects(get_cli_chats_path())
+            for cp in cli_projects:
+                if cp["project_id"] == project_id:
+                    last_ms = cp["last_updated_ms"]
+                    return jsonify({
+                        "id": workspace_id,
+                        "name": cp["workspace_name"] or project_id[:12],
+                        "path": cp["workspace_path"],
+                        "folder": cp["workspace_path"],
+                        "lastModified": (
+                            datetime.fromtimestamp(last_ms / 1000, tz=timezone.utc).isoformat()
+                            if last_ms
+                            else datetime.now(tz=timezone.utc).isoformat()
+                        ),
+                        "source": "cli",
+                    })
+            return jsonify({"error": "CLI project not found"}), 404
 
         workspace_path = resolve_workspace_path()
         db_path = os.path.join(workspace_path, workspace_id, "state.vscdb")
@@ -782,6 +840,97 @@ def get_workspace(workspace_id):
 from utils.tool_parser import parse_tool_call as _parse_tool_call
 
 
+def _get_cli_workspace_tabs(workspace_id: str):
+    """Return tabs for a Cursor CLI project (``workspace_id`` starts with ``cli:``)."""
+    try:
+        project_id = workspace_id[4:]
+        cli_projects = list_cli_projects(get_cli_chats_path())
+        project = next((cp for cp in cli_projects if cp["project_id"] == project_id), None)
+        if project is None:
+            return jsonify({"error": "CLI project not found"}), 404
+
+        rules = current_app.config.get("EXCLUSION_RULES") or []
+        ws_name = project["workspace_name"] or project_id[:12]
+        tabs = []
+
+        for session in project["sessions"]:
+            meta = session.get("meta", {})
+            session_id = session["session_id"]
+            created_ms: int = meta.get("createdAt") or int(datetime.now().timestamp() * 1000)
+            session_name = meta.get("name") or f"Session {session_id[:8]}"
+
+            try:
+                messages = traverse_blobs(session["db_path"])
+            except Exception as e:
+                print(f"CLI: could not read session {session_id}: {e}")
+                continue
+
+            bubbles = messages_to_bubbles(messages, created_ms)
+            if not bubbles:
+                continue
+
+            # Derive title from first user bubble when name is generic
+            title = session_name
+            if not title or title.startswith("New Agent"):
+                for b in bubbles:
+                    if b["type"] == "user" and b.get("text"):
+                        first_lines = [l for l in b["text"].split("\n") if l.strip()]
+                        if first_lines:
+                            title = first_lines[0][:100]
+                            if len(title) == 100:
+                                title += "..."
+                        break
+
+            searchable = build_searchable_text(project_name=ws_name, chat_title=title)
+            if is_excluded_by_rules(rules, searchable):
+                continue
+
+            # Aggregate metadata
+            total_tool_calls = 0
+            tool_breakdown: dict = {}
+            for b in bubbles:
+                tcs = (b.get("metadata") or {}).get("toolCalls") or []
+                total_tool_calls += len(tcs)
+                for tc in tcs:
+                    tn = tc.get("name", "unknown")
+                    tool_breakdown[tn] = tool_breakdown.get(tn, 0) + 1
+
+            tab_meta: dict | None = None
+            if total_tool_calls or tool_breakdown:
+                tab_meta = {"totalToolCalls": total_tool_calls or None}
+                if tool_breakdown:
+                    tab_meta["toolBreakdown"] = tool_breakdown
+
+            tab = {
+                "id": session_id,
+                "title": title,
+                "timestamp": created_ms,
+                "bubbles": [
+                    {
+                        "type": b["type"],
+                        "text": b.get("text", ""),
+                        "timestamp": b.get("timestamp", created_ms),
+                        **({"metadata": b["metadata"]} if b.get("metadata") else {}),
+                    }
+                    for b in bubbles
+                ],
+                "source": "cli",
+            }
+            if tab_meta:
+                tab_meta_clean = {k: v for k, v in tab_meta.items() if v is not None}
+                if tab_meta_clean:
+                    tab["metadata"] = tab_meta_clean
+
+            tabs.append(tab)
+
+        tabs.sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
+        return jsonify({"tabs": tabs})
+
+    except Exception as e:
+        print(f"Failed to get CLI workspace tabs: {e}")
+        return jsonify({"error": "Failed to get CLI workspace tabs"}), 500
+
+
 def _extract_chat_id_from_bubble_key(key: str) -> str | None:
     m = re.match(r"^bubbleId:([^:]+):", key)
     return m.group(1) if m else None
@@ -794,6 +943,9 @@ def _extract_chat_id_from_code_block_diff_key(key: str) -> str | None:
 
 @bp.route("/api/workspaces/<workspace_id>/tabs")
 def get_workspace_tabs(workspace_id):
+    if workspace_id.startswith("cli:"):
+        return _get_cli_workspace_tabs(workspace_id)
+
     global_db = None
     try:
         workspace_path = resolve_workspace_path()
