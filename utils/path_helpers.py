@@ -40,11 +40,17 @@ def normalize_file_path(file_path: str) -> str:
     except Exception:
         pass
 
-    # Platform-specific normalization
+    # Normalize Windows-style paths: lowercase and unify slashes.
+    # Done unconditionally for paths that look like Windows absolute paths
+    # (e.g. "d:\foo" or "d:/foo") so that cross-platform reads (WSL, Linux
+    # reading Cursor's Windows storage) get the same result as native Win32.
     if sys.platform == "win32":
         normalized = normalized.replace("/", "\\")
-        # Remove leading backslash before drive letter
         normalized = re.sub(r"^\\([a-zA-Z]:)", r"\1", normalized)
+        normalized = normalized.lower()
+    elif re.match(r"^[a-zA-Z]:[/\\]", normalized):
+        # Windows-style absolute path on a non-Windows host.
+        normalized = normalized.replace("/", "\\")
         normalized = normalized.lower()
 
     return normalized
