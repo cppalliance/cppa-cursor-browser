@@ -76,7 +76,14 @@ def validate_path():
 
 @bp.route("/api/set-workspace", methods=["POST"])
 def set_workspace():
-    body = request.get_json(silent=True) or {}
+    # Reject non-dict JSON bodies (array / string / number / null). Without
+    # this, get_json returns the value directly, the truthy fallback `or {}`
+    # is bypassed, and `body.get("path", "")` raises AttributeError — which
+    # the outer Exception handler then mis-reports as a 500 server error
+    # instead of a 400 client error. (CodeRabbit on PR #16.)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
     raw = body.get("path", "")
     # Validate the supplied path BEFORE storing the override (issue #15).
     # validate_workspace_path collapses `..` traversal AND resolves symlinks

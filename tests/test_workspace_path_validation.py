@@ -99,8 +99,16 @@ class TestValidateWorkspacePath(unittest.TestCase):
     # ─── Path-traversal class ──────────────────────────────────────
 
     def test_traversal_into_non_workspace_is_rejected(self):
-        # /tmp/<x>/real-storage/../../  → /tmp/  → no Cursor markers → reject
-        storage = _make_cursor_workspace_dir(self.tmp)
+        # Keep traversal target inside this test's own temp tree — escaping
+        # to /tmp itself would be non-deterministic (any other test or
+        # process creating a `state.vscdb` under /tmp/<dir>/state.vscdb
+        # would flip this test's outcome).
+        #
+        #   <self.tmp>/isolated-root/storage/../..  →  <self.tmp>/isolated-root
+        # which contains no state.vscdb under any subdir → reject on markers.
+        isolated_root = os.path.join(self.tmp, "isolated-root")
+        os.makedirs(isolated_root)
+        storage = _make_cursor_workspace_dir(isolated_root)
         escape = os.path.join(storage, "..", "..")
         with self.assertRaises(WorkspacePathError):
             validate_workspace_path(escape)
@@ -127,6 +135,66 @@ class TestValidateWorkspacePath(unittest.TestCase):
         result = validate_workspace_path(link)
         self.assertEqual(result, os.path.realpath(storage))
         self.assertNotEqual(result, link)
+
+
+class TestSetWorkspaceApi(unittest.TestCase):
+    """API-layer regressions for POST /api/set-workspace.
+
+    The validator helper has its own coverage above; these cases exist to
+    pin behaviour the API handler owns (request body shape handling,
+    HTTP status mapping). Notably the non-dict-body case which used to
+    surface as a 500 instead of a 400 — see CodeRabbit on PR #16.
+    """
+
+    def setUp(self):
+        from flask import Flask
+        from api.config_api import bp as config_bp
+
+        self.tmp = tempfile.mkdtemp(prefix="cursor-validate-api-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(config_bp)
+        self.client = app.test_client()
+
+    def test_non_dict_json_array_returns_400_not_500(self):
+        # Regression: a JSON array body (truthy, non-dict) used to trip
+        # AttributeError on body.get(...) and surface as a 500.
+        resp = self.client.post(
+            "/api/set-workspace",
+            data="[]",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("error", resp.get_json())
+
+    def test_non_dict_json_string_returns_400(self):
+        resp = self.client.post(
+            "/api/set-workspace",
+            data='"some string"',
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_non_dict_json_number_returns_400(self):
+        resp = self.client.post(
+            "/api/set-workspace",
+            data="42",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_dict_with_valid_path_returns_200_with_canonical(self):
+        storage = _make_cursor_workspace_dir(self.tmp)
+        resp = self.client.post(
+            "/api/set-workspace",
+            json={"path": storage},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["path"], os.path.realpath(storage))
 
 
 if __name__ == "__main__":
