@@ -9,6 +9,7 @@ Run:
     python -m unittest tests.test_cli_args -v
 """
 
+import ast
 import sys
 import os
 import unittest
@@ -294,14 +295,36 @@ class TestDebugFlagGating(unittest.TestCase):
         opts = _build_app_parser().parse_args(["--debug"])
         self.assertTrue(opts.debug)
 
-    # -- source-level guard: app.py must NOT carry debug=True ----------------
-    # If a future edit re-introduces the literal it'll be caught here.
+    # -- source-level guard: app.py must NOT carry a literal debug=True -------
+    # AST-walk so cosmetic variations (`debug = True`, multi-line formatting,
+    # leading whitespace, etc.) cannot bypass the guard. A regression that
+    # reintroduces the literal in any form fails this test with the offending
+    # line number(s).
 
     def test_app_py_does_not_hardcode_debug_true(self):
         app_path = os.path.join(REPO_ROOT, "app.py")
         with open(app_path, "r", encoding="utf-8") as f:
-            src = f.read()
-        self.assertNotIn("debug=True", src)
+            tree = ast.parse(f.read(), filename=app_path)
+
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if (
+                    kw.arg == "debug"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True
+                ):
+                    offenders.append(kw.lineno)
+
+        self.assertEqual(
+            offenders, [],
+            "Found a literal `debug=True` keyword argument in app.py at "
+            "line(s) %s. The Werkzeug debugger must be opt-in via the "
+            "--debug flag or FLASK_DEBUG env var (see issue #9), never "
+            "hard-coded." % offenders,
+        )
 
 
 if __name__ == "__main__":
