@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 
 from flask import Blueprint, jsonify
@@ -32,9 +33,10 @@ def get_logs():
         global_db_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
         if os.path.isfile(global_db_path):
             try:
-                conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'").fetchall()
+                # closing() guarantees .close() on scope exit (issue #17).
+                with closing(sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'").fetchall()
 
                 chat_map: dict[str, list] = {}
                 for row in rows:
@@ -67,7 +69,6 @@ def get_logs():
                         "type": "chat",
                         "messageCount": len(bubbles),
                     })
-                conn.close()
             except Exception as e:
                 print(f"Error reading global storage: {e}")
 
@@ -91,43 +92,42 @@ def get_logs():
                     pass
 
                 try:
-                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                    # closing() guarantees .close() on scope exit (issue #17).
+                    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                        # Chat logs
+                        chat_row = conn.execute(
+                            "SELECT value FROM ItemTable WHERE [key] = 'workbench.panel.aichat.view.aichat.chatdata'"
+                        ).fetchone()
+                        if chat_row and chat_row[0]:
+                            data = json.loads(chat_row[0])
+                            tabs = data.get("tabs") or []
+                            for tab in tabs:
+                                logs.append({
+                                    "id": tab.get("id", ""),
+                                    "workspaceId": name,
+                                    "workspaceFolder": workspace_folder,
+                                    "title": tab.get("title") or f"Chat {(tab.get('id') or '')[:8]}",
+                                    "timestamp": tab.get("timestamp", 0),
+                                    "type": "chat",
+                                    "messageCount": len(tab.get("bubbles") or []),
+                                })
 
-                    # Chat logs
-                    chat_row = conn.execute(
-                        "SELECT value FROM ItemTable WHERE [key] = 'workbench.panel.aichat.view.aichat.chatdata'"
-                    ).fetchone()
-                    if chat_row and chat_row[0]:
-                        data = json.loads(chat_row[0])
-                        tabs = data.get("tabs") or []
-                        for tab in tabs:
-                            logs.append({
-                                "id": tab.get("id", ""),
-                                "workspaceId": name,
-                                "workspaceFolder": workspace_folder,
-                                "title": tab.get("title") or f"Chat {(tab.get('id') or '')[:8]}",
-                                "timestamp": tab.get("timestamp", 0),
-                                "type": "chat",
-                                "messageCount": len(tab.get("bubbles") or []),
-                            })
-
-                    # Composer logs
-                    comp_row = conn.execute(
-                        "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                    ).fetchone()
-                    if comp_row and comp_row[0]:
-                        data = json.loads(comp_row[0])
-                        for c in (data.get("allComposers") or []):
-                            logs.append({
-                                "id": c.get("composerId", ""),
-                                "workspaceId": name,
-                                "workspaceFolder": workspace_folder,
-                                "title": c.get("text") or f"Composer {(c.get('composerId') or '')[:8]}",
-                                "timestamp": to_epoch_ms(c.get("lastUpdatedAt")) or to_epoch_ms(c.get("createdAt")) or 0,
-                                "type": "composer",
-                                "messageCount": len(c.get("conversation") or []),
-                            })
-                    conn.close()
+                        # Composer logs
+                        comp_row = conn.execute(
+                            "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                        ).fetchone()
+                        if comp_row and comp_row[0]:
+                            data = json.loads(comp_row[0])
+                            for c in (data.get("allComposers") or []):
+                                logs.append({
+                                    "id": c.get("composerId", ""),
+                                    "workspaceId": name,
+                                    "workspaceFolder": workspace_folder,
+                                    "title": c.get("text") or f"Composer {(c.get('composerId') or '')[:8]}",
+                                    "timestamp": to_epoch_ms(c.get("lastUpdatedAt")) or to_epoch_ms(c.get("createdAt")) or 0,
+                                    "type": "composer",
+                                    "messageCount": len(c.get("conversation") or []),
+                                })
                 except Exception:
                     pass
         except Exception:

@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import sys
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 
@@ -158,28 +159,27 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
         return None
     composer_ids: list[str] = []
     try:
-        lconn = sqlite3.connect(f"file:{local_db_path}?mode=ro", uri=True)
-        row = lconn.execute(
-            "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-        ).fetchone()
+        # closing() guarantees .close() on scope exit (issue #17).
+        with closing(sqlite3.connect(f"file:{local_db_path}?mode=ro", uri=True)) as lconn:
+            row = lconn.execute(
+                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+            ).fetchone()
         if row and row[0]:
             data = json.loads(row[0])
             for c in (data.get("allComposers") or []):
                 cid = c.get("composerId") if isinstance(c, dict) else None
                 if cid:
                     composer_ids.append(cid)
-        lconn.close()
     except Exception:
         return None
     if not composer_ids:
         return None
 
     # Gather folder-name hints from global messageRequestContext.projectLayouts
-    gconn, _ = _open_global_db(workspace_path)
-    if not gconn:
-        return None
     counts: dict[str, int] = {}
-    try:
+    with _open_global_db(workspace_path) as (gconn, _):
+        if not gconn:
+            return None
         for cid in composer_ids:
             rows = gconn.execute(
                 "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
@@ -207,8 +207,6 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
                     hint = _basename_from_pathish(obj.get("rootPath"))
                     if hint:
                         counts[hint] = counts.get(hint, 0) + 1
-    finally:
-        gconn.close()
 
     if not counts:
         return None
@@ -475,10 +473,11 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
         if not os.path.isfile(db_path):
             continue
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            row = conn.execute(
-                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-            ).fetchone()
+            # closing() guarantees .close() on scope exit (issue #17).
+            with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                row = conn.execute(
+                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                ).fetchone()
             if row and row[0]:
                 data = json.loads(row[0])
                 all_composers = data.get("allComposers")
@@ -487,21 +486,31 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
                         cid = c.get("composerId")
                         if cid:
                             mapping[cid] = entry["name"]
-            conn.close()
         except Exception:
             pass
     return mapping
 
 
+@contextmanager
 def _open_global_db(workspace_path: str):
-    """Open the global storage database (read-only). Returns (conn, path) or (None, path)."""
+    """Yield (conn, path) for the global-storage SQLite db (read-only).
+
+    Context-managed so the caller writes ``with _open_global_db(...) as (conn, _):``
+    and the connection is guaranteed to close on scope exit, including on
+    exception (issue #17). Yields ``(None, path)`` if the file is missing —
+    callers branch on ``conn is None`` exactly as before.
+    """
     global_db_path = os.path.join(workspace_path, "..", "globalStorage", "state.vscdb")
     global_db_path = os.path.normpath(global_db_path)
     if not os.path.isfile(global_db_path):
-        return None, global_db_path
+        yield None, global_db_path
+        return
     conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    return conn, global_db_path
+    try:
+        yield conn, global_db_path
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -521,100 +530,98 @@ def list_workspaces():
 
         conversation_map: dict[str, list] = {}
 
-        global_db, _ = _open_global_db(workspace_path)
-        if global_db:
-            try:
-                # composerData rows
-                composer_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
-                ).fetchall()
+        # closing semantics now baked into the context manager (issue #17).
+        with _open_global_db(workspace_path) as (global_db, _):
+            if global_db:
+                try:
+                    # composerData rows
+                    composer_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
+                    ).fetchall()
 
-                # messageRequestContext rows -> project layouts
-                ctx_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
-                ).fetchall()
-                project_layouts_map: dict[str, list] = {}
-                for row in ctx_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) < 2:
-                        continue
-                    cid = parts[1]
-                    try:
-                        ctx = json.loads(row["value"])
-                        layouts = ctx.get("projectLayouts")
-                        if isinstance(layouts, list):
-                            if cid not in project_layouts_map:
-                                project_layouts_map[cid] = []
-                            for layout in layouts:
-                                if isinstance(layout, str):
-                                    try:
-                                        obj = json.loads(layout)
-                                        if isinstance(obj, dict) and obj.get("rootPath"):
-                                            project_layouts_map[cid].append(obj["rootPath"])
-                                    except Exception:
-                                        pass
-                    except Exception:
-                        pass
-
-                # bubbleId rows for project detection
-                bubble_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-                ).fetchall()
-                bubble_map: dict[str, dict] = {}
-                for row in bubble_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) >= 3:
-                        bid = parts[2]
+                    # messageRequestContext rows -> project layouts
+                    ctx_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
+                    ).fetchall()
+                    project_layouts_map: dict[str, list] = {}
+                    for row in ctx_rows:
+                        parts = row["key"].split(":")
+                        if len(parts) < 2:
+                            continue
+                        cid = parts[1]
                         try:
-                            b = json.loads(row["value"])
-                            if isinstance(b, dict):
-                                bubble_map[bid] = b
+                            ctx = json.loads(row["value"])
+                            layouts = ctx.get("projectLayouts")
+                            if isinstance(layouts, list):
+                                if cid not in project_layouts_map:
+                                    project_layouts_map[cid] = []
+                                for layout in layouts:
+                                    if isinstance(layout, str):
+                                        try:
+                                            obj = json.loads(layout)
+                                            if isinstance(obj, dict) and obj.get("rootPath"):
+                                                project_layouts_map[cid].append(obj["rootPath"])
+                                        except Exception:
+                                            pass
                         except Exception:
                             pass
 
-                # Process each composer
-                invalid_workspace_aliases = _infer_invalid_workspace_aliases(
-                    composer_rows=composer_rows,
-                    project_layouts_map=project_layouts_map,
-                    project_name_map=project_name_map,
-                    workspace_path_map=workspace_path_map,
-                    workspace_entries=workspace_entries,
-                    bubble_map=bubble_map,
-                    composer_id_to_ws=composer_id_to_ws,
-                    invalid_workspace_ids=invalid_workspace_ids,
-                )
-                for row in composer_rows:
-                    cid = row["key"].split(":")[1]
-                    try:
-                        cd = json.loads(row["value"])
-                        pid = _determine_project_for_conversation(
-                            cd, cid, project_layouts_map,
-                            project_name_map, workspace_path_map,
-                            workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
-                        )
-                        mapped_ws = composer_id_to_ws.get(cid)
-                        if not pid and mapped_ws in invalid_workspace_ids:
-                            pid = invalid_workspace_aliases.get(mapped_ws)
-                        assigned = pid if pid else "global"
+                    # bubbleId rows for project detection
+                    bubble_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+                    ).fetchall()
+                    bubble_map: dict[str, dict] = {}
+                    for row in bubble_rows:
+                        parts = row["key"].split(":")
+                        if len(parts) >= 3:
+                            bid = parts[2]
+                            try:
+                                b = json.loads(row["value"])
+                                if isinstance(b, dict):
+                                    bubble_map[bid] = b
+                            except Exception:
+                                pass
 
-                        headers = cd.get("fullConversationHeadersOnly") or []
-                        has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
-                        if not has_bubbles:
-                            continue
+                    # Process each composer
+                    invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                        composer_rows=composer_rows,
+                        project_layouts_map=project_layouts_map,
+                        project_name_map=project_name_map,
+                        workspace_path_map=workspace_path_map,
+                        workspace_entries=workspace_entries,
+                        bubble_map=bubble_map,
+                        composer_id_to_ws=composer_id_to_ws,
+                        invalid_workspace_ids=invalid_workspace_ids,
+                    )
+                    for row in composer_rows:
+                        cid = row["key"].split(":")[1]
+                        try:
+                            cd = json.loads(row["value"])
+                            pid = _determine_project_for_conversation(
+                                cd, cid, project_layouts_map,
+                                project_name_map, workspace_path_map,
+                                workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
+                            )
+                            mapped_ws = composer_id_to_ws.get(cid)
+                            if not pid and mapped_ws in invalid_workspace_ids:
+                                pid = invalid_workspace_aliases.get(mapped_ws)
+                            assigned = pid if pid else "global"
 
-                        conversation_map.setdefault(assigned, []).append({
-                            "composerId": cid,
-                            "name": cd.get("name") or f"Conversation {cid[:8]}",
-                            "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
-                            "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
-                        })
-                    except Exception:
-                        pass
+                            headers = cd.get("fullConversationHeadersOnly") or []
+                            has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
+                            if not has_bubbles:
+                                continue
 
-                global_db.close()
-            except Exception:
-                if global_db:
-                    global_db.close()
+                            conversation_map.setdefault(assigned, []).append({
+                                "composerId": cid,
+                                "name": cd.get("name") or f"Conversation {cid[:8]}",
+                                "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
+                                "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
         # Exclusion rules (optional)
         rules = current_app.config.get("EXCLUSION_RULES") or []
@@ -946,6 +953,11 @@ def get_workspace_tabs(workspace_id):
     if workspace_id.startswith("cli:"):
         return _get_cli_workspace_tabs(workspace_id)
 
+    # `global_db` is the long-lived connection used across the ~400-line body
+    # below. Wrap the whole function in try/finally so the connection is
+    # released on every exit path — including unexpected exceptions that
+    # bypass the in-body close calls (issue #17). Equivalent to wrapping the
+    # body in `with closing(sqlite3.connect(...))` without the indent shift.
     global_db = None
     try:
         workspace_path = resolve_workspace_path()
@@ -1388,10 +1400,6 @@ def get_workspace_tabs(workspace_id):
             except Exception as e:
                 print(f"Error parsing composer data for {composer_id}: {e}")
 
-        if global_db:
-            global_db.close()
-            global_db = None
-
         # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
 
@@ -1399,6 +1407,9 @@ def get_workspace_tabs(workspace_id):
 
     except Exception as e:
         print(f"Failed to get workspace tabs: {e}")
-        if global_db:
-            global_db.close()
         return jsonify({"error": "Failed to get workspace tabs"}), 500
+    finally:
+        # Guaranteed close — fires on success, exception, AND on any
+        # in-body return that doesn't go through except (issue #17).
+        if global_db is not None:
+            global_db.close()
