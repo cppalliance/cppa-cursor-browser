@@ -48,6 +48,8 @@ class TestDOMPurifyLoaded(unittest.TestCase):
         self.assertGreater(marked_pos, 0, "Marked.js must be loaded")
         self.assertGreater(purify_pos, 0, "DOMPurify must be loaded")
         self.assertGreater(app_js_pos, 0, "app.js must be loaded")
+        self.assertLess(marked_pos, purify_pos,
+                        "DOMPurify must load after Marked.js (matches the test name + comment)")
         self.assertLess(purify_pos, app_js_pos,
                         "DOMPurify must load before app.js so renderMarkdownSafe can use it")
 
