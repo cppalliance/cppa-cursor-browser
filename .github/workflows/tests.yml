@@ -5,6 +5,12 @@ on:
     branches: [master]
   pull_request:
 
+# Least-privilege GITHUB_TOKEN scope. None of these jobs need write access
+# (no commit, no PR comment, no release publish) — read-only is enough.
+# A compromised action in any matrix cell can't write back to the repo.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
