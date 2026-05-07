@@ -96,7 +96,10 @@ def set_workspace():
         return jsonify({"error": str(e)}), 400
     except Exception:  # noqa: BLE001 — only here as a fallback
         return jsonify({"error": "Failed to validate workspace path"}), 500
-    set_workspace_path_override(canonical)
+    try:
+        set_workspace_path_override(canonical)
+    except Exception:  # noqa: BLE001 — keep the response shape structured JSON
+        return jsonify({"error": "Failed to set workspace path"}), 500
     return jsonify({"success": True, "path": canonical})
 
 
