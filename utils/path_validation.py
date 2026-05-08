@@ -1,4 +1,4 @@
-"""Validation for workspace paths submitted via /api/set-workspace.
+"""Validation for workspace paths submitted via /api/set-workspace and /api/validate-path.
 
 Lives outside ``api/`` so the unit tests can import it without pulling
 Flask into scope (the existing test suite intentionally avoids Flask —
@@ -30,9 +30,10 @@ class WorkspacePathError(ValueError):
 def _has_cursor_workspace_markers(directory: str) -> bool:
     """Return True iff at least one immediate subdirectory contains state.vscdb.
 
-    Same heuristic /api/validate-path already uses to recognise a Cursor
-    workspaceStorage directory. Used here as the final accept gate so that
-    a symlink whose realpath happens to leave the user's own data area
+    Same heuristic as POST /api/validate-path (counts workspaces). Nested
+    layouts beyond one level are out of scope per issue #15. Used here as the
+    final accept gate so that a symlink whose realpath happens to leave the
+    user's own data area
     (e.g. /tmp, /etc) is rejected — those locations have no state.vscdb.
     """
     try:
@@ -50,7 +51,9 @@ def _has_cursor_workspace_markers(directory: str) -> bool:
 
 
 def validate_workspace_path(raw_path: str) -> str:
-    """Validate a /api/set-workspace input and return the canonical real path.
+    """Validate a workspace path input and return the canonical real path.
+
+    Used by POST /api/set-workspace and POST /api/validate-path (issue #15).
 
     Raises :class:`WorkspacePathError` if the path:
       - is empty / not a string,
@@ -69,6 +72,8 @@ def validate_workspace_path(raw_path: str) -> str:
     # realpath() collapses `..` AND resolves symlinks. Both classes of escape
     # become equivalent to whatever is actually on disk.
     real = os.path.realpath(expanded)
+    # Classic TOCTOU: the tree could change before listdir below; low practical
+    # risk for this single-user local tool (issue #15 review).
 
     if not os.path.exists(real):
         raise WorkspacePathError("path does not exist")

@@ -12,7 +12,6 @@ import sys
 
 from flask import Blueprint, jsonify, request
 
-from utils.path_helpers import expand_tilde_path
 from utils.path_validation import WorkspacePathError, validate_workspace_path
 from utils.workspace_path import set_workspace_path_override
 
@@ -51,23 +50,30 @@ def detect_environment():
 
 @bp.route("/api/validate-path", methods=["POST"])
 def validate_path():
+    """Same path rules as POST /api/set-workspace: realpath, markers (issue #15)."""
     try:
         body = request.get_json(silent=True) or {}
-        workspace_path = body.get("path", "")
-        expanded = expand_tilde_path(workspace_path)
-
-        if not os.path.isdir(expanded):
-            return jsonify({"valid": False, "error": "Path does not exist"})
+        raw = body.get("path", "")
+        try:
+            canonical = validate_workspace_path(raw)
+        except WorkspacePathError as e:
+            return jsonify({"valid": False, "error": str(e), "workspaceCount": 0})
 
         workspace_count = 0
-        for name in os.listdir(expanded):
-            full = os.path.join(expanded, name)
+        for name in os.listdir(canonical):
+            full = os.path.join(canonical, name)
             if os.path.isdir(full):
                 db = os.path.join(full, "state.vscdb")
                 if os.path.isfile(db):
                     workspace_count += 1
 
-        return jsonify({"valid": workspace_count > 0, "workspaceCount": workspace_count})
+        return jsonify(
+            {
+                "valid": workspace_count > 0,
+                "workspaceCount": workspace_count,
+                "path": canonical,
+            }
+        )
 
     except Exception as e:
         print(f"Validation error: {e}")

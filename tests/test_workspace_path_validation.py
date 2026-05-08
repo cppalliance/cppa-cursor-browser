@@ -114,6 +114,7 @@ class TestValidateWorkspacePath(unittest.TestCase):
             validate_workspace_path(escape)
 
     # ─── Symlink-escape class ──────────────────────────────────────
+    # POSIX-only; CI runs tests on ubuntu-latest so these still run in CI.
 
     @unittest.skipIf(sys.platform == "win32", "POSIX symlinks only")
     def test_symlink_to_non_workspace_is_rejected(self):
@@ -195,6 +196,24 @@ class TestSetWorkspaceApi(unittest.TestCase):
         body = resp.get_json()
         self.assertTrue(body["success"])
         self.assertEqual(body["path"], os.path.realpath(storage))
+
+    def test_validate_path_returns_canonical_and_count(self):
+        storage = _make_cursor_workspace_dir(self.tmp)
+        resp = self.client.post("/api/validate-path", json={"path": storage})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["valid"])
+        self.assertGreaterEqual(data["workspaceCount"], 1)
+        self.assertEqual(data["path"], os.path.realpath(storage))
+
+    def test_validate_path_invalid_returns_error(self):
+        plain = os.path.join(self.tmp, "no-markers")
+        os.makedirs(plain)
+        resp = self.client.post("/api/validate-path", json={"path": plain})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertFalse(data["valid"])
+        self.assertIn("error", data)
 
 
 if __name__ == "__main__":

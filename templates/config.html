@@ -96,7 +96,7 @@ async function validateAndSave() {
       setTimeout(() => { window.location.href = '/'; }, 1000);
     } else {
       statusEl.className = 'alert alert-danger';
-      statusEl.textContent = 'No workspaces found in the specified location';
+      statusEl.textContent = data.error || 'No workspaces found in the specified location';
       statusEl.style.display = 'block';
     }
   } catch (e) {
