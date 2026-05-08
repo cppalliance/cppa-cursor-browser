@@ -53,6 +53,10 @@ def validate_path():
     """Same path rules as POST /api/set-workspace: realpath, markers (issue #15)."""
     try:
         body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify(
+                {"valid": False, "error": "invalid JSON body", "workspaceCount": 0}
+            )
         raw = body.get("path", "")
         try:
             canonical = validate_workspace_path(raw)

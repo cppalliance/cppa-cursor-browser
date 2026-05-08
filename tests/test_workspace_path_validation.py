@@ -225,6 +225,19 @@ class TestSetWorkspaceApi(unittest.TestCase):
         self.assertFalse(data["valid"])
         self.assertIn("error", data)
 
+    def test_validate_path_non_dict_json_returns_structured_error(self):
+        # Mirror set_workspace: truthy non-dict JSON must not reach body.get.
+        resp = self.client.post(
+            "/api/validate-path",
+            data='"not an object"',
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertFalse(data["valid"])
+        self.assertEqual(data["error"], "invalid JSON body")
+        self.assertEqual(data["workspaceCount"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
