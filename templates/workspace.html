@@ -155,30 +155,30 @@ function renderChat(tab) {
   if (tab.metadata) {
     const m = tab.metadata;
     let meta = [];
-    if (m.modelsUsed && m.modelsUsed.length) meta.push(`Models: ${m.modelsUsed.join(', ')}`);
+    if (m.modelsUsed && m.modelsUsed.length) meta.push(escapeHtml('Models: ' + m.modelsUsed.join(', ')));
     if (m.totalInputTokens || m.totalOutputTokens) {
       let t = `Tokens: in ${fmtNum(m.totalInputTokens || 0)}, out ${fmtNum(m.totalOutputTokens || 0)}`;
       if (m.totalCachedTokens) t += `, cached ${fmtNum(m.totalCachedTokens)}`;
-      meta.push(t);
+      meta.push(escapeHtml(t));
     }
     if (m.maxContextTokensUsed && m.contextTokenLimit) {
-      meta.push(`Context: ${fmtNum(m.maxContextTokensUsed)} / ${fmtNum(m.contextTokenLimit)} tokens used`);
+      meta.push(escapeHtml(`Context: ${fmtNum(m.maxContextTokensUsed)} / ${fmtNum(m.contextTokenLimit)} tokens used`));
     }
-    if (m.totalResponseTimeMs) meta.push(`Total response time: ${(m.totalResponseTimeMs / 1000).toFixed(1)}s`);
-    if (m.totalCost != null) meta.push(`Cost: $${Number(m.totalCost).toFixed(4)}`);
-    if (m.totalToolCalls) meta.push(`Tool calls: ${m.totalToolCalls}`);
-    if (m.totalThinkingDurationMs) meta.push(`Total thinking: ${(m.totalThinkingDurationMs / 1000).toFixed(1)}s`);
+    if (m.totalResponseTimeMs) meta.push(escapeHtml(`Total response time: ${(m.totalResponseTimeMs / 1000).toFixed(1)}s`));
+    if (m.totalCost != null) meta.push(escapeHtml(`Cost: $${Number(m.totalCost).toFixed(4)}`));
+    if (m.totalToolCalls) meta.push(escapeHtml(`Tool calls: ${m.totalToolCalls}`));
+    if (m.totalThinkingDurationMs) meta.push(escapeHtml(`Total thinking: ${(m.totalThinkingDurationMs / 1000).toFixed(1)}s`));
     if (m.totalLinesAdded || m.totalLinesRemoved) {
       let lm = 'Lines: ';
       if (m.totalLinesAdded) lm += `+${fmtNum(m.totalLinesAdded)}`;
       if (m.totalLinesRemoved) lm += ` -${fmtNum(m.totalLinesRemoved)}`;
-      meta.push(lm.trim());
+      meta.push(escapeHtml(lm.trim()));
     }
     if (m.totalFilesAdded || m.totalFilesRemoved) {
       let fm = 'Files: ';
       if (m.totalFilesAdded) fm += `+${m.totalFilesAdded}`;
       if (m.totalFilesRemoved) fm += ` -${m.totalFilesRemoved}`;
-      meta.push(fm.trim());
+      meta.push(escapeHtml(fm.trim()));
     }
     if (meta.length) {
       html += `<div class="text-sm text-muted" style="margin-bottom:1rem">${meta.join(' &bull; ')}</div>`;
@@ -197,21 +197,21 @@ function renderChat(tab) {
     if (bubble.metadata) {
       const bm = bubble.metadata;
       let parts = [];
-      if (bm.modelName && bm.modelName !== 'default') parts.push(bm.modelName);
+      if (bm.modelName && bm.modelName !== 'default') parts.push(escapeHtml(String(bm.modelName)));
       // Only show token counts if they are actually populated (non-zero)
       if (bm.inputTokens > 0 || bm.outputTokens > 0) {
         let t = `Tokens: in ${fmtNum(bm.inputTokens || 0)}, out ${fmtNum(bm.outputTokens || 0)}`;
         if (bm.cachedTokens > 0) t += `, cached ${fmtNum(bm.cachedTokens)}`;
-        parts.push(t);
+        parts.push(escapeHtml(t));
       }
-      if (bm.responseTimeMs != null) parts.push(`Response: ${(bm.responseTimeMs / 1000).toFixed(1)}s`);
-      if (bm.cost != null) parts.push(`Cost: $${Number(bm.cost).toFixed(4)}`);
+      if (bm.responseTimeMs != null) parts.push(escapeHtml(`Response: ${(bm.responseTimeMs / 1000).toFixed(1)}s`));
+      if (bm.cost != null) parts.push(escapeHtml(`Cost: $${Number(bm.cost).toFixed(4)}`));
       // Context window info (from user bubbles)
       if (bm.contextTokensUsed > 0 && bm.contextTokenLimit > 0) {
         const pct = ((bm.contextTokensUsed / bm.contextTokenLimit) * 100).toFixed(0);
-        parts.push(`Context: ${fmtNum(bm.contextTokensUsed)} / ${fmtNum(bm.contextTokenLimit)} (${pct}% used)`);
+        parts.push(escapeHtml(`Context: ${fmtNum(bm.contextTokensUsed)} / ${fmtNum(bm.contextTokenLimit)} (${pct}% used)`));
       } else if (bm.contextWindowPercent != null) {
-        parts.push(`Context: ${bm.contextWindowPercent.toFixed(1)}% remaining`);
+        parts.push(escapeHtml(`Context: ${bm.contextWindowPercent.toFixed(1)}% remaining`));
       }
       if (parts.length) {
         metaHtml = `<div class="bubble-meta">${parts.join(' &bull; ')}</div>`;
@@ -312,12 +312,10 @@ function fmtNum(n) {
 }
 
 function renderMarkdown(text) {
-  if (!text) return '';
-  try {
-    return marked.parse(text, { breaks: true, gfm: true });
-  } catch (e) {
-    return escapeHtml(text);
-  }
+  // Delegate to the shared sanitised helper in static/js/app.js — every
+  // markdown render in this app must flow through DOMPurify before
+  // hitting innerHTML (issue #11). Do not re-add a raw marked.parse here.
+  return renderMarkdownSafe(text);
 }
 
 document.addEventListener('click', e => {

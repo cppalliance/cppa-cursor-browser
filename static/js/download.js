@@ -188,7 +188,10 @@ async function downloadAs(format) {
   }
   else if (format === 'html') {
     const md = convertChatToMarkdown(tab, true);
-    const htmlContent = marked.parse(md);
+    // Sanitise with DOMPurify before embedding in the download blob (issue #11).
+    // The downloaded file is opened in a browser and any payload would execute
+    // in the file:// origin, so XSS still applies.
+    const htmlContent = renderMarkdownSafe(md);
     const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>${escapeHtml(tab.title || 'Chat')}</title>
 <style>body{max-width:800px;margin:40px auto;padding:0 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.6;color:#333}pre{background:#f5f5f5;padding:1em;overflow-x:auto;border-radius:4px;border:1px solid #ddd}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:0.9em}hr{border:none;border-top:1px solid #ddd;margin:2em 0}h1,h2,h3{margin-top:2em;margin-bottom:1em}blockquote{border-left:4px solid #ddd;margin:0;padding-left:1em;color:#666}em{color:#666}@media(prefers-color-scheme:dark){body{background:#1a1a1a;color:#ddd}pre{background:#2d2d2d;border-color:#404040}blockquote{border-color:#404040;color:#999}em{color:#999}}</style>

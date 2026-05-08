@@ -48,6 +48,30 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+/**
+ * Render Markdown to HTML, then sanitise with DOMPurify before returning.
+ *
+ * Marked.js does NOT sanitise. Without DOMPurify, `[link](javascript:...)`,
+ * dangerous `data:` URIs, and inline event handlers all survive into the DOM
+ * — that's the XSS class fixed in issue #11.
+ *
+ * Fallback: if either marked or DOMPurify is missing (CDN failure, ad blocker,
+ * tests), return the plain-text-escaped string rather than ever emit raw or
+ * unsanitised HTML. Never fall through to a bare Marked call without sanitising.
+ */
+function renderMarkdownSafe(text) {
+  if (!text) return '';
+  if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+    return escapeHtml(text);
+  }
+  try {
+    const html = marked.parse(text, { breaks: true, gfm: true });
+    return DOMPurify.sanitize(html);
+  } catch (e) {
+    return escapeHtml(text);
+  }
+}
+
 function formatDate(timestamp) {
   if (!timestamp) return '';
   try {
