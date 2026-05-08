@@ -1,14 +1,17 @@
 """
-Cursor Chat Browser — Python Edition
+Cursor Chat Browser - Python Edition
 A Flask web application for browsing and managing chat histories
 from the Cursor editor's AI chat feature.
 """
 
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, render_template, send_from_directory
+
+from utils.debug_flag import resolve_debug_flag
 
 from api.workspaces import bp as workspaces_bp
 from api.composers import bp as composers_bp
@@ -101,6 +104,13 @@ if __name__ == "__main__":
         help="Path to exclusion rules file (sensitive projects/chats are omitted). "
              "If omitted, uses ~/.cursor-chat-browser/exclusion-rules.txt if present.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable Flask debug mode and the Werkzeug debugger. "
+             "DANGEROUS: allows remote code execution if the port is exposed. "
+             "Off by default; can also be enabled via FLASK_DEBUG=1.",
+    )
     args = parser.parse_args()
 
     if args.base_dir:
@@ -109,10 +119,23 @@ if __name__ == "__main__":
 
     app = create_app(exclusion_rules_path=args.exclude_rules)
     print(f"Cursor Chat Browser (Python) running at http://{args.host}:{args.port}")
+
+    debug_enabled = resolve_debug_flag(os.environ.get("FLASK_DEBUG"), args.debug)
+    if debug_enabled:
+        # Print the warning to stderr so it's visible even when stdout is
+        # piped/redirected. The Werkzeug debugger is a remote-code-execution
+        # primitive - anyone reaching the host:port can hijack the process.
+        print(
+            "WARNING: Flask debug mode ENABLED. The Werkzeug debugger allows "
+            "arbitrary code execution by anyone who can reach this server. "
+            "Bind only to 127.0.0.1 and never expose to untrusted networks.",
+            file=sys.stderr,
+        )
+
     # Disable reloader on Windows to avoid a socket conflict with Flask's stat reloader.
     app.run(
         host=args.host,
         port=args.port,
-        debug=True,
-        use_reloader=(sys.platform != "win32"),
+        debug=debug_enabled,
+        use_reloader=debug_enabled and (sys.platform != "win32"),
     )

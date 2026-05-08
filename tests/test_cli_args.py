@@ -9,6 +9,7 @@ Run:
     python -m unittest tests.test_cli_args -v
 """
 
+import ast
 import sys
 import os
 import unittest
@@ -43,6 +44,7 @@ def _build_app_parser():
     parser.add_argument("--base-dir", default=None)
     parser.add_argument("--exclude-rules", "-e", default=None,
                         metavar="PATH", dest="exclude_rules")
+    parser.add_argument("--debug", action="store_true")
     return parser
 
 
@@ -244,6 +246,156 @@ class TestAppArgs(unittest.TestCase):
         with open(export_path, "r", encoding="utf-8") as f:
             src = f.read()
         self.assertIn('choices=["all", "last"]', src)
+
+
+# ---------------------------------------------------------------------------
+# Werkzeug debugger gating (security): debug must be off by default,
+# opt-in via --debug or FLASK_DEBUG=1. Regression for the Critical
+# `debug=True` exposure that was hard-coded in app.py.
+# ---------------------------------------------------------------------------
+
+class TestDebugFlagGating(unittest.TestCase):
+
+    # -- _resolve_debug_flag helper ------------------------------------------
+
+    def setUp(self):
+        # Import from the standalone utility module so the test does not pull
+        # Flask into scope (the rest of this file deliberately avoids Flask).
+        from utils.debug_flag import resolve_debug_flag
+        self._resolve = resolve_debug_flag
+
+    def test_debug_off_when_env_unset_and_no_cli(self):
+        self.assertFalse(self._resolve(None, False))
+
+    def test_debug_off_when_env_empty_string(self):
+        self.assertFalse(self._resolve("", False))
+
+    def test_debug_off_for_explicit_falsey_env_values(self):
+        for v in ("0", "false", "False", "no", "off", "anything-not-truthy"):
+            with self.subTest(env=v):
+                self.assertFalse(self._resolve(v, False))
+
+    def test_debug_on_for_truthy_env_values(self):
+        for v in ("1", "true", "True", "TRUE", "yes", "YES", " 1 "):
+            with self.subTest(env=v):
+                self.assertTrue(self._resolve(v, False))
+
+    def test_cli_flag_overrides_env(self):
+        # Even with FLASK_DEBUG explicitly off, --debug should turn it on.
+        self.assertTrue(self._resolve("0", True))
+        self.assertTrue(self._resolve(None, True))
+
+    # -- argparse: --debug flag ----------------------------------------------
+
+    def test_app_parser_debug_default_false(self):
+        opts = _build_app_parser().parse_args([])
+        self.assertFalse(opts.debug)
+
+    def test_app_parser_debug_explicit(self):
+        opts = _build_app_parser().parse_args(["--debug"])
+        self.assertTrue(opts.debug)
+
+    # -- source-level guard: app.py must NOT carry a literal debug=True -------
+    # AST-walk so cosmetic variations (`debug = True`, multi-line formatting,
+    # leading whitespace, etc.) cannot bypass the guard. A regression that
+    # reintroduces the literal in any form fails this test with the offending
+    # line number(s).
+
+    def test_app_py_does_not_hardcode_debug_true(self):
+        app_path = os.path.join(REPO_ROOT, "app.py")
+        with open(app_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=app_path)
+
+        offenders = _find_debug_true_offenders(tree)
+        self.assertEqual(
+            offenders, [],
+            "Found a literal `debug=True` keyword argument in app.py at "
+            "line(s) %s. The Werkzeug debugger must be opt-in via the "
+            "--debug flag or FLASK_DEBUG env var (see issue #9), never "
+            "hard-coded." % offenders,
+        )
+
+
+class FindDebugTrueOffendersTests(unittest.TestCase):
+    """Unit tests for the AST-walk helper itself, so the regression guard
+    above keeps catching what we expect across Python AST shape changes.
+
+    Covers:
+      - direct keyword `f(debug=True)` (ast.Constant on 3.8+, ast.NameConstant on 3.7)
+      - dict-spread `f(**{"debug": True})` bypass
+      - benign shapes that should NOT trip the guard (False, variable, attribute)
+    """
+
+    def _find(self, src):
+        return _find_debug_true_offenders(ast.parse(src))
+
+    def test_simple_keyword_literal(self):
+        self.assertEqual(self._find("app.run(debug=True)"), [1])
+
+    def test_keyword_false_not_flagged(self):
+        self.assertEqual(self._find("app.run(debug=False)"), [])
+
+    def test_keyword_variable_not_flagged(self):
+        # Out of scope per PR review - only literals are tracked.
+        self.assertEqual(self._find("flag = True\napp.run(debug=flag)"), [])
+
+    def test_keyword_attribute_not_flagged(self):
+        self.assertEqual(self._find("app.run(debug=cfg.debug_on)"), [])
+
+    def test_dict_spread_literal(self):
+        # Determined-bypass shape: kwargs come in via **dict literal.
+        offenders = self._find("app.run(**{'debug': True})")
+        self.assertEqual(len(offenders), 1)
+
+    def test_dict_spread_false_not_flagged(self):
+        self.assertEqual(self._find("app.run(**{'debug': False})"), [])
+
+    def test_dict_spread_other_key_not_flagged(self):
+        self.assertEqual(self._find("app.run(**{'foo': True})"), [])
+
+
+# ---------------------------------------------------------------------------
+# AST helper (module-level so it's testable in isolation)
+# ---------------------------------------------------------------------------
+
+def _find_debug_true_offenders(tree):
+    """Return line numbers of any literal `debug=True` (or `**{"debug": True}`)
+    on a Call node in the AST.
+
+    Cross-version safe: works with both ast.Constant (3.8+) and the legacy
+    ast.NameConstant shape (3.7) by reading `.value` attribute-style rather
+    than narrowing to a specific node class. Only literal True is flagged;
+    `debug=variable` and `debug=mod.attr` are out of scope.
+    """
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            # Shape 1: direct keyword - f(debug=True)
+            if kw.arg == "debug" and _is_literal_true(kw.value):
+                offenders.append(kw.lineno)
+                continue
+            # Shape 2: dict-spread - f(**{"debug": True})
+            if kw.arg is None and isinstance(kw.value, ast.Dict):
+                for k, v in zip(kw.value.keys, kw.value.values):
+                    if _is_str_literal(k, "debug") and _is_literal_true(v):
+                        offenders.append(getattr(v, "lineno", kw.lineno))
+    return offenders
+
+
+def _is_literal_true(node):
+    """True only when *node* is the literal True (ast.Constant on 3.8+,
+    ast.NameConstant on 3.7). Excludes variables/attributes via the strict
+    `is True` identity check on `.value`."""
+    return getattr(node, "value", None) is True
+
+
+def _is_str_literal(node, expected):
+    """True when *node* is a string literal equal to *expected* (handles
+    ast.Constant on 3.8+ and ast.Str on 3.7)."""
+    val = getattr(node, "value", getattr(node, "s", None))
+    return isinstance(val, str) and val == expected
 
 
 if __name__ == "__main__":
