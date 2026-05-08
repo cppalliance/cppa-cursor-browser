@@ -15,6 +15,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -56,7 +57,10 @@ class TestValidateWorkspacePath(unittest.TestCase):
         traversal_input = os.path.join(storage, "..", os.path.basename(storage))
         result = validate_workspace_path(traversal_input)
         self.assertEqual(result, os.path.realpath(storage))
-        self.assertNotIn("..", result)
+        # Assert no `..` *segment* in the canonical path (vs. a substring check
+        # on the raw string, which would spuriously fail if the OS-supplied
+        # tempdir name ever embedded `..` in a folder name).
+        self.assertNotIn(os.pardir, Path(result).parts)
 
     # ─── Hard rejects ──────────────────────────────────────────────
 
@@ -149,9 +153,15 @@ class TestSetWorkspaceApi(unittest.TestCase):
     def setUp(self):
         from flask import Flask
         from api.config_api import bp as config_bp
+        from utils.workspace_path import set_workspace_path_override
 
         self.tmp = tempfile.mkdtemp(prefix="cursor-validate-api-test-")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # Reset the module-global workspace override after each test. The
+        # 200-path test below mutates it via the API and the tempdir is then
+        # rmtree'd by the cleanup above — without this, a future sibling test
+        # inspecting the override would see a stale, now-deleted path.
+        self.addCleanup(set_workspace_path_override, None)
 
         app = Flask(__name__)
         app.config["TESTING"] = True
