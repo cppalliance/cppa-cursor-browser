@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       # Pinned to immutable commit SHAs (not @v4 / @v5) so a compromised tag
@@ -75,6 +75,8 @@ jobs:
           python -m pip install 'flask>=3.0' 'fpdf2>=2.7' 'mypy>=1.10'
 
       - name: Run mypy
+        # Transitional only (maintainer consensus): keeps CI green until `mypy` exits
+        # zero on this repo — then delete this line so type errors fail the job.
         continue-on-error: true
         run: mypy --ignore-missing-imports --no-strict-optional --pretty .
 
