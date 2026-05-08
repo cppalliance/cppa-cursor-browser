@@ -11,6 +11,7 @@ import re
 import sqlite3
 import sys
 import zipfile
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -78,6 +79,10 @@ def export_chats():
     application startup; an app restart is required to pick up changes to the
     exclusion rules file.
     """
+    # Outer try/finally guarantees the global-storage connection is closed
+    # on every exit path including unexpected exceptions (issue #17). Keeps
+    # the existing function body shape; just ensures cleanup.
+    conn = None
     try:
         body = request.get_json(silent=True) or {}
         since = "last" if body.get("since") == "last" else "all"
@@ -131,17 +136,17 @@ def export_chats():
             if not os.path.isfile(db_path):
                 continue
             try:
-                wconn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-                row = wconn.execute(
-                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                ).fetchone()
+                # closing() guarantees .close() on scope exit (issue #17).
+                with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as wconn:
+                    row = wconn.execute(
+                        "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                    ).fetchone()
                 if row and row[0]:
                     data = json.loads(row[0])
                     for c in (data.get("allComposers") or []):
                         cid = c.get("composerId") if isinstance(c, dict) else None
                         if cid:
                             composer_id_to_ws[cid] = entry["name"]
-                wconn.close()
             except Exception:
                 pass
 
@@ -402,8 +407,6 @@ def export_chats():
             except Exception as e:
                 print(f"Error processing composer {composer_id} for export: {e}")
 
-        conn.close()
-
         count = len(exported)
         if count == 0:
             return jsonify({"error": "No conversations to export" + (
@@ -436,3 +439,8 @@ def export_chats():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Export failed: {str(e)}"}), 500
+    finally:
+        # Guaranteed close — fires on success, exception, AND on any
+        # in-body return that doesn't go through except (issue #17).
+        if conn is not None:
+            conn.close()

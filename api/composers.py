@@ -7,6 +7,7 @@ API routes for composers — mirrors:
 import json
 import os
 import sqlite3
+from contextlib import closing
 
 from flask import Blueprint, jsonify
 
@@ -45,11 +46,11 @@ def list_composers():
                 pass
 
             try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-                row = conn.execute(
-                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                ).fetchone()
-                conn.close()
+                # closing() guarantees .close() on scope exit (issue #17).
+                with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                    row = conn.execute(
+                        "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                    ).fetchone()
 
                 if row and row[0]:
                     data = json.loads(row[0])
@@ -86,11 +87,11 @@ def get_composer(composer_id):
                 continue
 
             try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-                row = conn.execute(
-                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                ).fetchone()
-                conn.close()
+                # closing() guarantees .close() on scope exit (issue #17).
+                with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                    row = conn.execute(
+                        "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                    ).fetchone()
 
                 if row and row[0]:
                     data = json.loads(row[0])
@@ -104,12 +105,12 @@ def get_composer(composer_id):
         global_db_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
         if os.path.isfile(global_db_path):
             try:
-                conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
-                row = conn.execute(
-                    "SELECT value FROM cursorDiskKV WHERE key = ?",
-                    (f"composerData:{composer_id}",),
-                ).fetchone()
-                conn.close()
+                # closing() guarantees .close() on scope exit (issue #17).
+                with closing(sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)) as conn:
+                    row = conn.execute(
+                        "SELECT value FROM cursorDiskKV WHERE key = ?",
+                        (f"composerData:{composer_id}",),
+                    ).fetchone()
 
                 if row and row[0]:
                     raw = row[0] if isinstance(row[0], str) else row[0].decode("utf-8")

@@ -396,11 +396,11 @@ def main():
                 "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
                 " AND value LIKE '%fullConversationHeadersOnly%'"
             ).fetchall()
-
-            _conn.close()
-            _conn = None
         except Exception as e:
             print(f"Warning: Could not read Cursor IDE chats ({e}) — skipping.", file=sys.stderr)
+        finally:
+            # Guaranteed close on every exit path (issue #17). Replaces the
+            # previous duplicate close-in-success-and-error pattern.
             if _conn is not None:
                 try:
                     _conn.close()

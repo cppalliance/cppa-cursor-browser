@@ -70,10 +70,13 @@ def cursor_cli_session_to_markdown(
     # Read metadata from the database if not provided.
     if session_meta is None:
         import sqlite3
+        from contextlib import closing
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
-            conn.close()
+            # `closing(...)` guarantees .close() on scope exit (including on
+            # exception); sqlite3.Connection's own context manager only handles
+            # commit/rollback, not close. See issue #17.
+            with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
             session_meta = json.loads(bytes.fromhex(row[0]).decode()) if row else {}
         except Exception:
             session_meta = {}

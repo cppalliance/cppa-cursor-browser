@@ -69,6 +69,20 @@ python app.py
 
 Open <http://localhost:3000> in your browser.
 
+## Tests
+
+Run the full suite from the repository root (install `requirements.txt` first):
+
+```bash
+python -m unittest discover tests -v
+```
+
+Run a single module, for example:
+
+```bash
+python -m unittest tests.test_cli_args -v
+```
+
 ## CLI Export
 
 Export chat history to Markdown without starting the web server. Running with no arguments exports **everything** (all chats + composer logs) as a zip archive into the current directory.

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from urllib.parse import unquote as _url_unquote
 
@@ -83,6 +84,11 @@ def search():
         # Search global cursorDiskKV (new Cursor format — primary source)
         # ---------------------------------------------------------------
         if os.path.isfile(global_db_path):
+            # try/finally guarantees .close() on every exit path including
+            # exception (issue #17). Equivalent to wrapping the body in
+            # `with closing(sqlite3.connect(...))`, without the 160-line
+            # indent shift over the search logic that follows.
+            conn = None
             try:
                 conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
@@ -117,10 +123,11 @@ def search():
                     if not os.path.isfile(db_path):
                         continue
                     try:
-                        wconn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-                        row = wconn.execute(
-                            "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                        ).fetchone()
+                        # closing() guarantees .close() on scope exit (issue #17).
+                        with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as wconn:
+                            row = wconn.execute(
+                                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                            ).fetchone()
                         if row and row[0]:
                             data = json.loads(row[0])
                             all_composers = data.get("allComposers")
@@ -129,7 +136,6 @@ def search():
                                     cid = c.get("composerId") if isinstance(c, dict) else None
                                     if cid:
                                         composer_id_to_ws[cid] = entry["name"]
-                        wconn.close()
                     except Exception:
                         pass
 
@@ -244,9 +250,11 @@ def search():
                     except Exception:
                         pass
 
-                conn.close()
             except Exception as e:
                 print(f"Error searching global storage: {e}")
+            finally:
+                if conn is not None:
+                    conn.close()
 
         # ---------------------------------------------------------------
         # Search per-workspace ItemTable (legacy format — fallback)
@@ -270,6 +278,8 @@ def search():
                     pass
                 workspace_name = _workspace_display_name_from_folder(workspace_folder, fallback=name)
 
+                # try/finally guarantees .close() on every exit path (issue #17).
+                conn = None
                 try:
                     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
@@ -338,9 +348,11 @@ def search():
                                         "type": "chat",
                                     })
 
-                    conn.close()
                 except Exception:
                     pass
+                finally:
+                    if conn is not None:
+                        conn.close()
         except Exception:
             pass
 
