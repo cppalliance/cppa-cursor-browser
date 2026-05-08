@@ -18,6 +18,7 @@ Run:
     python -m unittest tests.test_xss_sanitization -v
 """
 
+import glob
 import os
 import re
 import unittest
@@ -28,6 +29,21 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _read(rel_path):
     with open(os.path.join(REPO_ROOT, rel_path), "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _discover_frontend_source_files():
+    """All templates/*.html and static/js/*.js - catches new files without
+    updating a fixed list (PR review hardening).
+    """
+    out = []
+    for pattern in (
+        os.path.join(REPO_ROOT, "templates", "*.html"),
+        os.path.join(REPO_ROOT, "static", "js", "*.js"),
+    ):
+        for full in sorted(glob.glob(pattern)):
+            rel = os.path.relpath(full, REPO_ROOT).replace("\\", "/")
+            out.append(rel)
+    return out
 
 
 class TestDOMPurifyLoaded(unittest.TestCase):
@@ -102,20 +118,10 @@ class TestNoBareMarkedParse(unittest.TestCase):
     function then sanitises). We allow at most one such call across the
     frontend — the one inside the helper itself."""
 
-    FRONTEND_FILES = [
-        "templates/workspace.html",
-        "templates/index.html",
-        "templates/search.html",
-        "templates/config.html",
-        "static/js/app.js",
-        "static/js/download.js",
-    ]
-
     def test_marked_parse_appears_only_inside_safe_helper(self):
         marked_call = re.compile(r"marked\.parse\s*\(")
-        total = 0
         per_file = {}
-        for rel in self.FRONTEND_FILES:
+        for rel in _discover_frontend_source_files():
             full = os.path.join(REPO_ROOT, rel)
             if not os.path.exists(full):
                 continue
@@ -123,7 +129,6 @@ class TestNoBareMarkedParse(unittest.TestCase):
                 src = f.read()
             n = len(marked_call.findall(src))
             per_file[rel] = n
-            total += n
         # Exactly one allowed — the call inside renderMarkdownSafe in app.js.
         self.assertEqual(per_file.get("static/js/app.js", 0), 1,
                          "static/js/app.js should contain marked.parse exactly once "
@@ -134,7 +139,7 @@ class TestNoBareMarkedParse(unittest.TestCase):
                 continue
             self.assertEqual(
                 n, 0,
-                "%s contains a bare marked.parse(...) call — wrap it via "
+                "%s contains a bare marked.parse(...) call - wrap it via "
                 "renderMarkdownSafe() instead. per_file=%s" % (rel, per_file)
             )
 
