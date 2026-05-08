@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 import sys
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
@@ -160,7 +161,10 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
     composer_ids: list[str] = []
     try:
         # closing() guarantees .close() on scope exit (issue #17).
-        with closing(sqlite3.connect(f"file:{local_db_path}?mode=ro", uri=True)) as lconn:
+        # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
+        # naive f"file:{path}" breaks sqlite URI parsing.
+        _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
             row = lconn.execute(
                 "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
             ).fetchone()
