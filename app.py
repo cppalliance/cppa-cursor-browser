@@ -1,5 +1,5 @@
 """
-Cursor Chat Browser — Python Edition
+Cursor Chat Browser - Python Edition
 A Flask web application for browsing and managing chat histories
 from the Cursor editor's AI chat feature.
 """
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     if debug_enabled:
         # Print the warning to stderr so it's visible even when stdout is
         # piped/redirected. The Werkzeug debugger is a remote-code-execution
-        # primitive — anyone reaching the host:port can hijack the process.
+        # primitive - anyone reaching the host:port can hijack the process.
         print(
             "WARNING: Flask debug mode ENABLED. The Werkzeug debugger allows "
             "arbitrary code execution by anyone who can reach this server. "

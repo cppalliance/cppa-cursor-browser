@@ -69,6 +69,8 @@ python app.py
 
 Open <http://localhost:3000> in your browser.
 
+The Werkzeug debugger is **off by default** and must be opted in explicitly via the `--debug` flag or by setting `FLASK_DEBUG=1`. (Note: `FLASK_ENV=development` is **not** consulted - only `FLASK_DEBUG` is. See issue #9 for the rationale.)
+
 ## CLI Export
 
 Export chat history to Markdown without starting the web server. Running with no arguments exports **everything** (all chats + composer logs) as a zip archive into the current directory.
