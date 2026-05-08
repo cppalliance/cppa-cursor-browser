@@ -1,7 +1,6 @@
 """
 Tests for exclusion rules (filtering sensitive projects/chats).
-Run from project root: python -m pytest tests/test_exclusion_rules.py -v
-or: python -m unittest tests.test_exclusion_rules -v
+Run from project root: python -m unittest tests.test_exclusion_rules -v
 """
 
 import os

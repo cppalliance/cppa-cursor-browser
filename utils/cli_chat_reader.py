@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Generator
 
@@ -46,15 +47,14 @@ from typing import Generator
 
 def _read_meta(db_path: str) -> dict:
     """Read and decode the session metadata row from a ``store.db``."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
-        if row and row[0]:
-            return json.loads(bytes.fromhex(row[0]).decode("utf-8"))
-    except Exception:
-        pass
-    finally:
-        conn.close()
+    # `closing(...)` guarantees .close() on scope exit (issue #17).
+    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
+            if row and row[0]:
+                return json.loads(bytes.fromhex(row[0]).decode("utf-8"))
+        except Exception:
+            pass
     return {}
 
 
@@ -86,8 +86,11 @@ def traverse_blobs(db_path: str) -> list[dict]:
     conversation order.  ``system`` messages are included; callers may filter
     them as needed.
     """
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
+    # `closing(...)` guarantees .close() on scope exit (issue #17). Connection
+    # is only needed to materialise the blob graph; subsequent BFS works on
+    # in-memory dicts, so the connection is released as soon as we're done
+    # reading.
+    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
         meta_row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
         if not meta_row or not meta_row[0]:
             return []
@@ -112,9 +115,6 @@ def traverse_blobs(db_path: str) -> list[dict]:
                 pass
             refs = _extract_blob_refs(data)
             chain_blobs[blob_id] = refs
-
-    finally:
-        conn.close()
 
     # BFS from root (newest-first by nature of the linked-list structure);
     # reverse at the end to restore chronological (oldest→newest) order.

@@ -11,7 +11,9 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 import sys
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 
@@ -158,28 +160,30 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
         return None
     composer_ids: list[str] = []
     try:
-        lconn = sqlite3.connect(f"file:{local_db_path}?mode=ro", uri=True)
-        row = lconn.execute(
-            "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-        ).fetchone()
+        # closing() guarantees .close() on scope exit (issue #17).
+        # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
+        # naive f"file:{path}" breaks sqlite URI parsing.
+        _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
+            row = lconn.execute(
+                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+            ).fetchone()
         if row and row[0]:
             data = json.loads(row[0])
             for c in (data.get("allComposers") or []):
                 cid = c.get("composerId") if isinstance(c, dict) else None
                 if cid:
                     composer_ids.append(cid)
-        lconn.close()
     except Exception:
         return None
     if not composer_ids:
         return None
 
     # Gather folder-name hints from global messageRequestContext.projectLayouts
-    gconn, _ = _open_global_db(workspace_path)
-    if not gconn:
-        return None
     counts: dict[str, int] = {}
-    try:
+    with _open_global_db(workspace_path) as (gconn, _):
+        if not gconn:
+            return None
         for cid in composer_ids:
             rows = gconn.execute(
                 "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
@@ -207,8 +211,6 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
                     hint = _basename_from_pathish(obj.get("rootPath"))
                     if hint:
                         counts[hint] = counts.get(hint, 0) + 1
-    finally:
-        gconn.close()
 
     if not counts:
         return None
@@ -475,10 +477,11 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
         if not os.path.isfile(db_path):
             continue
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            row = conn.execute(
-                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-            ).fetchone()
+            # closing() guarantees .close() on scope exit (issue #17).
+            with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+                row = conn.execute(
+                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+                ).fetchone()
             if row and row[0]:
                 data = json.loads(row[0])
                 all_composers = data.get("allComposers")
@@ -487,21 +490,31 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
                         cid = c.get("composerId")
                         if cid:
                             mapping[cid] = entry["name"]
-            conn.close()
         except Exception:
             pass
     return mapping
 
 
+@contextmanager
 def _open_global_db(workspace_path: str):
-    """Open the global storage database (read-only). Returns (conn, path) or (None, path)."""
+    """Yield (conn, path) for the global-storage SQLite db (read-only).
+
+    Context-managed so the caller writes ``with _open_global_db(...) as (conn, _):``
+    and the connection is guaranteed to close on scope exit, including on
+    exception (issue #17). Yields ``(None, path)`` if the file is missing —
+    callers branch on ``conn is None`` exactly as before.
+    """
     global_db_path = os.path.join(workspace_path, "..", "globalStorage", "state.vscdb")
     global_db_path = os.path.normpath(global_db_path)
     if not os.path.isfile(global_db_path):
-        return None, global_db_path
+        yield None, global_db_path
+        return
     conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    return conn, global_db_path
+    try:
+        yield conn, global_db_path
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -521,100 +534,98 @@ def list_workspaces():
 
         conversation_map: dict[str, list] = {}
 
-        global_db, _ = _open_global_db(workspace_path)
-        if global_db:
-            try:
-                # composerData rows
-                composer_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
-                ).fetchall()
+        # closing semantics now baked into the context manager (issue #17).
+        with _open_global_db(workspace_path) as (global_db, _):
+            if global_db:
+                try:
+                    # composerData rows
+                    composer_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
+                    ).fetchall()
 
-                # messageRequestContext rows -> project layouts
-                ctx_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
-                ).fetchall()
-                project_layouts_map: dict[str, list] = {}
-                for row in ctx_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) < 2:
-                        continue
-                    cid = parts[1]
-                    try:
-                        ctx = json.loads(row["value"])
-                        layouts = ctx.get("projectLayouts")
-                        if isinstance(layouts, list):
-                            if cid not in project_layouts_map:
-                                project_layouts_map[cid] = []
-                            for layout in layouts:
-                                if isinstance(layout, str):
-                                    try:
-                                        obj = json.loads(layout)
-                                        if isinstance(obj, dict) and obj.get("rootPath"):
-                                            project_layouts_map[cid].append(obj["rootPath"])
-                                    except Exception:
-                                        pass
-                    except Exception:
-                        pass
-
-                # bubbleId rows for project detection
-                bubble_rows = global_db.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-                ).fetchall()
-                bubble_map: dict[str, dict] = {}
-                for row in bubble_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) >= 3:
-                        bid = parts[2]
+                    # messageRequestContext rows -> project layouts
+                    ctx_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
+                    ).fetchall()
+                    project_layouts_map: dict[str, list] = {}
+                    for row in ctx_rows:
+                        parts = row["key"].split(":")
+                        if len(parts) < 2:
+                            continue
+                        cid = parts[1]
                         try:
-                            b = json.loads(row["value"])
-                            if isinstance(b, dict):
-                                bubble_map[bid] = b
+                            ctx = json.loads(row["value"])
+                            layouts = ctx.get("projectLayouts")
+                            if isinstance(layouts, list):
+                                if cid not in project_layouts_map:
+                                    project_layouts_map[cid] = []
+                                for layout in layouts:
+                                    if isinstance(layout, str):
+                                        try:
+                                            obj = json.loads(layout)
+                                            if isinstance(obj, dict) and obj.get("rootPath"):
+                                                project_layouts_map[cid].append(obj["rootPath"])
+                                        except Exception:
+                                            pass
                         except Exception:
                             pass
 
-                # Process each composer
-                invalid_workspace_aliases = _infer_invalid_workspace_aliases(
-                    composer_rows=composer_rows,
-                    project_layouts_map=project_layouts_map,
-                    project_name_map=project_name_map,
-                    workspace_path_map=workspace_path_map,
-                    workspace_entries=workspace_entries,
-                    bubble_map=bubble_map,
-                    composer_id_to_ws=composer_id_to_ws,
-                    invalid_workspace_ids=invalid_workspace_ids,
-                )
-                for row in composer_rows:
-                    cid = row["key"].split(":")[1]
-                    try:
-                        cd = json.loads(row["value"])
-                        pid = _determine_project_for_conversation(
-                            cd, cid, project_layouts_map,
-                            project_name_map, workspace_path_map,
-                            workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
-                        )
-                        mapped_ws = composer_id_to_ws.get(cid)
-                        if not pid and mapped_ws in invalid_workspace_ids:
-                            pid = invalid_workspace_aliases.get(mapped_ws)
-                        assigned = pid if pid else "global"
+                    # bubbleId rows for project detection
+                    bubble_rows = global_db.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+                    ).fetchall()
+                    bubble_map: dict[str, dict] = {}
+                    for row in bubble_rows:
+                        parts = row["key"].split(":")
+                        if len(parts) >= 3:
+                            bid = parts[2]
+                            try:
+                                b = json.loads(row["value"])
+                                if isinstance(b, dict):
+                                    bubble_map[bid] = b
+                            except Exception:
+                                pass
 
-                        headers = cd.get("fullConversationHeadersOnly") or []
-                        has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
-                        if not has_bubbles:
-                            continue
+                    # Process each composer
+                    invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                        composer_rows=composer_rows,
+                        project_layouts_map=project_layouts_map,
+                        project_name_map=project_name_map,
+                        workspace_path_map=workspace_path_map,
+                        workspace_entries=workspace_entries,
+                        bubble_map=bubble_map,
+                        composer_id_to_ws=composer_id_to_ws,
+                        invalid_workspace_ids=invalid_workspace_ids,
+                    )
+                    for row in composer_rows:
+                        cid = row["key"].split(":")[1]
+                        try:
+                            cd = json.loads(row["value"])
+                            pid = _determine_project_for_conversation(
+                                cd, cid, project_layouts_map,
+                                project_name_map, workspace_path_map,
+                                workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
+                            )
+                            mapped_ws = composer_id_to_ws.get(cid)
+                            if not pid and mapped_ws in invalid_workspace_ids:
+                                pid = invalid_workspace_aliases.get(mapped_ws)
+                            assigned = pid if pid else "global"
 
-                        conversation_map.setdefault(assigned, []).append({
-                            "composerId": cid,
-                            "name": cd.get("name") or f"Conversation {cid[:8]}",
-                            "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
-                            "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
-                        })
-                    except Exception:
-                        pass
+                            headers = cd.get("fullConversationHeadersOnly") or []
+                            has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
+                            if not has_bubbles:
+                                continue
 
-                global_db.close()
-            except Exception:
-                if global_db:
-                    global_db.close()
+                            conversation_map.setdefault(assigned, []).append({
+                                "composerId": cid,
+                                "name": cd.get("name") or f"Conversation {cid[:8]}",
+                                "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
+                                "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
         # Exclusion rules (optional)
         rules = current_app.config.get("EXCLUSION_RULES") or []
@@ -946,10 +957,10 @@ def get_workspace_tabs(workspace_id):
     if workspace_id.startswith("cli:"):
         return _get_cli_workspace_tabs(workspace_id)
 
-    global_db = None
+    # Global DB reads use `_open_global_db` (issue #17) — same lifecycle as
+    # list_workspaces; connection closes when the `with` block exits.
     try:
         workspace_path = resolve_workspace_path()
-        global_db_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
         response = {"tabs": []}
 
@@ -988,417 +999,409 @@ def get_workspace_tabs(workspace_id):
         code_block_diff_map: dict[str, list] = {}
         message_request_context_map: dict[str, list] = {}
 
-        if not os.path.isfile(global_db_path):
-            return jsonify({"error": "Global storage not found"}), 404
+        with _open_global_db(workspace_path) as (global_db, _):
+            if global_db is None:
+                return jsonify({"error": "Global storage not found"}), 404
 
-        workspace_display_name = _get_workspace_display_name(workspace_path, workspace_id)
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+            workspace_display_name = _get_workspace_display_name(workspace_path, workspace_id)
+            rules = current_app.config.get("EXCLUSION_RULES") or []
 
-        global_db = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
-        global_db.row_factory = sqlite3.Row
-
-        # Load bubbles
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
-            parts = row["key"].split(":")
-            if len(parts) >= 3:
-                bid = parts[2]
+            # Load bubbles
+            for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
+                parts = row["key"].split(":")
+                if len(parts) >= 3:
+                    bid = parts[2]
+                    try:
+                        b = json.loads(row["value"])
+                        if isinstance(b, dict):
+                            bubble_map[bid] = b
+                    except Exception:
+                        pass
+    
+            # Load codeBlockDiffs
+            for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
+                chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
+                if not chat_id:
+                    continue
                 try:
-                    b = json.loads(row["value"])
-                    if isinstance(b, dict):
-                        bubble_map[bid] = b
-                except Exception:
-                    pass
-
-        # Load codeBlockDiffs
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
-            chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
-            if not chat_id:
-                continue
-            try:
-                d = json.loads(row["value"])
-                code_block_diff_map.setdefault(chat_id, []).append({
-                    **d,
-                    "diffId": row["key"].split(":")[2] if len(row["key"].split(":")) > 2 else None,
-                })
-            except Exception:
-                pass
-
-        # Load messageRequestContext
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
-            parts = row["key"].split(":")
-            if len(parts) >= 3:
-                chat_id = parts[1]
-                context_id = parts[2]
-                try:
-                    ctx = json.loads(row["value"])
-                    message_request_context_map.setdefault(chat_id, []).append({
-                        **ctx,
-                        "contextId": context_id,
+                    d = json.loads(row["value"])
+                    code_block_diff_map.setdefault(chat_id, []).append({
+                        **d,
+                        "diffId": row["key"].split(":")[2] if len(row["key"].split(":")) > 2 else None,
                     })
                 except Exception:
                     pass
-
-        # Build projectLayoutsMap
-        project_layouts_map: dict[str, list] = {}
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
-            parts = row["key"].split(":")
-            if len(parts) >= 2:
-                cid = parts[1]
-                try:
-                    ctx = json.loads(row["value"])
-                    layouts = ctx.get("projectLayouts")
-                    if isinstance(layouts, list):
-                        project_layouts_map.setdefault(cid, [])
-                        for layout in layouts:
-                            if isinstance(layout, str):
-                                try:
-                                    obj = json.loads(layout)
-                                    if isinstance(obj, dict) and obj.get("rootPath"):
-                                        project_layouts_map[cid].append(obj["rootPath"])
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
-
-        # Get composer data entries with conversations
-        composer_rows = global_db.execute(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-            " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
-        ).fetchall()
-
-        invalid_workspace_aliases = _infer_invalid_workspace_aliases(
-            composer_rows=composer_rows,
-            project_layouts_map=project_layouts_map,
-            project_name_map=project_name_map,
-            workspace_path_map=workspace_path_map,
-            workspace_entries=workspace_entries,
-            bubble_map=bubble_map,
-            composer_id_to_ws=composer_id_to_ws,
-            invalid_workspace_ids=invalid_workspace_ids,
-        )
-
-        for row in composer_rows:
-            composer_id = row["key"].split(":")[1]
-            try:
-                cd = json.loads(row["value"])
-
-                # Determine project
-                pid = _determine_project_for_conversation(
-                    cd, composer_id, project_layouts_map,
-                    project_name_map, workspace_path_map,
-                    workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
-                )
-                mapped_ws = composer_id_to_ws.get(composer_id)
-                if not pid and mapped_ws in invalid_workspace_ids:
-                    pid = invalid_workspace_aliases.get(mapped_ws)
-                assigned = pid if pid else "global"
-
-                if assigned not in matching_ws_ids:
-                    continue
-
-                headers = cd.get("fullConversationHeadersOnly") or []
-
-                # Build bubbles
-                bubbles = []
-                for header in headers:
-                    bubble_id = header.get("bubbleId")
-                    bubble = bubble_map.get(bubble_id)
-                    if not bubble:
-                        continue
-
-                    is_user = header.get("type") == 1
-                    msg_type = "user" if is_user else "ai"
-                    text = extract_text_from_bubble(bubble)
-
-                    # Append messageRequestContext info
-                    context_text = ""
-                    for ctx in message_request_context_map.get(composer_id, []):
-                        if ctx.get("bubbleId") == bubble_id:
-                            if ctx.get("gitStatusRaw"):
-                                context_text += f"\n\n**Git Status:**\n```\n{ctx['gitStatusRaw']}\n```"
-                            tf = ctx.get("terminalFiles")
-                            if isinstance(tf, list) and tf:
-                                context_text += "\n\n**Terminal Files:**"
-                                for f in tf:
-                                    context_text += f"\n- {f.get('path', '')}"
-                            af = ctx.get("attachedFoldersListDirResults")
-                            if isinstance(af, list) and af:
-                                context_text += "\n\n**Attached Folders:**"
-                                for fld in af:
-                                    files = fld.get("files")
-                                    if isinstance(files, list) and files:
-                                        context_text += f"\n\n**Folder:** {fld.get('path', 'Unknown')}"
-                                        for fi in files:
-                                            context_text += f"\n- {fi.get('name', '')} ({fi.get('type', '')})"
-                            cr = ctx.get("cursorRules")
-                            if isinstance(cr, list) and cr:
-                                context_text += "\n\n**Cursor Rules:**"
-                                for rule in cr:
-                                    context_text += f"\n- {rule.get('name') or rule.get('description') or 'Rule'}"
-                            sc = ctx.get("summarizedComposers")
-                            if isinstance(sc, list) and sc:
-                                context_text += "\n\n**Related Conversations:**"
-                                for comp in sc:
-                                    context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
-
-                    full_text = text + context_text
-
-                    raw = bubble
-                    token_count = raw.get("tokenCount")
-
-                    # Tool calls
-                    tool_calls = None
-                    tfd = raw.get("toolFormerData")
-                    if isinstance(tfd, dict):
-                        tool_call = _parse_tool_call(tfd)
-                        tool_calls = [tool_call]
-
-                    # Thinking
-                    thinking = None
-                    thinking_duration_ms = None
-                    if raw.get("thinking"):
-                        thinking = raw["thinking"] if isinstance(raw["thinking"], str) else (raw["thinking"].get("text") if isinstance(raw["thinking"], dict) else None)
-                        thinking_duration_ms = raw.get("thinkingDurationMs")
-
-                    has_content = full_text.strip() or tool_calls or thinking
-                    if not has_content:
-                        continue
-
-                    # Context window
-                    ctx_window = raw.get("contextWindowStatusAtCreation") or {}
-                    ctx_pct = ctx_window.get("percentageRemainingFloat") or ctx_window.get("percentageRemaining")
-
-                    # Display text fallbacks
-                    display_text = full_text.strip()
-                    if not display_text and tool_calls:
-                        tc = tool_calls[0]
-                        display_text = f"**Tool: {tc.get('name', 'unknown')}**"
-                        if tc.get("status"):
-                            display_text += f" ({tc['status']})"
-                    if not display_text and thinking:
-                        display_text = thinking
-
-                    # Build metadata for BOTH user and AI bubbles
-                    bubble_meta = None
-                    if bubble:
-                        model_info = raw.get("modelInfo") or {}
-                        model_name = model_info.get("modelName")
-                        if model_name == "default":
-                            model_name = None
-
-                        if msg_type == "ai":
-                            tc_dict = token_count if isinstance(token_count, dict) else {}
-                            # Only include token counts if they are actually non-zero
-                            in_tok = tc_dict.get("inputTokens") or 0
-                            out_tok = tc_dict.get("outputTokens") or 0
-                            cached_tok = tc_dict.get("cachedTokens") or 0
-                            bubble_meta = {
-                                "modelName": model_name,
-                                "inputTokens": in_tok if in_tok > 0 else None,
-                                "outputTokens": out_tok if out_tok > 0 else None,
-                                "cachedTokens": cached_tok if cached_tok > 0 else None,
-                                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(raw["toolResults"]) if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None),
-                                "toolResults": raw.get("toolResults") if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None,
-                                "toolCalls": tool_calls,
-                                "thinking": thinking,
-                                "thinkingDurationMs": thinking_duration_ms,
-                                "contextWindowPercent": ctx_pct,
-                            }
-                        elif msg_type == "user":
-                            bubble_meta = {
-                                "modelName": model_name,
-                                "contextWindowPercent": ctx_pct,
-                            }
-                            # Context window token details from user bubbles
-                            if ctx_window:
-                                tokens_used = ctx_window.get("tokensUsed", 0)
-                                token_limit = ctx_window.get("tokenLimit", 0)
-                                if tokens_used > 0:
-                                    bubble_meta["contextTokensUsed"] = tokens_used
-                                if token_limit > 0:
-                                    bubble_meta["contextTokenLimit"] = token_limit
-
-                        # Strip None values and only include if something is set
-                        if bubble_meta:
-                            bubble_meta = {k: v for k, v in bubble_meta.items() if v is not None}
-                            if not bubble_meta:
-                                bubble_meta = None
-
-                    b_entry = {
-                        "type": msg_type,
-                        "text": display_text,
-                        "timestamp": to_epoch_ms(bubble.get("createdAt")) or to_epoch_ms(bubble.get("timestamp")) or int(datetime.now().timestamp() * 1000),
-                    }
-                    if bubble_meta:
-                        b_entry["metadata"] = bubble_meta
-                    bubbles.append(b_entry)
-
-                if not bubbles:
-                    continue
-
-                # Title
-                title = cd.get("name") or f"Conversation {composer_id[:8]}"
-                if not cd.get("name") and bubbles:
-                    first_msg = bubbles[0].get("text", "")
-                    if first_msg:
-                        first_lines = [l for l in first_msg.split("\n") if l.strip()]
-                        if first_lines:
-                            title = first_lines[0][:100]
-                            if len(title) == 100:
-                                title += "..."
-
-                # Early exclusion check — run before expensive metadata aggregation
-                _early_model_config = cd.get("modelConfig") or {}
-                _early_model_name = _early_model_config.get("modelName")
-                _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
-                if is_excluded_by_rules(rules, build_searchable_text(
-                    project_name=workspace_display_name,
-                    chat_title=title,
-                    model_names=_early_model_names,
-                )):
-                    continue
-
-                # Code block diffs as extra bubbles
-                diffs = code_block_diff_map.get(composer_id, [])
-                for diff in diffs:
-                    diff_text = format_tool_action(diff)
-                    if diff_text.strip():
-                        bubbles.append({
-                            "type": "ai",
-                            "text": f"**Tool Action:**{diff_text}",
-                            "timestamp": int(datetime.now().timestamp() * 1000),
+    
+            # Load messageRequestContext
+            for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+                parts = row["key"].split(":")
+                if len(parts) >= 3:
+                    chat_id = parts[1]
+                    context_id = parts[2]
+                    try:
+                        ctx = json.loads(row["value"])
+                        message_request_context_map.setdefault(chat_id, []).append({
+                            **ctx,
+                            "contextId": context_id,
                         })
-
-                bubbles.sort(key=lambda b: b.get("timestamp") or 0)
-
-                # Response time calculation
-                last_user_ts = None
-                for b in bubbles:
-                    if b["type"] == "user":
-                        last_user_ts = b.get("timestamp")
-                    elif b["type"] == "ai" and last_user_ts is not None:
-                        ts = b.get("timestamp")
-                        if ts and ts > last_user_ts:
-                            meta = b.setdefault("metadata", {})
-                            meta["responseTimeMs"] = ts - last_user_ts
-
-                # Aggregate metadata
-                total_input = 0
-                total_output = 0
-                total_cached = 0
-                total_response_ms = 0
-                total_cost = 0.0
-                total_tool_calls = 0
-                total_thinking_ms = 0
-                models_set = set()
-                for b in bubbles:
-                    m = b.get("metadata") or {}
-                    if m.get("inputTokens"):
-                        total_input += m["inputTokens"]
-                    if m.get("outputTokens"):
-                        total_output += m["outputTokens"]
-                    if m.get("cachedTokens"):
-                        total_cached += m["cachedTokens"]
-                    if m.get("responseTimeMs"):
-                        total_response_ms += m["responseTimeMs"]
-                    if m.get("cost") is not None:
-                        total_cost += m["cost"]
-                    if m.get("modelName"):
-                        models_set.add(m["modelName"])
-                    if m.get("toolCalls"):
-                        total_tool_calls += len(m["toolCalls"])
-                    if m.get("thinkingDurationMs"):
-                        total_thinking_ms += m["thinkingDurationMs"]
-
-                # Composer-level cost fallback
-                usage = cd.get("usageData") or {}
-                composer_cost = usage.get("cost") or usage.get("estimatedCost")
-                if isinstance(composer_cost, (int, float)) and total_cost == 0:
-                    total_cost = composer_cost
-
-                # Composer-level lines/files changed
-                lines_added = cd.get("totalLinesAdded", 0)
-                lines_removed = cd.get("totalLinesRemoved", 0)
-                files_added = cd.get("addedFiles", 0)
-                files_removed = cd.get("removedFiles", 0)
-
-                # Context window progression from user bubbles
-                max_ctx_tokens = 0
-                ctx_token_limit = 0
-                for b in bubbles:
-                    m = b.get("metadata") or {}
-                    if m.get("contextTokensUsed", 0) > max_ctx_tokens:
-                        max_ctx_tokens = m["contextTokensUsed"]
-                    if m.get("contextTokenLimit", 0) > ctx_token_limit:
-                        ctx_token_limit = m["contextTokenLimit"]
-
-                tab_meta = None
-                has_any = any([total_input, total_output, total_cached, total_response_ms,
-                              total_cost, models_set, total_tool_calls, total_thinking_ms,
-                              lines_added, lines_removed, files_added, files_removed,
-                              max_ctx_tokens])
-                if has_any:
-                    tab_meta_raw = {
-                        "totalInputTokens": total_input or None,
-                        "totalOutputTokens": total_output or None,
-                        "totalCachedTokens": total_cached or None,
-                        "modelsUsed": list(models_set) if models_set else None,
-                        "totalResponseTimeMs": total_response_ms or None,
-                        "totalCost": total_cost if total_cost > 0 else None,
-                        "totalToolCalls": total_tool_calls or None,
-                        "totalThinkingDurationMs": total_thinking_ms or None,
-                        "totalLinesAdded": lines_added if lines_added else None,
-                        "totalLinesRemoved": lines_removed if lines_removed else None,
-                        "totalFilesAdded": files_added if files_added else None,
-                        "totalFilesRemoved": files_removed if files_removed else None,
-                        "maxContextTokensUsed": max_ctx_tokens if max_ctx_tokens else None,
-                        "contextTokenLimit": ctx_token_limit if ctx_token_limit else None,
+                    except Exception:
+                        pass
+    
+            # Build projectLayoutsMap
+            project_layouts_map: dict[str, list] = {}
+            for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+                parts = row["key"].split(":")
+                if len(parts) >= 2:
+                    cid = parts[1]
+                    try:
+                        ctx = json.loads(row["value"])
+                        layouts = ctx.get("projectLayouts")
+                        if isinstance(layouts, list):
+                            project_layouts_map.setdefault(cid, [])
+                            for layout in layouts:
+                                if isinstance(layout, str):
+                                    try:
+                                        obj = json.loads(layout)
+                                        if isinstance(obj, dict) and obj.get("rootPath"):
+                                            project_layouts_map[cid].append(obj["rootPath"])
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+    
+            # Get composer data entries with conversations
+            composer_rows = global_db.execute(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+                " AND value LIKE '%fullConversationHeadersOnly%'"
+                " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
+            ).fetchall()
+    
+            invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                composer_rows=composer_rows,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map=bubble_map,
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+            )
+    
+            for row in composer_rows:
+                composer_id = row["key"].split(":")[1]
+                try:
+                    cd = json.loads(row["value"])
+    
+                    # Determine project
+                    pid = _determine_project_for_conversation(
+                        cd, composer_id, project_layouts_map,
+                        project_name_map, workspace_path_map,
+                        workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
+                    )
+                    mapped_ws = composer_id_to_ws.get(composer_id)
+                    if not pid and mapped_ws in invalid_workspace_ids:
+                        pid = invalid_workspace_aliases.get(mapped_ws)
+                    assigned = pid if pid else "global"
+    
+                    if assigned not in matching_ws_ids:
+                        continue
+    
+                    headers = cd.get("fullConversationHeadersOnly") or []
+    
+                    # Build bubbles
+                    bubbles = []
+                    for header in headers:
+                        bubble_id = header.get("bubbleId")
+                        bubble = bubble_map.get(bubble_id)
+                        if not bubble:
+                            continue
+    
+                        is_user = header.get("type") == 1
+                        msg_type = "user" if is_user else "ai"
+                        text = extract_text_from_bubble(bubble)
+    
+                        # Append messageRequestContext info
+                        context_text = ""
+                        for ctx in message_request_context_map.get(composer_id, []):
+                            if ctx.get("bubbleId") == bubble_id:
+                                if ctx.get("gitStatusRaw"):
+                                    context_text += f"\n\n**Git Status:**\n```\n{ctx['gitStatusRaw']}\n```"
+                                tf = ctx.get("terminalFiles")
+                                if isinstance(tf, list) and tf:
+                                    context_text += "\n\n**Terminal Files:**"
+                                    for f in tf:
+                                        context_text += f"\n- {f.get('path', '')}"
+                                af = ctx.get("attachedFoldersListDirResults")
+                                if isinstance(af, list) and af:
+                                    context_text += "\n\n**Attached Folders:**"
+                                    for fld in af:
+                                        files = fld.get("files")
+                                        if isinstance(files, list) and files:
+                                            context_text += f"\n\n**Folder:** {fld.get('path', 'Unknown')}"
+                                            for fi in files:
+                                                context_text += f"\n- {fi.get('name', '')} ({fi.get('type', '')})"
+                                cr = ctx.get("cursorRules")
+                                if isinstance(cr, list) and cr:
+                                    context_text += "\n\n**Cursor Rules:**"
+                                    for rule in cr:
+                                        context_text += f"\n- {rule.get('name') or rule.get('description') or 'Rule'}"
+                                sc = ctx.get("summarizedComposers")
+                                if isinstance(sc, list) and sc:
+                                    context_text += "\n\n**Related Conversations:**"
+                                    for comp in sc:
+                                        context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
+    
+                        full_text = text + context_text
+    
+                        raw = bubble
+                        token_count = raw.get("tokenCount")
+    
+                        # Tool calls
+                        tool_calls = None
+                        tfd = raw.get("toolFormerData")
+                        if isinstance(tfd, dict):
+                            tool_call = _parse_tool_call(tfd)
+                            tool_calls = [tool_call]
+    
+                        # Thinking
+                        thinking = None
+                        thinking_duration_ms = None
+                        if raw.get("thinking"):
+                            thinking = raw["thinking"] if isinstance(raw["thinking"], str) else (raw["thinking"].get("text") if isinstance(raw["thinking"], dict) else None)
+                            thinking_duration_ms = raw.get("thinkingDurationMs")
+    
+                        has_content = full_text.strip() or tool_calls or thinking
+                        if not has_content:
+                            continue
+    
+                        # Context window
+                        ctx_window = raw.get("contextWindowStatusAtCreation") or {}
+                        ctx_pct = ctx_window.get("percentageRemainingFloat") or ctx_window.get("percentageRemaining")
+    
+                        # Display text fallbacks
+                        display_text = full_text.strip()
+                        if not display_text and tool_calls:
+                            tc = tool_calls[0]
+                            display_text = f"**Tool: {tc.get('name', 'unknown')}**"
+                            if tc.get("status"):
+                                display_text += f" ({tc['status']})"
+                        if not display_text and thinking:
+                            display_text = thinking
+    
+                        # Build metadata for BOTH user and AI bubbles
+                        bubble_meta = None
+                        if bubble:
+                            model_info = raw.get("modelInfo") or {}
+                            model_name = model_info.get("modelName")
+                            if model_name == "default":
+                                model_name = None
+    
+                            if msg_type == "ai":
+                                tc_dict = token_count if isinstance(token_count, dict) else {}
+                                # Only include token counts if they are actually non-zero
+                                in_tok = tc_dict.get("inputTokens") or 0
+                                out_tok = tc_dict.get("outputTokens") or 0
+                                cached_tok = tc_dict.get("cachedTokens") or 0
+                                bubble_meta = {
+                                    "modelName": model_name,
+                                    "inputTokens": in_tok if in_tok > 0 else None,
+                                    "outputTokens": out_tok if out_tok > 0 else None,
+                                    "cachedTokens": cached_tok if cached_tok > 0 else None,
+                                    "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(raw["toolResults"]) if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None),
+                                    "toolResults": raw.get("toolResults") if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None,
+                                    "toolCalls": tool_calls,
+                                    "thinking": thinking,
+                                    "thinkingDurationMs": thinking_duration_ms,
+                                    "contextWindowPercent": ctx_pct,
+                                }
+                            elif msg_type == "user":
+                                bubble_meta = {
+                                    "modelName": model_name,
+                                    "contextWindowPercent": ctx_pct,
+                                }
+                                # Context window token details from user bubbles
+                                if ctx_window:
+                                    tokens_used = ctx_window.get("tokensUsed", 0)
+                                    token_limit = ctx_window.get("tokenLimit", 0)
+                                    if tokens_used > 0:
+                                        bubble_meta["contextTokensUsed"] = tokens_used
+                                    if token_limit > 0:
+                                        bubble_meta["contextTokenLimit"] = token_limit
+    
+                            # Strip None values and only include if something is set
+                            if bubble_meta:
+                                bubble_meta = {k: v for k, v in bubble_meta.items() if v is not None}
+                                if not bubble_meta:
+                                    bubble_meta = None
+    
+                        b_entry = {
+                            "type": msg_type,
+                            "text": display_text,
+                            "timestamp": to_epoch_ms(bubble.get("createdAt")) or to_epoch_ms(bubble.get("timestamp")) or int(datetime.now().timestamp() * 1000),
+                        }
+                        if bubble_meta:
+                            b_entry["metadata"] = bubble_meta
+                        bubbles.append(b_entry)
+    
+                    if not bubbles:
+                        continue
+    
+                    # Title
+                    title = cd.get("name") or f"Conversation {composer_id[:8]}"
+                    if not cd.get("name") and bubbles:
+                        first_msg = bubbles[0].get("text", "")
+                        if first_msg:
+                            first_lines = [l for l in first_msg.split("\n") if l.strip()]
+                            if first_lines:
+                                title = first_lines[0][:100]
+                                if len(title) == 100:
+                                    title += "..."
+    
+                    # Early exclusion check — run before expensive metadata aggregation
+                    _early_model_config = cd.get("modelConfig") or {}
+                    _early_model_name = _early_model_config.get("modelName")
+                    _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
+                    if is_excluded_by_rules(rules, build_searchable_text(
+                        project_name=workspace_display_name,
+                        chat_title=title,
+                        model_names=_early_model_names,
+                    )):
+                        continue
+    
+                    # Code block diffs as extra bubbles
+                    diffs = code_block_diff_map.get(composer_id, [])
+                    for diff in diffs:
+                        diff_text = format_tool_action(diff)
+                        if diff_text.strip():
+                            bubbles.append({
+                                "type": "ai",
+                                "text": f"**Tool Action:**{diff_text}",
+                                "timestamp": int(datetime.now().timestamp() * 1000),
+                            })
+    
+                    bubbles.sort(key=lambda b: b.get("timestamp") or 0)
+    
+                    # Response time calculation
+                    last_user_ts = None
+                    for b in bubbles:
+                        if b["type"] == "user":
+                            last_user_ts = b.get("timestamp")
+                        elif b["type"] == "ai" and last_user_ts is not None:
+                            ts = b.get("timestamp")
+                            if ts and ts > last_user_ts:
+                                meta = b.setdefault("metadata", {})
+                                meta["responseTimeMs"] = ts - last_user_ts
+    
+                    # Aggregate metadata
+                    total_input = 0
+                    total_output = 0
+                    total_cached = 0
+                    total_response_ms = 0
+                    total_cost = 0.0
+                    total_tool_calls = 0
+                    total_thinking_ms = 0
+                    models_set = set()
+                    for b in bubbles:
+                        m = b.get("metadata") or {}
+                        if m.get("inputTokens"):
+                            total_input += m["inputTokens"]
+                        if m.get("outputTokens"):
+                            total_output += m["outputTokens"]
+                        if m.get("cachedTokens"):
+                            total_cached += m["cachedTokens"]
+                        if m.get("responseTimeMs"):
+                            total_response_ms += m["responseTimeMs"]
+                        if m.get("cost") is not None:
+                            total_cost += m["cost"]
+                        if m.get("modelName"):
+                            models_set.add(m["modelName"])
+                        if m.get("toolCalls"):
+                            total_tool_calls += len(m["toolCalls"])
+                        if m.get("thinkingDurationMs"):
+                            total_thinking_ms += m["thinkingDurationMs"]
+    
+                    # Composer-level cost fallback
+                    usage = cd.get("usageData") or {}
+                    composer_cost = usage.get("cost") or usage.get("estimatedCost")
+                    if isinstance(composer_cost, (int, float)) and total_cost == 0:
+                        total_cost = composer_cost
+    
+                    # Composer-level lines/files changed
+                    lines_added = cd.get("totalLinesAdded", 0)
+                    lines_removed = cd.get("totalLinesRemoved", 0)
+                    files_added = cd.get("addedFiles", 0)
+                    files_removed = cd.get("removedFiles", 0)
+    
+                    # Context window progression from user bubbles
+                    max_ctx_tokens = 0
+                    ctx_token_limit = 0
+                    for b in bubbles:
+                        m = b.get("metadata") or {}
+                        if m.get("contextTokensUsed", 0) > max_ctx_tokens:
+                            max_ctx_tokens = m["contextTokensUsed"]
+                        if m.get("contextTokenLimit", 0) > ctx_token_limit:
+                            ctx_token_limit = m["contextTokenLimit"]
+    
+                    tab_meta = None
+                    has_any = any([total_input, total_output, total_cached, total_response_ms,
+                                  total_cost, models_set, total_tool_calls, total_thinking_ms,
+                                  lines_added, lines_removed, files_added, files_removed,
+                                  max_ctx_tokens])
+                    if has_any:
+                        tab_meta_raw = {
+                            "totalInputTokens": total_input or None,
+                            "totalOutputTokens": total_output or None,
+                            "totalCachedTokens": total_cached or None,
+                            "modelsUsed": list(models_set) if models_set else None,
+                            "totalResponseTimeMs": total_response_ms or None,
+                            "totalCost": total_cost if total_cost > 0 else None,
+                            "totalToolCalls": total_tool_calls or None,
+                            "totalThinkingDurationMs": total_thinking_ms or None,
+                            "totalLinesAdded": lines_added if lines_added else None,
+                            "totalLinesRemoved": lines_removed if lines_removed else None,
+                            "totalFilesAdded": files_added if files_added else None,
+                            "totalFilesRemoved": files_removed if files_removed else None,
+                            "maxContextTokensUsed": max_ctx_tokens if max_ctx_tokens else None,
+                            "contextTokenLimit": ctx_token_limit if ctx_token_limit else None,
+                        }
+                        tab_meta = {k: v for k, v in tab_meta_raw.items() if v is not None}
+    
+                    # Model config from composer data
+                    model_config = cd.get("modelConfig") or {}
+                    model_name_from_config = model_config.get("modelName")
+                    if model_name_from_config and model_name_from_config != "default":
+                        if not tab_meta:
+                            tab_meta = {}
+                        if not tab_meta.get("modelsUsed"):
+                            tab_meta["modelsUsed"] = [model_name_from_config]
+                        elif model_name_from_config not in tab_meta["modelsUsed"]:
+                            tab_meta["modelsUsed"].insert(0, model_name_from_config)
+    
+                    tab = {
+                        "id": composer_id,
+                        "title": title,
+                        "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
+                        "bubbles": [{
+                            "type": b["type"],
+                            "text": b.get("text", ""),
+                            "timestamp": b.get("timestamp", 0),
+                            **({"metadata": b["metadata"]} if b.get("metadata") else {}),
+                        } for b in bubbles],
+                        "codeBlockDiffs": diffs,
                     }
-                    tab_meta = {k: v for k, v in tab_meta_raw.items() if v is not None}
-
-                # Model config from composer data
-                model_config = cd.get("modelConfig") or {}
-                model_name_from_config = model_config.get("modelName")
-                if model_name_from_config and model_name_from_config != "default":
-                    if not tab_meta:
-                        tab_meta = {}
-                    if not tab_meta.get("modelsUsed"):
-                        tab_meta["modelsUsed"] = [model_name_from_config]
-                    elif model_name_from_config not in tab_meta["modelsUsed"]:
-                        tab_meta["modelsUsed"].insert(0, model_name_from_config)
-
-                tab = {
-                    "id": composer_id,
-                    "title": title,
-                    "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
-                    "bubbles": [{
-                        "type": b["type"],
-                        "text": b.get("text", ""),
-                        "timestamp": b.get("timestamp", 0),
-                        **({"metadata": b["metadata"]} if b.get("metadata") else {}),
-                    } for b in bubbles],
-                    "codeBlockDiffs": diffs,
-                }
-                if tab_meta:
-                    tab["metadata"] = tab_meta
-
-                response["tabs"].append(tab)
-
-            except Exception as e:
-                print(f"Error parsing composer data for {composer_id}: {e}")
-
-        if global_db:
-            global_db.close()
-            global_db = None
-
-        # Sort tabs by timestamp descending (newest first)
-        response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
-
-        return jsonify(response)
+                    if tab_meta:
+                        tab["metadata"] = tab_meta
+    
+                    response["tabs"].append(tab)
+    
+                except Exception as e:
+                    print(f"Error parsing composer data for {composer_id}: {e}")
+    
+            # Sort tabs by timestamp descending (newest first)
+            response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
+    
+            return jsonify(response)
 
     except Exception as e:
         print(f"Failed to get workspace tabs: {e}")
-        if global_db:
-            global_db.close()
         return jsonify({"error": "Failed to get workspace tabs"}), 500
