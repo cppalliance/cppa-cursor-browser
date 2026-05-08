@@ -58,7 +58,12 @@ def get_default_workspace_path() -> str:
 
 
 def resolve_workspace_path() -> str:
-    """Return the effective workspace path (override > env var > default)."""
+    """Return the effective workspace path (override > env var > default).
+
+    Override comes from POST /api/set-workspace (validated). ``WORKSPACE_PATH``
+    is only tilde-expanded — trusted-operator escape hatch, not the same checks
+    as the API (issue #15).
+    """
     if _workspace_path_override:
         return expand_tilde_path(_workspace_path_override)
     env_path = os.environ.get("WORKSPACE_PATH", "").strip()

@@ -138,6 +138,8 @@ The application automatically detects your Cursor workspace storage location:
 
 To override, set the `WORKSPACE_PATH` environment variable or use the Configuration page in the web UI.
 
+Paths submitted through **`POST /api/set-workspace`** (and **`POST /api/validate-path`**) are validated the same way: canonical resolution (`realpath`), directory checks, and Cursor workspace markers (`state.vscdb` under immediate subdirectories). The **`WORKSPACE_PATH`** environment variable is only tilde-expanded — it is a **trusted-operator** escape hatch for automation and known-good paths, not a substitute for those API checks when untrusted input matters.
+
 Cursor CLI agent sessions are read from `~/.cursor/chats/` (the default path used by the `cursor agent` CLI). Override with the `CLI_CHATS_PATH` environment variable.
 
 ## Project Structure
