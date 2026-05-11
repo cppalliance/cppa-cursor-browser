@@ -33,6 +33,7 @@ from utils.path_helpers import (
 )
 from utils.text_extract import extract_text_from_bubble, format_tool_action
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from models import Composer, SchemaError
 
 bp = Blueprint("workspaces", __name__)
 
@@ -600,9 +601,15 @@ def list_workspaces():
                     for row in composer_rows:
                         cid = row["key"].split(":")[1]
                         try:
-                            cd = json.loads(row["value"])
+                            composer = Composer.from_dict(json.loads(row["value"]), composer_id=cid)
+                        except SchemaError as e:
+                            print(f"Schema drift in composer {cid}: {e}")
+                            continue
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            continue
+                        try:
                             pid = _determine_project_for_conversation(
-                                cd, cid, project_layouts_map,
+                                composer.raw, cid, project_layouts_map,
                                 project_name_map, workspace_path_map,
                                 workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
                             )
@@ -611,16 +618,16 @@ def list_workspaces():
                                 pid = invalid_workspace_aliases.get(mapped_ws)
                             assigned = pid if pid else "global"
 
-                            headers = cd.get("fullConversationHeadersOnly") or []
+                            headers = composer.full_conversation_headers_only
                             has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
                             if not has_bubbles:
                                 continue
 
                             conversation_map.setdefault(assigned, []).append({
                                 "composerId": cid,
-                                "name": cd.get("name") or f"Conversation {cid[:8]}",
-                                "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
-                                "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
+                                "name": composer.name or f"Conversation {cid[:8]}",
+                                "lastUpdatedAt": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or 0,
+                                "createdAt": to_epoch_ms(composer.created_at) or 0,
                             })
                         except Exception:
                             pass

@@ -18,6 +18,7 @@ from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.cli_chat_reader import list_cli_projects, traverse_blobs, messages_to_bubbles
+from models import Composer, SchemaError
 
 bp = Blueprint("search", __name__)
 
@@ -161,17 +162,24 @@ def search():
                 for row in composer_rows:
                     composer_id = row["key"].split(":")[1]
                     try:
-                        cd = json.loads(row["value"])
-                        headers = cd.get("fullConversationHeadersOnly") or []
+                        composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
+                    except SchemaError as e:
+                        print(f"Schema drift in composer {composer_id}: {e}")
+                        continue
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    try:
+                        cd = composer.raw
+                        headers = composer.full_conversation_headers_only
                         if not headers:
                             continue
 
-                        title = cd.get("name") or ""
+                        title = composer.name or ""
                         ws_id = composer_id_to_ws.get(composer_id, "global")
                         ws_name = ws_id_to_name.get(ws_id)
                         project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
 
-                        model_config = cd.get("modelConfig") or {}
+                        model_config = composer.model_config
                         model_name = model_config.get("modelName")
                         model_names = [model_name] if model_name and model_name != "default" else None
 
@@ -243,7 +251,7 @@ def search():
                                 "workspaceFolder": ws_name,
                                 "chatId": composer_id,
                                 "chatTitle": title,
-                                "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
+                                "timestamp": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or int(datetime.now().timestamp() * 1000),
                                 "matchingText": matching_text,
                                 "type": "composer",
                             })
