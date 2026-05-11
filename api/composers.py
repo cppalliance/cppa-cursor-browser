@@ -55,6 +55,12 @@ def list_composers():
 
                 if row and row[0]:
                     data = json.loads(row[0])
+                    if not isinstance(data, dict):
+                        raise SchemaError(
+                            "WorkspaceComposers",
+                            "composer.composerData",
+                            hint=f"expected object, got {type(data).__name__}",
+                        )
                     if "allComposers" not in data:
                         raise SchemaError("WorkspaceComposers", "allComposers")
                     all_composers = data.get("allComposers")

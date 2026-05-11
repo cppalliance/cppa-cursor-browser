@@ -392,6 +392,43 @@ class TestTraverseBlobs(unittest.TestCase):
         result = traverse_blobs(path)
         self.assertEqual(result, [])
 
+    def _write_raw_meta(self, name: str, raw_meta_value: str) -> str:
+        """Build a minimal store.db with a hand-rolled meta row 0 value."""
+        path = self._db(name)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
+        conn.execute("INSERT INTO meta VALUES ('0', ?)", (raw_meta_value,))
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_malformed_hex_meta_returns_empty(self):
+        """Regression: bad hex must not escape as ValueError."""
+        # 'zz' is not valid hex — bytes.fromhex() raises ValueError.
+        path = self._write_raw_meta("bad_hex.db", "zzzz")
+        self.assertEqual(traverse_blobs(path), [])
+
+    def test_non_utf8_meta_returns_empty(self):
+        """Regression: non-UTF-8 bytes must not escape as UnicodeDecodeError."""
+        # 0xff 0xfe is invalid as UTF-8 — .decode('utf-8') raises.
+        path = self._write_raw_meta("bad_utf8.db", "fffe")
+        self.assertEqual(traverse_blobs(path), [])
+
+    def test_invalid_json_meta_returns_empty(self):
+        """Regression: malformed JSON must not escape as JSONDecodeError."""
+        # Hex-encoded UTF-8 garbage that isn't a JSON object: "not json"
+        garbage = "not json".encode("utf-8").hex()
+        path = self._write_raw_meta("bad_json.db", garbage)
+        self.assertEqual(traverse_blobs(path), [])
+
+    def test_non_dict_meta_returns_empty(self):
+        """Regression: top-level non-object must surface as SchemaError + empty."""
+        # Hex-encoded JSON list — passes hex/utf8/json, fails dict guard.
+        list_payload = json.dumps(["not", "a", "dict"]).encode("utf-8").hex()
+        path = self._write_raw_meta("non_dict.db", list_payload)
+        self.assertEqual(traverse_blobs(path), [])
+
 
 # ---------------------------------------------------------------------------
 # iter_sessions and list_cli_projects

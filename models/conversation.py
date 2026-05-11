@@ -12,13 +12,12 @@ from models.errors import SchemaError
 class Composer:
     """A Cursor conversation (a.k.a. "composer") row.
 
-    Required fields per the schema-validation contract:
+    Required fields per the schema-validation contract (issue #24):
       - ``fullConversationHeadersOnly`` — without this, a composer cannot be
-        rendered (no message order is recoverable). This is the only hard
-        requirement: real Cursor data legitimately omits ``createdAt`` for
-        older composers (the existing call sites already fall back to
-        ``lastUpdatedAt`` and then to epoch zero), so it is captured but
-        not gated on.
+        rendered (no message order is recoverable).
+      - ``createdAt`` — Cursor writes this on every composer (verified
+        17/17 against a live workspaceStorage). A missing value is the
+        kind of drift this layer exists to surface.
 
     The composer ID is intentionally passed in as a constructor argument
     rather than read from ``raw`` because Cursor stores it in the row key
@@ -35,12 +34,20 @@ class Composer:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, composer_id: str) -> "Composer":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "Composer",
+                "composerData",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
         if not composer_id:
             raise SchemaError("Composer", "composerId", hint="empty composer ID")
         if "fullConversationHeadersOnly" not in raw:
             raise SchemaError("Composer", "fullConversationHeadersOnly")
+        if "createdAt" not in raw:
+            raise SchemaError("Composer", "createdAt")
 
-        headers = raw.get("fullConversationHeadersOnly") or []
+        headers = raw.get("fullConversationHeadersOnly")
         if not isinstance(headers, list):
             raise SchemaError(
                 "Composer",
@@ -78,6 +85,12 @@ class Bubble:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, bubble_id: str) -> "Bubble":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "Bubble",
+                "bubble",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
         if not bubble_id:
             raise SchemaError("Bubble", "bubbleId", hint="empty bubble ID")
         return cls(bubble_id=bubble_id, raw=raw)

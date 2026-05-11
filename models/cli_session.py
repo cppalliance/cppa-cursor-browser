@@ -27,6 +27,12 @@ class CliSessionMeta:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "CliSessionMeta":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "CliSessionMeta",
+                "meta",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
         latest = raw.get("latestRootBlobId")
         if not latest:
             raise SchemaError("CliSessionMeta", "latestRootBlobId")

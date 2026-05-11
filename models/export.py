@@ -27,13 +27,24 @@ class ExportEntry:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ExportEntry":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "ExportEntry",
+                "entry",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
         for required in ("log_id", "title", "workspace"):
-            if required not in raw or raw[required] in (None, ""):
-                raise SchemaError("ExportEntry", required)
+            value = raw.get(required)
+            if not isinstance(value, str) or value == "":
+                raise SchemaError(
+                    "ExportEntry",
+                    required,
+                    hint=f"expected non-empty str, got {type(value).__name__}",
+                )
         return cls(
-            log_id=str(raw["log_id"]),
-            title=str(raw["title"]),
-            workspace=str(raw["workspace"]),
+            log_id=raw["log_id"],
+            title=raw["title"],
+            workspace=raw["workspace"],
             created_at=raw.get("created_at"),
             updated_at=raw.get("updated_at"),
             raw=raw,

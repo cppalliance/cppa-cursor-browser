@@ -110,13 +110,14 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertEqual(cm.exception.model, "Composer")
         self.assertEqual(cm.exception.field, "fullConversationHeadersOnly")
 
-    def test_composer_missing_created_at_is_tolerated(self) -> None:
-        # Real Cursor data legitimately omits createdAt for older composers;
-        # call sites already fall back to lastUpdatedAt and then to epoch zero.
+    def test_missing_created_at_raises(self) -> None:
+        # Issue #24 lists createdAt as a required field. A live workspaceStorage
+        # check confirmed 17/17 composers carry it, so a missing value is real
+        # schema drift (not benign older-record absence).
         bad = {k: v for k, v in GOOD_COMPOSER_RAW.items() if k != "createdAt"}
-        composer = Composer.from_dict(bad, composer_id="cid-001")
-        self.assertIsNone(composer.created_at)
-        self.assertEqual(composer.last_updated_at, 1_715_000_500_000)
+        with self.assertRaises(SchemaError) as cm:
+            Composer.from_dict(bad, composer_id="cid-001")
+        self.assertEqual(cm.exception.field, "createdAt")
 
     def test_empty_composer_id_raises(self) -> None:
         with self.assertRaises(SchemaError) as cm:
@@ -129,6 +130,21 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             Composer.from_dict(bad, composer_id="cid-001")
         self.assertIn("expected list", str(cm.exception))
 
+    def test_headers_falsy_non_list_raises(self) -> None:
+        # Regression: CodeRabbit caught that ``raw.get(...) or []`` silently
+        # coerced None / "" / 0 / False to an empty list, bypassing the
+        # isinstance gate. Each falsy non-list value must now raise.
+        for bad_value in (None, "", 0, False):
+            bad = dict(GOOD_COMPOSER_RAW, fullConversationHeadersOnly=bad_value)
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_value!r}"):
+                Composer.from_dict(bad, composer_id="cid-001")
+
+    def test_headers_empty_list_is_valid(self) -> None:
+        # Empty list must still pass — a composer with no messages is legal.
+        ok = dict(GOOD_COMPOSER_RAW, fullConversationHeadersOnly=[])
+        composer = Composer.from_dict(ok, composer_id="cid-001")
+        self.assertEqual(composer.full_conversation_headers_only, [])
+
     def test_bubble_empty_id_raises(self) -> None:
         with self.assertRaises(SchemaError):
             Bubble.from_dict({"text": "hi"}, bubble_id="")
@@ -138,6 +154,16 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             ExportEntry.from_dict({"title": "x", "workspace": "w"})
         self.assertEqual(cm.exception.field, "log_id")
 
+    def test_export_entry_non_string_required_raises(self) -> None:
+        # Regression: CodeRabbit caught that ``str(raw["log_id"])`` silently
+        # coerced ints, UUIDs, lists, etc. into strings, masking schema drift.
+        # Each required field must now be an actual non-empty string.
+        bad_values: tuple[object, ...] = (123, None, "", [], {"x": 1}, True)
+        for bad_value in bad_values:
+            bad: dict[str, object] = {"log_id": bad_value, "title": "x", "workspace": "w"}
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_value!r}"):
+                ExportEntry.from_dict(bad)
+
     def test_schema_error_inherits_value_error(self) -> None:
         # call sites that catch ValueError still trap SchemaError (back-compat)
         try:
@@ -145,6 +171,24 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         except ValueError:
             return
         self.fail("SchemaError did not propagate as ValueError")
+
+    def test_non_dict_payload_raises_schema_error(self) -> None:
+        # Regression: CodeRabbit caught that a malformed top-level payload
+        # (list, string, None) would previously trip AttributeError on
+        # ``raw.get(...)`` and get swallowed by surrounding ``except Exception``.
+        # Each ``from_dict`` now surfaces it as SchemaError so drift stays loud.
+        bad_payloads: tuple[object, ...] = ([], "not a dict", 42, None, ("a", "b"))
+        for bad in bad_payloads:
+            with self.assertRaises(SchemaError, msg=f"failed for {type(bad).__name__}"):
+                Composer.from_dict(bad, composer_id="cid-001")  # type: ignore[arg-type]
+            with self.assertRaises(SchemaError):
+                CliSessionMeta.from_dict(bad)  # type: ignore[arg-type]
+            with self.assertRaises(SchemaError):
+                Workspace.from_dict(bad, workspace_id="ws-1")  # type: ignore[arg-type]
+            with self.assertRaises(SchemaError):
+                ExportEntry.from_dict(bad)  # type: ignore[arg-type]
+            with self.assertRaises(SchemaError):
+                Bubble.from_dict(bad, bubble_id="b-1")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

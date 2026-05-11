@@ -25,6 +25,12 @@ class Workspace:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, workspace_id: str) -> "Workspace":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "Workspace",
+                "workspace.json",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
         if not workspace_id:
             raise SchemaError("Workspace", "workspaceId", hint="empty workspace ID")
         folder = raw.get("folder")
