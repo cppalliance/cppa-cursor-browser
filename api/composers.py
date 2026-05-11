@@ -82,8 +82,8 @@ def list_composers():
                         composers.append(c)
             except SchemaError as e:
                 print(f"Schema drift in {db_path}: {e}")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Failed reading composers from {db_path}: {e}")
 
         composers.sort(key=lambda c: to_epoch_ms(c.get("lastUpdatedAt")), reverse=True)
         return jsonify(composers)
