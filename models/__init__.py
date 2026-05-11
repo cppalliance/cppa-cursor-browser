@@ -9,7 +9,7 @@ critical fields are missing, so drift becomes loud instead of silent.
 """
 
 from models.cli_session import CliSessionMeta
-from models.conversation import Bubble, Composer
+from models.conversation import Bubble, Composer, WorkspaceLocalComposer
 from models.errors import SchemaError
 from models.export import ExportEntry
 from models.workspace import Workspace
@@ -21,4 +21,5 @@ __all__ = [
     "ExportEntry",
     "SchemaError",
     "Workspace",
+    "WorkspaceLocalComposer",
 ]

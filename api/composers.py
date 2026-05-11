@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
-from models import SchemaError
+from models import SchemaError, WorkspaceLocalComposer
 
 bp = Blueprint("composers", __name__)
 
@@ -71,7 +71,10 @@ def list_composers():
                             hint=f"expected list, got {type(all_composers).__name__}",
                         )
                     for c in all_composers:
-                        if not isinstance(c, dict) or not c.get("composerId"):
+                        try:
+                            WorkspaceLocalComposer.from_dict(c)
+                        except SchemaError as e:
+                            print(f"Schema drift in {db_path}: {e}")
                             continue
                         c["conversation"] = c.get("conversation") or []
                         c["workspaceId"] = name

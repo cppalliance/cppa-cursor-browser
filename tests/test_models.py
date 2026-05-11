@@ -28,6 +28,7 @@ from models import (
     ExportEntry,
     SchemaError,
     Workspace,
+    WorkspaceLocalComposer,
 )
 from utils.cli_chat_reader import _extract_blob_refs
 
@@ -84,6 +85,17 @@ class ComposerKnownGoodSchema(unittest.TestCase):
 
         ws_no_folder = Workspace.from_dict({}, workspace_id="cli-only")
         self.assertEqual(ws_no_folder.folder, None)
+
+    def test_workspace_local_composer_parses(self) -> None:
+        # Workspace-local composers (composer.composerData ItemTable rows)
+        # carry composerId + lastUpdatedAt but not the global-storage fields.
+        c = WorkspaceLocalComposer.from_dict({
+            "composerId": "cid-local-1",
+            "lastUpdatedAt": 1_715_000_500_000,
+            "conversation": [],
+        })
+        self.assertEqual(c.composer_id, "cid-local-1")
+        self.assertEqual(c.last_updated_at, 1_715_000_500_000)
 
     def test_export_entry_parses(self) -> None:
         entry = ExportEntry.from_dict({
@@ -148,6 +160,25 @@ class ComposerMissingFieldSchema(unittest.TestCase):
     def test_bubble_empty_id_raises(self) -> None:
         with self.assertRaises(SchemaError):
             Bubble.from_dict({"text": "hi"}, bubble_id="")
+
+    def test_workspace_local_composer_missing_id_raises(self) -> None:
+        # Regression for CodeRabbit's per-row drift comment on api/composers.py:
+        # previously a row missing composerId was silently skipped. Now drift
+        # raises SchemaError so api/composers.py can log + skip explicitly.
+        for bad in (
+            {"lastUpdatedAt": 0},           # composerId absent
+            {"composerId": ""},             # empty string
+            {"composerId": None},           # None
+            {"composerId": 123},            # wrong type
+        ):
+            with self.assertRaises(SchemaError, msg=f"failed for {bad!r}") as cm:
+                WorkspaceLocalComposer.from_dict(bad)
+            self.assertEqual(cm.exception.field, "composerId")
+
+    def test_workspace_local_composer_non_dict_raises(self) -> None:
+        for bad in (None, [], "str", 42):
+            with self.assertRaises(SchemaError):
+                WorkspaceLocalComposer.from_dict(bad)  # type: ignore[arg-type]
 
     def test_export_entry_missing_required_raises(self) -> None:
         with self.assertRaises(SchemaError) as cm:

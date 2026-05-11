@@ -71,6 +71,46 @@ class Composer:
 
 
 @dataclass(frozen=True)
+class WorkspaceLocalComposer:
+    """A composer entry from ``composer.composerData`` ItemTable rows.
+
+    These are summary records that live in each per-workspace ``state.vscdb``.
+    They share ``composerId`` and ``lastUpdatedAt`` with the global composer
+    schema, but they do **not** carry ``fullConversationHeadersOnly`` or
+    ``createdAt`` — those only exist on the global ``cursorDiskKV`` rows that
+    ``Composer.from_dict`` validates. Treating both shapes through the same
+    model would reject every workspace-local entry, so this slim model
+    exists to keep schema-drift detection at the boundary without conflating
+    the two storage paths.
+    """
+
+    composer_id: str
+    last_updated_at: Any = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "WorkspaceLocalComposer":
+        if not isinstance(raw, dict):
+            raise SchemaError(
+                "WorkspaceLocalComposer",
+                "composer",
+                hint=f"expected object, got {type(raw).__name__}",
+            )
+        composer_id = raw.get("composerId")
+        if not isinstance(composer_id, str) or not composer_id:
+            raise SchemaError(
+                "WorkspaceLocalComposer",
+                "composerId",
+                hint=f"expected non-empty str, got {type(composer_id).__name__}",
+            )
+        return cls(
+            composer_id=composer_id,
+            last_updated_at=raw.get("lastUpdatedAt"),
+            raw=raw,
+        )
+
+
+@dataclass(frozen=True)
 class Bubble:
     """A single message bubble within a composer.
 
