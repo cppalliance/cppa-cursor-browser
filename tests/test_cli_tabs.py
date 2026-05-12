@@ -68,5 +68,31 @@ class TestMessagesToBubblesFailureIsolation(unittest.TestCase):
         self.assertIn("sess-good", tab_ids)
 
 
+class TestMalformedSessionRecordSkipped(unittest.TestCase):
+    def test_session_missing_session_id_is_skipped_not_500(self) -> None:
+        app = _make_app()
+        project = _fake_project("proj-1", [
+            {"db_path": "/tmp/missing-id.db", "meta": {}},  # no session_id
+            _fake_session("sess-good"),
+        ])
+
+        def fake_traverse_blobs(db_path):
+            return ["ok"]
+
+        def fake_messages_to_bubbles(messages, created_ms):
+            return [{"type": "user", "text": "hi", "timestamp": created_ms}]
+
+        with app.test_request_context("/api/workspaces/cli:proj-1/tabs"), \
+             patch("services.cli_tabs.list_cli_projects", return_value=[project]), \
+             patch("services.cli_tabs.traverse_blobs", side_effect=fake_traverse_blobs), \
+             patch("services.cli_tabs.messages_to_bubbles", side_effect=fake_messages_to_bubbles):
+            response = _get_cli_workspace_tabs("cli:proj-1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        tab_ids = [t["id"] for t in payload["tabs"]]
+        self.assertEqual(tab_ids, ["sess-good"])
+
+
 if __name__ == "__main__":
     unittest.main()

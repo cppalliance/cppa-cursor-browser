@@ -23,8 +23,10 @@ def _get_cli_workspace_tabs(workspace_id: str):
         tabs = []
 
         for session in project["sessions"]:
-            meta = session.get("meta", {})
-            session_id = session["session_id"]
+            session_id = session.get("session_id")
+            if not session_id:
+                continue
+            meta = session.get("meta") or {}
             created_ms: int = meta.get("createdAt") or int(datetime.now().timestamp() * 1000)
             session_name = meta.get("name") or f"Session {session_id[:8]}"
 

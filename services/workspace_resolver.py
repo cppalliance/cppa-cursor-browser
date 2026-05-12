@@ -202,6 +202,8 @@ def _determine_project_for_conversation(
     # Fallback: conversation headers -> bubble references
     headers = composer_data.get("fullConversationHeadersOnly") or []
     for header in headers:
+        if not isinstance(header, dict):
+            continue
         bubble = bubble_map.get(header.get("bubbleId"))
         if not bubble:
             continue
@@ -234,6 +236,8 @@ def _determine_project_for_conversation(
         for fp in cbd.keys():
             path_segments.append(normalize_file_path(re.sub(r"^file://", "", fp)))
     for header in headers:
+        if not isinstance(header, dict):
+            continue
         bubble = bubble_map.get(header.get("bubbleId"))
         if not bubble:
             continue

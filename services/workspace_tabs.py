@@ -188,6 +188,8 @@ def assemble_workspace_tabs(
                 # Build bubbles
                 bubbles = []
                 for header in headers:
+                    if not isinstance(header, dict):
+                        continue
                     bubble_id = header.get("bubbleId")
                     bubble = bubble_map.get(bubble_id)
                     if not bubble:
@@ -207,25 +209,35 @@ def assemble_workspace_tabs(
                             if isinstance(tf, list) and tf:
                                 context_text += "\n\n**Terminal Files:**"
                                 for f in tf:
+                                    if not isinstance(f, dict):
+                                        continue
                                     context_text += f"\n- {f.get('path', '')}"
                             af = ctx.get("attachedFoldersListDirResults")
                             if isinstance(af, list) and af:
                                 context_text += "\n\n**Attached Folders:**"
                                 for fld in af:
+                                    if not isinstance(fld, dict):
+                                        continue
                                     files = fld.get("files")
                                     if isinstance(files, list) and files:
                                         context_text += f"\n\n**Folder:** {fld.get('path', 'Unknown')}"
                                         for fi in files:
+                                            if not isinstance(fi, dict):
+                                                continue
                                             context_text += f"\n- {fi.get('name', '')} ({fi.get('type', '')})"
                             cr = ctx.get("cursorRules")
                             if isinstance(cr, list) and cr:
                                 context_text += "\n\n**Cursor Rules:**"
                                 for rule in cr:
+                                    if not isinstance(rule, dict):
+                                        continue
                                     context_text += f"\n- {rule.get('name') or rule.get('description') or 'Rule'}"
                             sc = ctx.get("summarizedComposers")
                             if isinstance(sc, list) and sc:
                                 context_text += "\n\n**Related Conversations:**"
                                 for comp in sc:
+                                    if not isinstance(comp, dict):
+                                        continue
                                     context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
 
                     full_text = text + context_text
@@ -347,10 +359,15 @@ def assemble_workspace_tabs(
                 for diff in diffs:
                     diff_text = format_tool_action(diff)
                     if diff_text.strip():
+                        synthetic_ts = (
+                            to_epoch_ms(diff.get("timestamp"))
+                            or to_epoch_ms(diff.get("createdAt"))
+                            or max((b.get("timestamp") or 0) for b in bubbles)
+                        )
                         bubbles.append({
                             "type": "ai",
                             "text": f"**Tool Action:**{diff_text}",
-                            "timestamp": int(datetime.now().timestamp() * 1000),
+                            "timestamp": synthetic_ts,
                             "synthetic": True,
                         })
 

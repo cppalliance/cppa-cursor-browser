@@ -114,7 +114,11 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                         assigned = pid if pid else "global"
 
                         headers = cd.get("fullConversationHeadersOnly") or []
-                        has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
+                        has_bubbles = any(
+                            bubble_map.get(h.get("bubbleId"))
+                            for h in headers
+                            if isinstance(h, dict)
+                        )
                         if not has_bubbles:
                             continue
 
@@ -228,7 +232,11 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                 continue
             cli_convos = []
             for s in cp["sessions"]:
-                session_name = s["meta"].get("name") or f"Session {s['session_id'][:8]}"
+                session_id = s.get("session_id")
+                if not session_id:
+                    continue
+                meta = s.get("meta") or {}
+                session_name = meta.get("name") or f"Session {session_id[:8]}"
                 searchable = build_searchable_text(
                     project_name=ws_name,
                     chat_title=session_name,

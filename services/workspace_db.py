@@ -77,7 +77,11 @@ def _open_global_db(workspace_path: str):
         yield None, global_db_path
         return
     db_uri = Path(global_db_path).resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(db_uri, uri=True)
+    try:
+        conn = sqlite3.connect(db_uri, uri=True)
+    except sqlite3.Error:
+        yield None, global_db_path
+        return
     conn.row_factory = sqlite3.Row
     try:
         yield conn, global_db_path

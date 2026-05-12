@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -68,6 +69,24 @@ class TestSqliteUriEncoding(unittest.TestCase):
                     "SELECT key FROM cursorDiskKV WHERE key = 'composerData:probe'"
                 ).fetchone()
                 self.assertIsNotNone(row)
+
+
+class TestOpenGlobalDbConnectFailure(unittest.TestCase):
+    def test_sqlite_connect_error_yields_none_conn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            global_dir = os.path.join(tmp, "globalStorage")
+            os.makedirs(global_dir, exist_ok=True)
+            _make_global_state(os.path.join(global_dir, "state.vscdb"))
+            ws_root = os.path.join(tmp, "workspaceStorage")
+            os.makedirs(ws_root, exist_ok=True)
+
+            with patch(
+                "services.workspace_db.sqlite3.connect",
+                side_effect=sqlite3.OperationalError("simulated open failure"),
+            ):
+                with _open_global_db(ws_root) as (conn, path):
+                    self.assertIsNone(conn)
+                    self.assertTrue(path.endswith("state.vscdb"))
 
 
 if __name__ == "__main__":
