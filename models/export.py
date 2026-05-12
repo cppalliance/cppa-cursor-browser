@@ -1,5 +1,3 @@
-"""ExportEntry — typed model for an export manifest record (JSONL line)."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,13 +8,7 @@ from models.errors import SchemaError
 
 @dataclass(frozen=True)
 class ExportEntry:
-    """A single record in the export manifest (one line in ``manifest.jsonl``).
-
-    Required fields are the YAML-frontmatter keys that downstream tooling
-    indexes against: a missing ``log_id`` makes the entry unaddressable, and
-    a missing ``title`` produces unreadable output. Timestamps are optional —
-    not every Cursor conversation has both a creation and update time.
-    """
+    """One line of manifest.jsonl; log_id / title / workspace required, timestamps optional."""
 
     log_id: str
     title: str

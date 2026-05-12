@@ -1,21 +1,8 @@
-"""Regression tests for issue #24 — typed models + schema validation.
-
-Three fixture-based tests, per the issue acceptance criteria:
-  1. known-good Composer schema parses cleanly
-  2. missing-field Composer schema raises SchemaError
-  3. CliSessionMeta + ``_extract_blob_refs`` together exercise the binary
-     blob path (``0x0a 0x20`` marker)
-
-Run:
-    python -m unittest tests.test_models -v
-"""
-
 from __future__ import annotations
 
 import os
 import sys
 import unittest
-from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:

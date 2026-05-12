@@ -1,5 +1,3 @@
-"""Workspace — typed model for a single Cursor workspace folder."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,14 +8,7 @@ from models.errors import SchemaError
 
 @dataclass(frozen=True)
 class Workspace:
-    """A Cursor workspace entry.
-
-    The workspace ID is the directory name on disk (Cursor uses random
-    short hashes as workspace IDs) and is passed in explicitly. ``folder``
-    is the absolute path of the project the workspace targets, read from
-    ``workspace.json``; it may legitimately be ``None`` for a CLI-only
-    workspace, so missing-folder is not a schema error.
-    """
+    """A Cursor workspace folder; folder is None for CLI-only workspaces (not a schema error)."""
 
     workspace_id: str
     folder: str | None = None

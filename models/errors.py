@@ -1,16 +1,8 @@
-"""Exception types for the typed-model schema-validation layer."""
-
 from __future__ import annotations
 
 
 class SchemaError(ValueError):
-    """Raised when a required Cursor schema field is missing or malformed.
-
-    Inherits from ``ValueError`` so call sites that already catch generic
-    deserialisation errors (e.g. ``json.JSONDecodeError`` is a subclass of
-    ``ValueError``) also catch schema drift without needing a separate
-    ``except`` clause. New code should catch ``SchemaError`` explicitly.
-    """
+    """Raised when a required Cursor schema field is missing or malformed."""
 
     def __init__(self, model: str, field: str, *, hint: str | None = None) -> None:
         self.model = model

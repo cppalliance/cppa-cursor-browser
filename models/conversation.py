@@ -1,5 +1,3 @@
-"""Composer (conversation) and Bubble (message) typed models."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,19 +8,7 @@ from models.errors import SchemaError
 
 @dataclass(frozen=True)
 class Composer:
-    """A Cursor conversation (a.k.a. "composer") row.
-
-    Required fields per the schema-validation contract (issue #24):
-      - ``fullConversationHeadersOnly`` — without this, a composer cannot be
-        rendered (no message order is recoverable).
-      - ``createdAt`` — Cursor writes this on every composer (verified
-        17/17 against a live workspaceStorage). A missing value is the
-        kind of drift this layer exists to surface.
-
-    The composer ID is intentionally passed in as a constructor argument
-    rather than read from ``raw`` because Cursor stores it in the row key
-    (``composerData:<id>``) rather than in the JSON value.
-    """
+    """Cursor conversation row from globalStorage cursorDiskKV; requires fullConversationHeadersOnly + createdAt."""
 
     composer_id: str
     full_conversation_headers_only: list[dict[str, Any]]
@@ -72,17 +58,7 @@ class Composer:
 
 @dataclass(frozen=True)
 class WorkspaceLocalComposer:
-    """A composer entry from ``composer.composerData`` ItemTable rows.
-
-    These are summary records that live in each per-workspace ``state.vscdb``.
-    They share ``composerId`` and ``lastUpdatedAt`` with the global composer
-    schema, but they do **not** carry ``fullConversationHeadersOnly`` or
-    ``createdAt`` — those only exist on the global ``cursorDiskKV`` rows that
-    ``Composer.from_dict`` validates. Treating both shapes through the same
-    model would reject every workspace-local entry, so this slim model
-    exists to keep schema-drift detection at the boundary without conflating
-    the two storage paths.
-    """
+    """Summary composer row from per-workspace state.vscdb ItemTable; only composerId is required."""
 
     composer_id: str
     last_updated_at: Any = None
@@ -112,13 +88,7 @@ class WorkspaceLocalComposer:
 
 @dataclass(frozen=True)
 class Bubble:
-    """A single message bubble within a composer.
-
-    The bubble ID lives in the row key (``bubbleId:<composer_id>:<bubble_id>``)
-    rather than the JSON value, so it is passed in explicitly. The raw dict
-    is preserved to keep downstream rendering code (which still walks the
-    untyped shape) working without modification.
-    """
+    """One message in a composer; bubble_id comes from the row key, not the JSON value."""
 
     bubble_id: str
     raw: dict[str, Any] = field(default_factory=dict)

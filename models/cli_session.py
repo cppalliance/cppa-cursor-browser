@@ -1,5 +1,3 @@
-"""CliSessionMeta — typed model for the Cursor CLI ``meta`` blob."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,16 +8,7 @@ from models.errors import SchemaError
 
 @dataclass(frozen=True)
 class CliSessionMeta:
-    """The ``meta`` blob at the head of a Cursor CLI ``store.db`` blob graph.
-
-    ``latestRootBlobId`` is the entry point for the conversation reconstruction
-    BFS in ``utils/cli_chat_reader.traverse_blobs``; without it, the entire
-    conversation is unreachable. ``createdAt`` is documented as part of the
-    meta-blob schema (see ``utils/cli_chat_reader`` module docstring) and is
-    captured here, but it is not gated on — only ``latestRootBlobId`` is the
-    hard requirement, since that is the only field whose absence prevents
-    conversation reconstruction.
-    """
+    """CLI session meta blob; latestRootBlobId is the conversation entry point and the only required field."""
 
     latest_root_blob_id: str
     created_at: Any = None
