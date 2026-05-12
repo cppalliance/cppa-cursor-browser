@@ -250,7 +250,8 @@ def assemble_workspace_tabs(
                     tfd = raw.get("toolFormerData")
                     if isinstance(tfd, dict):
                         tool_call = _parse_tool_call(tfd)
-                        tool_calls = [tool_call]
+                        if isinstance(tool_call, dict):
+                            tool_calls = [tool_call]
 
                     # Thinking
                     thinking = None
@@ -271,9 +272,10 @@ def assemble_workspace_tabs(
                     display_text = full_text.strip()
                     if not display_text and tool_calls:
                         tc = tool_calls[0]
-                        display_text = f"**Tool: {tc.get('name', 'unknown')}**"
-                        if tc.get("status"):
-                            display_text += f" ({tc['status']})"
+                        if isinstance(tc, dict):
+                            display_text = f"**Tool: {tc.get('name', 'unknown')}**"
+                            if tc.get("status"):
+                                display_text += f" ({tc['status']})"
                     if not display_text and thinking:
                         display_text = thinking
 

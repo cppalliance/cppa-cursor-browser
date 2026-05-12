@@ -71,6 +71,34 @@ class TestSqliteUriEncoding(unittest.TestCase):
                 self.assertIsNotNone(row)
 
 
+class TestMalformedAllComposersEntry(unittest.TestCase):
+    def test_non_dict_entries_skipped_healthy_one_mapped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_dir = os.path.join(tmp, "ws-mixed")
+            os.makedirs(ws_dir, exist_ok=True)
+            db = os.path.join(ws_dir, "state.vscdb")
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE ItemTable ([key] TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO ItemTable ([key], value) VALUES (?, ?)",
+                (
+                    "composer.composerData",
+                    json.dumps({"allComposers": [
+                        None,                                # malformed: None
+                        "not a dict",                        # malformed: string
+                        42,                                  # malformed: number
+                        {"composerId": "cid-real"},          # healthy
+                    ]}),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            entries = [{"name": "ws-mixed", "workspaceJsonPath": ""}]
+            mapping = _build_composer_id_to_workspace_id(tmp, entries)
+            self.assertEqual(mapping, {"cid-real": "ws-mixed"})
+
+
 class TestOpenGlobalDbConnectFailure(unittest.TestCase):
     def test_sqlite_connect_error_yields_none_conn(self):
         with tempfile.TemporaryDirectory() as tmp:

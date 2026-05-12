@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from flask import Flask
 
@@ -147,6 +148,67 @@ class TestSyntheticBubbleTimestampNotNow(unittest.TestCase):
         # far in the past relative to today's time).
         now_ms = int(__import__("datetime").datetime.now().timestamp() * 1000)
         self.assertLess(synthetic["timestamp"], now_ms - 10_000_000_000)
+
+
+def _seed_workspace_with_tool_former(parent: str) -> str:
+    ws_root = os.path.join(parent, "workspaceStorage")
+    global_root = os.path.join(parent, "globalStorage")
+    os.makedirs(ws_root, exist_ok=True)
+    os.makedirs(global_root, exist_ok=True)
+    ws_dir = os.path.join(ws_root, "ws-a")
+    os.makedirs(ws_dir, exist_ok=True)
+    with open(os.path.join(ws_dir, "workspace.json"), "w") as f:
+        json.dump({"folder": "/tmp/proj"}, f)
+    sqlite3.connect(os.path.join(ws_dir, "state.vscdb")).close()
+
+    conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
+    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "composerData:cmp-t",
+            json.dumps({
+                "name": "Tab with toolFormerData",
+                "createdAt": 1_715_000_000_000,
+                "lastUpdatedAt": 1_715_000_500_000,
+                "fullConversationHeadersOnly": [{"bubbleId": "b-t", "type": 2}],
+            }),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "bubbleId:cmp-t:b-t",
+            json.dumps({
+                "text": "assistant message",
+                "createdAt": 1_715_000_400_000,
+                "toolFormerData": {"name": "tool-x"},
+            }),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return ws_root
+
+
+class TestParseToolCallNonDictReturn(unittest.TestCase):
+    def test_non_dict_parse_result_does_not_drop_composer(self) -> None:
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_root = _seed_workspace_with_tool_former(tmp)
+            # Force _parse_tool_call to return None — the previous code
+            # would have stored ``tool_calls = [None]`` and crashed in the
+            # display-text fallback with ``NoneType.get``.
+            with patch("services.workspace_tabs._parse_tool_call", return_value=None):
+                with app.test_request_context("/api/workspaces/global/tabs"):
+                    payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+
+        self.assertEqual(status, 200)
+        ids = [t["id"] for t in payload.get("tabs", [])]
+        self.assertIn("cmp-t", ids)
 
 
 if __name__ == "__main__":

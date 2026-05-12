@@ -60,6 +60,8 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
                 all_composers = data.get("allComposers")
                 if isinstance(all_composers, list):
                     for c in all_composers:
+                        if not isinstance(c, dict):
+                            continue
                         cid = c.get("composerId")
                         if cid:
                             mapping[cid] = entry["name"]

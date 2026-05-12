@@ -68,10 +68,13 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
         if not gconn:
             return None
         for cid in composer_ids:
-            rows = gconn.execute(
-                "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
-                (f"messageRequestContext:{cid}:%",),
-            ).fetchall()
+            try:
+                rows = gconn.execute(
+                    "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
+                    (f"messageRequestContext:{cid}:%",),
+                ).fetchall()
+            except sqlite3.Error:
+                continue
             for row in rows:
                 try:
                     ctx = json.loads(row["value"])
