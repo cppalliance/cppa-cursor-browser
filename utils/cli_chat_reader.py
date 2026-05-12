@@ -100,11 +100,6 @@ def traverse_blobs(db_path: str) -> list[dict]:
                 json.loads(bytes.fromhex(meta_row[0]).decode("utf-8"))
             )
         except (SchemaError, ValueError, UnicodeDecodeError, TypeError) as e:
-            # SchemaError covers field-level drift; ValueError covers bad hex
-            # and bad JSON (JSONDecodeError is a ValueError subclass);
-            # UnicodeDecodeError covers non-UTF-8 bytes; TypeError covers
-            # the meta_row[0] not being a string. All routes back to "no
-            # conversation" instead of escaping to the caller.
             print(f"Schema drift in CLI session meta at {db_path}: {e}")
             return []
         root_id: str = meta.latest_root_blob_id

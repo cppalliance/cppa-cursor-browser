@@ -20,10 +20,6 @@ from models import (
 from utils.cli_chat_reader import _extract_blob_refs
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 GOOD_COMPOSER_RAW: dict = {
     "name": "Refactor api/workspaces.py",
     "createdAt": 1_715_000_000_000,
@@ -48,11 +44,6 @@ def _make_blob_chain(*ref_hashes: str) -> bytes:
     return bytes(out)
 
 
-# ---------------------------------------------------------------------------
-# 1. Known-good schema
-# ---------------------------------------------------------------------------
-
-
 class ComposerKnownGoodSchema(unittest.TestCase):
     def test_parses_required_and_optional_fields(self) -> None:
         composer = Composer.from_dict(GOOD_COMPOSER_RAW, composer_id="cid-001")
@@ -74,8 +65,6 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         self.assertEqual(ws_no_folder.folder, None)
 
     def test_workspace_local_composer_parses(self) -> None:
-        # Workspace-local composers (composer.composerData ItemTable rows)
-        # carry composerId + lastUpdatedAt but not the global-storage fields.
         c = WorkspaceLocalComposer.from_dict({
             "composerId": "cid-local-1",
             "lastUpdatedAt": 1_715_000_500_000,
@@ -96,11 +85,6 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         self.assertEqual(entry.workspace, "ws-1")
 
 
-# ---------------------------------------------------------------------------
-# 2. Missing-field schema → SchemaError
-# ---------------------------------------------------------------------------
-
-
 class ComposerMissingFieldSchema(unittest.TestCase):
     def test_missing_full_conversation_headers_only_raises(self) -> None:
         bad = {k: v for k, v in GOOD_COMPOSER_RAW.items() if k != "fullConversationHeadersOnly"}
@@ -110,9 +94,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertEqual(cm.exception.field, "fullConversationHeadersOnly")
 
     def test_missing_created_at_raises(self) -> None:
-        # Issue #24 lists createdAt as a required field. A live workspaceStorage
-        # check confirmed 17/17 composers carry it, so a missing value is real
-        # schema drift (not benign older-record absence).
         bad = {k: v for k, v in GOOD_COMPOSER_RAW.items() if k != "createdAt"}
         with self.assertRaises(SchemaError) as cm:
             Composer.from_dict(bad, composer_id="cid-001")
@@ -130,16 +111,12 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertIn("expected list", str(cm.exception))
 
     def test_headers_falsy_non_list_raises(self) -> None:
-        # Regression: CodeRabbit caught that ``raw.get(...) or []`` silently
-        # coerced None / "" / 0 / False to an empty list, bypassing the
-        # isinstance gate. Each falsy non-list value must now raise.
         for bad_value in (None, "", 0, False):
             bad = dict(GOOD_COMPOSER_RAW, fullConversationHeadersOnly=bad_value)
             with self.assertRaises(SchemaError, msg=f"failed for {bad_value!r}"):
                 Composer.from_dict(bad, composer_id="cid-001")
 
     def test_headers_empty_list_is_valid(self) -> None:
-        # Empty list must still pass — a composer with no messages is legal.
         ok = dict(GOOD_COMPOSER_RAW, fullConversationHeadersOnly=[])
         composer = Composer.from_dict(ok, composer_id="cid-001")
         self.assertEqual(composer.full_conversation_headers_only, [])
@@ -149,9 +126,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             Bubble.from_dict({"text": "hi"}, bubble_id="")
 
     def test_workspace_local_composer_missing_id_raises(self) -> None:
-        # Regression for CodeRabbit's per-row drift comment on api/composers.py:
-        # previously a row missing composerId was silently skipped. Now drift
-        # raises SchemaError so api/composers.py can log + skip explicitly.
         for bad in (
             {"lastUpdatedAt": 0},           # composerId absent
             {"composerId": ""},             # empty string
@@ -173,9 +147,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertEqual(cm.exception.field, "log_id")
 
     def test_export_entry_non_string_required_raises(self) -> None:
-        # Regression: CodeRabbit caught that ``str(raw["log_id"])`` silently
-        # coerced ints, UUIDs, lists, etc. into strings, masking schema drift.
-        # Each required field must now be an actual non-empty string.
         bad_values: tuple[object, ...] = (123, None, "", [], {"x": 1}, True)
         for bad_value in bad_values:
             bad: dict[str, object] = {"log_id": bad_value, "title": "x", "workspace": "w"}
@@ -183,7 +154,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
                 ExportEntry.from_dict(bad)
 
     def test_schema_error_inherits_value_error(self) -> None:
-        # call sites that catch ValueError still trap SchemaError (back-compat)
         try:
             Composer.from_dict({}, composer_id="cid-001")
         except ValueError:
@@ -191,10 +161,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.fail("SchemaError did not propagate as ValueError")
 
     def test_non_dict_payload_raises_schema_error(self) -> None:
-        # Regression: CodeRabbit caught that a malformed top-level payload
-        # (list, string, None) would previously trip AttributeError on
-        # ``raw.get(...)`` and get swallowed by surrounding ``except Exception``.
-        # Each ``from_dict`` now surfaces it as SchemaError so drift stays loud.
         bad_payloads: tuple[object, ...] = ([], "not a dict", 42, None, ("a", "b"))
         for bad in bad_payloads:
             with self.assertRaises(SchemaError, msg=f"failed for {type(bad).__name__}"):
@@ -209,11 +175,6 @@ class ComposerMissingFieldSchema(unittest.TestCase):
                 Bubble.from_dict(bad, bubble_id="b-1")  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------
-# 3. _extract_blob_refs binary blob path (0x0a 0x20 marker)
-# ---------------------------------------------------------------------------
-
-
 class CliSessionMetaAndBlobChain(unittest.TestCase):
     def test_meta_missing_latest_root_blob_id_raises(self) -> None:
         with self.assertRaises(SchemaError) as cm:
@@ -226,8 +187,6 @@ class CliSessionMetaAndBlobChain(unittest.TestCase):
             CliSessionMeta.from_dict({"latestRootBlobId": 12345})
 
     def test_meta_parses_then_blob_chain_extracts_refs(self) -> None:
-        # Realistic flow: the meta blob points at a root chain blob, whose
-        # 0x0a 0x20-prefixed runs are SHA-256 references to JSON message blobs.
         ref1 = "a" * 64
         ref2 = "b" * 64
         ref3 = "c" * 64
@@ -245,7 +204,6 @@ class CliSessionMetaAndBlobChain(unittest.TestCase):
         self.assertEqual(refs, [ref1, ref2, ref3])
 
     def test_blob_chain_skips_non_marker_bytes(self) -> None:
-        # Garbage prefix + valid run + garbage suffix — only the run extracts.
         ref = "f" * 64
         garbage_before = b"\x01\x02\x03"
         garbage_after = b"\xff\xfe"

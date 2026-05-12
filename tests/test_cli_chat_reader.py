@@ -404,27 +404,19 @@ class TestTraverseBlobs(unittest.TestCase):
         return path
 
     def test_malformed_hex_meta_returns_empty(self):
-        """Regression: bad hex must not escape as ValueError."""
-        # 'zz' is not valid hex — bytes.fromhex() raises ValueError.
         path = self._write_raw_meta("bad_hex.db", "zzzz")
         self.assertEqual(traverse_blobs(path), [])
 
     def test_non_utf8_meta_returns_empty(self):
-        """Regression: non-UTF-8 bytes must not escape as UnicodeDecodeError."""
-        # 0xff 0xfe is invalid as UTF-8 — .decode('utf-8') raises.
         path = self._write_raw_meta("bad_utf8.db", "fffe")
         self.assertEqual(traverse_blobs(path), [])
 
     def test_invalid_json_meta_returns_empty(self):
-        """Regression: malformed JSON must not escape as JSONDecodeError."""
-        # Hex-encoded UTF-8 garbage that isn't a JSON object: "not json"
         garbage = "not json".encode("utf-8").hex()
         path = self._write_raw_meta("bad_json.db", garbage)
         self.assertEqual(traverse_blobs(path), [])
 
     def test_non_dict_meta_returns_empty(self):
-        """Regression: top-level non-object must surface as SchemaError + empty."""
-        # Hex-encoded JSON list — passes hex/utf8/json, fails dict guard.
         list_payload = json.dumps(["not", "a", "dict"]).encode("utf-8").hex()
         path = self._write_raw_meta("non_dict.db", list_payload)
         self.assertEqual(traverse_blobs(path), [])
