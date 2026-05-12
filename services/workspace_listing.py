@@ -66,11 +66,11 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             for layout in layouts:
                                 if isinstance(layout, str):
                                     try:
-                                        obj = json.loads(layout)
-                                        if isinstance(obj, dict) and obj.get("rootPath"):
-                                            project_layouts_map[cid].append(obj["rootPath"])
+                                        layout = json.loads(layout)
                                     except Exception:
-                                        pass
+                                        continue
+                                if isinstance(layout, dict) and layout.get("rootPath"):
+                                    project_layouts_map[cid].append(layout["rootPath"])
                     except Exception:
                         pass
 

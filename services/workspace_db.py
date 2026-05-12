@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 from contextlib import closing, contextmanager
+from pathlib import Path
 
 from utils.path_helpers import get_workspace_folder_paths
 from utils.workspace_descriptor import _read_json_file
@@ -47,7 +48,10 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
             continue
         try:
             # closing() guarantees .close() on scope exit (issue #17).
-            with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+            # Path.as_uri() percent-encodes reserved chars; ``f"file:{path}"``
+            # breaks sqlite URI parsing on paths with spaces, ``#``, etc.
+            db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(db_uri, uri=True)) as conn:
                 row = conn.execute(
                     "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
                 ).fetchone()
@@ -72,7 +76,8 @@ def _open_global_db(workspace_path: str):
     if not os.path.isfile(global_db_path):
         yield None, global_db_path
         return
-    conn = sqlite3.connect(f"file:{global_db_path}?mode=ro", uri=True)
+    db_uri = Path(global_db_path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(db_uri, uri=True)
     conn.row_factory = sqlite3.Row
     try:
         yield conn, global_db_path

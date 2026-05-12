@@ -34,7 +34,11 @@ def _get_cli_workspace_tabs(workspace_id: str):
                 print(f"CLI: could not read session {session_id}: {e}")
                 continue
 
-            bubbles = messages_to_bubbles(messages, created_ms)
+            try:
+                bubbles = messages_to_bubbles(messages, created_ms)
+            except Exception as e:
+                print(f"CLI: could not convert session {session_id} to bubbles: {e}")
+                continue
             if not bubbles:
                 continue
 

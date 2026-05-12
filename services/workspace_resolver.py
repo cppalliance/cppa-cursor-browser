@@ -112,7 +112,11 @@ def _get_project_from_file_path(
             wd = _read_json_file(entry["workspaceJsonPath"])
             for folder in get_workspace_folder_paths(wd):
                 wp = normalize_file_path(folder)
-                if normalized_path.startswith(wp) and len(wp) > best_len:
+                try:
+                    is_within_workspace = os.path.commonpath([normalized_path, wp]) == wp
+                except ValueError:
+                    is_within_workspace = False
+                if is_within_workspace and len(wp) > best_len:
                     best_len = len(wp)
                     best_match = entry["name"]
         except Exception:

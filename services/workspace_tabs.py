@@ -138,11 +138,11 @@ def assemble_workspace_tabs(
                         for layout in layouts:
                             if isinstance(layout, str):
                                 try:
-                                    obj = json.loads(layout)
-                                    if isinstance(obj, dict) and obj.get("rootPath"):
-                                        project_layouts_map[cid].append(obj["rootPath"])
+                                    layout = json.loads(layout)
                                 except Exception:
-                                    pass
+                                    continue
+                            if isinstance(layout, dict) and layout.get("rootPath"):
+                                project_layouts_map[cid].append(layout["rootPath"])
                 except Exception:
                     pass
 
@@ -351,6 +351,7 @@ def assemble_workspace_tabs(
                             "type": "ai",
                             "text": f"**Tool Action:**{diff_text}",
                             "timestamp": int(datetime.now().timestamp() * 1000),
+                            "synthetic": True,
                         })
 
                 bubbles.sort(key=lambda b: b.get("timestamp") or 0)
@@ -360,7 +361,7 @@ def assemble_workspace_tabs(
                 for b in bubbles:
                     if b["type"] == "user":
                         last_user_ts = b.get("timestamp")
-                    elif b["type"] == "ai" and last_user_ts is not None:
+                    elif b["type"] == "ai" and last_user_ts is not None and not b.get("synthetic"):
                         ts = b.get("timestamp")
                         if ts and ts > last_user_ts:
                             meta = b.setdefault("metadata", {})
