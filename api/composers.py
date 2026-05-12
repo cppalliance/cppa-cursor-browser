@@ -13,13 +13,9 @@ from flask import Blueprint, jsonify
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
+from utils.workspace_descriptor import _read_json_file
 
 bp = Blueprint("composers", __name__)
-
-
-def _read_json_file(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 @bp.route("/api/composers")
