@@ -64,6 +64,12 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         ws_no_folder = Workspace.from_dict({}, workspace_id="cli-only")
         self.assertEqual(ws_no_folder.folder, None)
 
+    def test_non_string_workspace_id_raises(self) -> None:
+        for bad_id in (None, "", 123, [], {}, True, b"bytes"):
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
+                Workspace.from_dict({}, workspace_id=bad_id)  # type: ignore[arg-type]
+            self.assertEqual(cm.exception.field, "workspaceId")
+
     def test_workspace_local_composer_parses(self) -> None:
         c = WorkspaceLocalComposer.from_dict({
             "composerId": "cid-local-1",
@@ -99,10 +105,29 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             Composer.from_dict(bad, composer_id="cid-001")
         self.assertEqual(cm.exception.field, "createdAt")
 
+    def test_non_numeric_created_at_raises(self) -> None:
+        for bad_value in ("2026-05-12", None, [], {}, True, False, b"bytes"):
+            bad = dict(GOOD_COMPOSER_RAW, createdAt=bad_value)
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_value!r}") as cm:
+                Composer.from_dict(bad, composer_id="cid-001")
+            self.assertEqual(cm.exception.field, "createdAt")
+
+    def test_numeric_created_at_passes(self) -> None:
+        for ok_value in (1_715_000_000_000, 1_715_000_000_000.5, 0, -1):
+            ok = dict(GOOD_COMPOSER_RAW, createdAt=ok_value)
+            composer = Composer.from_dict(ok, composer_id="cid-001")
+            self.assertEqual(composer.created_at, ok_value)
+
     def test_empty_composer_id_raises(self) -> None:
         with self.assertRaises(SchemaError) as cm:
             Composer.from_dict(GOOD_COMPOSER_RAW, composer_id="")
         self.assertEqual(cm.exception.field, "composerId")
+
+    def test_non_string_composer_id_raises(self) -> None:
+        for bad_id in (None, 123, [], {}, True, b"bytes"):
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
+                Composer.from_dict(GOOD_COMPOSER_RAW, composer_id=bad_id)  # type: ignore[arg-type]
+            self.assertEqual(cm.exception.field, "composerId")
 
     def test_headers_wrong_type_raises(self) -> None:
         bad = dict(GOOD_COMPOSER_RAW, fullConversationHeadersOnly={"not": "a list"})
@@ -124,6 +149,12 @@ class ComposerMissingFieldSchema(unittest.TestCase):
     def test_bubble_empty_id_raises(self) -> None:
         with self.assertRaises(SchemaError):
             Bubble.from_dict({"text": "hi"}, bubble_id="")
+
+    def test_non_string_bubble_id_raises(self) -> None:
+        for bad_id in (None, 123, [], {}, True, b"bytes"):
+            with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
+                Bubble.from_dict({"text": "hi"}, bubble_id=bad_id)  # type: ignore[arg-type]
+            self.assertEqual(cm.exception.field, "bubbleId")
 
     def test_workspace_local_composer_missing_id_raises(self) -> None:
         for bad in (

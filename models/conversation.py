@@ -26,12 +26,24 @@ class Composer:
                 "composerData",
                 hint=f"expected object, got {type(raw).__name__}",
             )
-        if not composer_id:
-            raise SchemaError("Composer", "composerId", hint="empty composer ID")
+        if not isinstance(composer_id, str) or not composer_id:
+            raise SchemaError(
+                "Composer",
+                "composerId",
+                hint=f"expected non-empty str, got {type(composer_id).__name__}",
+            )
         if "fullConversationHeadersOnly" not in raw:
             raise SchemaError("Composer", "fullConversationHeadersOnly")
         if "createdAt" not in raw:
             raise SchemaError("Composer", "createdAt")
+
+        created_at = raw.get("createdAt")
+        if not isinstance(created_at, (int, float)) or isinstance(created_at, bool):
+            raise SchemaError(
+                "Composer",
+                "createdAt",
+                hint=f"expected timestamp number, got {type(created_at).__name__}",
+            )
 
         headers = raw.get("fullConversationHeadersOnly")
         if not isinstance(headers, list):
@@ -48,7 +60,7 @@ class Composer:
         return cls(
             composer_id=composer_id,
             full_conversation_headers_only=headers,
-            created_at=raw.get("createdAt"),
+            created_at=created_at,
             name=raw.get("name"),
             last_updated_at=raw.get("lastUpdatedAt"),
             model_config=model_config,
@@ -101,6 +113,10 @@ class Bubble:
                 "bubble",
                 hint=f"expected object, got {type(raw).__name__}",
             )
-        if not bubble_id:
-            raise SchemaError("Bubble", "bubbleId", hint="empty bubble ID")
+        if not isinstance(bubble_id, str) or not bubble_id:
+            raise SchemaError(
+                "Bubble",
+                "bubbleId",
+                hint=f"expected non-empty str, got {type(bubble_id).__name__}",
+            )
         return cls(bubble_id=bubble_id, raw=raw)

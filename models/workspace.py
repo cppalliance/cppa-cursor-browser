@@ -22,8 +22,12 @@ class Workspace:
                 "workspace.json",
                 hint=f"expected object, got {type(raw).__name__}",
             )
-        if not workspace_id:
-            raise SchemaError("Workspace", "workspaceId", hint="empty workspace ID")
+        if not isinstance(workspace_id, str) or not workspace_id:
+            raise SchemaError(
+                "Workspace",
+                "workspaceId",
+                hint=f"expected non-empty str, got {type(workspace_id).__name__}",
+            )
         folder = raw.get("folder")
         if folder is not None and not isinstance(folder, str):
             raise SchemaError(
