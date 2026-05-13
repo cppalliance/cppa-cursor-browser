@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 from datetime import datetime
 
 from utils.path_helpers import (
@@ -83,8 +84,14 @@ def assemble_workspace_tabs(
 
         workspace_display_name = _get_workspace_display_name(workspace_path, workspace_id)
 
+        def _safe_fetchall(query: str, params: tuple = ()) -> list:
+            try:
+                return global_db.execute(query, params).fetchall()
+            except sqlite3.Error:
+                return []
+
         # Load bubbles
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
+        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
@@ -96,7 +103,7 @@ def assemble_workspace_tabs(
                     pass
 
         # Load codeBlockDiffs
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
+        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
             chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
             if not chat_id:
                 continue
@@ -110,7 +117,7 @@ def assemble_workspace_tabs(
                 pass
 
         # Load messageRequestContext
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 chat_id = parts[1]
@@ -126,7 +133,7 @@ def assemble_workspace_tabs(
 
         # Build projectLayoutsMap
         project_layouts_map: dict[str, list] = {}
-        for row in global_db.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
             parts = row["key"].split(":")
             if len(parts) >= 2:
                 cid = parts[1]
@@ -147,11 +154,11 @@ def assemble_workspace_tabs(
                     pass
 
         # Get composer data entries with conversations
-        composer_rows = global_db.execute(
+        composer_rows = _safe_fetchall(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
             " AND value LIKE '%fullConversationHeadersOnly%'"
             " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
-        ).fetchall()
+        )
 
         invalid_workspace_aliases = _infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
