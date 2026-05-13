@@ -109,11 +109,22 @@ class TestSearch:
         body = response.get_json()
         assert "results" in body and body["results"] == []
 
-    def test_missing_q_returns_400_or_empty(self, client):
+    def test_missing_q_returns_400(self, client):
         response = client.get("/api/search")
-        # Implementation may return 400 (missing required param) or 200 with empty.
-        # Both are reasonable for "no query supplied"; pin whichever shipped.
-        assert response.status_code in (200, 400)
-        if response.status_code == 200:
-            body = response.get_json()
-            assert "results" in body
+        assert response.status_code == 400
+        body = response.get_json()
+        assert "error" in body
+        assert body["error"] == "No search query provided"
+
+    def test_empty_q_returns_400(self, client):
+        response = client.get("/api/search?q=")
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body.get("error") == "No search query provided"
+
+    def test_whitespace_only_q_returns_400(self, client):
+        # api/search.py strips q before the empty-check, so "   " is rejected.
+        response = client.get("/api/search?q=%20%20%20")
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body.get("error") == "No search query provided"
