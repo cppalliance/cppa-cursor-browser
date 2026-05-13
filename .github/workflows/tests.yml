@@ -52,9 +52,9 @@ jobs:
         run: python -m unittest discover tests -v
 
       - name: Run pytest integration suite
-        # Closes #26. Pytest fixtures (tests/conftest.py) build a temp
-        # workspaceStorage and exercise the Flask routes via app.test_client().
-        # Runs alongside unittest, not instead of — both suites are merge gates.
+        # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage
+        # and exercise the Flask routes via app.test_client(). Runs alongside
+        # unittest, not instead of — both suites are merge gates.
         run: python -m pytest tests/ -v --tb=short
 
   # ── Typecheck: mypy ───────────────────────────────────────────────────────
