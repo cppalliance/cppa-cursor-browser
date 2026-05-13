@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -25,36 +25,38 @@ HAPPY_WORKSPACE_ID = "ws-export-happy"
 
 
 def _make_global_state_db(path: str, *, last_updated_ms: int = 1_715_000_500_000) -> None:
-    conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
-    conn.execute(
-        "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-        (
-            f"composerData:{HAPPY_COMPOSER_ID}",
-            json.dumps({
-                "name": "Export E2E conversation",
-                "createdAt": 1_715_000_000_000,
-                "lastUpdatedAt": last_updated_ms,
-                "fullConversationHeadersOnly": [
-                    {"bubbleId": HAPPY_BUBBLE_ID, "type": 1},
-                ],
-                "modelConfig": {"modelName": "gpt-4o"},
-            }),
-        ),
-    )
-    conn.execute(
-        "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-        (
-            f"bubbleId:{HAPPY_COMPOSER_ID}:{HAPPY_BUBBLE_ID}",
-            json.dumps({
-                "text": "hello from the e2e test fixture",
-                "type": "user",
-                "createdAt": 1_715_000_400_000,
-            }),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    # closing() guarantees conn.close() even if an exec/commit raises
+    # mid-setup. On Windows TemporaryDirectory.cleanup() refuses to delete
+    # an open SQLite file, so a leaked handle would fail the whole test.
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"composerData:{HAPPY_COMPOSER_ID}",
+                json.dumps({
+                    "name": "Export E2E conversation",
+                    "createdAt": 1_715_000_000_000,
+                    "lastUpdatedAt": last_updated_ms,
+                    "fullConversationHeadersOnly": [
+                        {"bubbleId": HAPPY_BUBBLE_ID, "type": 1},
+                    ],
+                    "modelConfig": {"modelName": "gpt-4o"},
+                }),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"bubbleId:{HAPPY_COMPOSER_ID}:{HAPPY_BUBBLE_ID}",
+                json.dumps({
+                    "text": "hello from the e2e test fixture",
+                    "type": "user",
+                    "createdAt": 1_715_000_400_000,
+                }),
+            ),
+        )
+        conn.commit()
 
 
 def _make_workspace_storage(parent: str, *, last_updated_ms: int = 1_715_000_500_000) -> str:
@@ -70,14 +72,13 @@ def _make_workspace_storage(parent: str, *, last_updated_ms: int = 1_715_000_500
     with open(os.path.join(ws_dir, "workspace.json"), "w", encoding="utf-8") as f:
         json.dump({"folder": project_folder}, f)
     local_db = os.path.join(ws_dir, "state.vscdb")
-    conn = sqlite3.connect(local_db)
-    conn.execute("CREATE TABLE ItemTable ([key] TEXT PRIMARY KEY, value TEXT)")
-    conn.execute(
-        "INSERT INTO ItemTable ([key], value) VALUES (?, ?)",
-        ("composer.composerData", json.dumps({"allComposers": [{"composerId": HAPPY_COMPOSER_ID}]})),
-    )
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(local_db)) as conn:
+        conn.execute("CREATE TABLE ItemTable ([key] TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO ItemTable ([key], value) VALUES (?, ?)",
+            ("composer.composerData", json.dumps({"allComposers": [{"composerId": HAPPY_COMPOSER_ID}]})),
+        )
+        conn.commit()
 
     _make_global_state_db(os.path.join(global_root, "state.vscdb"), last_updated_ms=last_updated_ms)
     return ws_root
@@ -113,6 +114,38 @@ def _run_export(argv: list[str], *, workspace_path: str, state_dir: str):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = prior
+
+
+class TestGetGlobalStateDir(unittest.TestCase):
+    """Regression: get_global_state_dir() must honor XDG_STATE_HOME.
+
+    Before the fix it hardcoded ~/.cursor-chat-browser, which leaked test
+    state into the developer's real home directory and made the
+    --since last test pass only by timestamp coincidence.
+    """
+
+    def setUp(self):
+        self._prior = os.environ.get("XDG_STATE_HOME")
+
+    def tearDown(self):
+        if self._prior is None:
+            os.environ.pop("XDG_STATE_HOME", None)
+        else:
+            os.environ["XDG_STATE_HOME"] = self._prior
+
+    def test_uses_xdg_state_home_when_set(self):
+        os.environ["XDG_STATE_HOME"] = "/tmp/some-xdg-root"
+        self.assertEqual(
+            export_script.get_global_state_dir(),
+            "/tmp/some-xdg-root/cursor-chat-browser",
+        )
+
+    def test_falls_back_to_home_when_xdg_unset(self):
+        os.environ.pop("XDG_STATE_HOME", None)
+        self.assertEqual(
+            export_script.get_global_state_dir(),
+            os.path.join(str(Path.home()), ".cursor-chat-browser"),
+        )
 
 
 class TestCliExportEndToEnd(unittest.TestCase):
@@ -236,6 +269,49 @@ class TestCliExportEndToEnd(unittest.TestCase):
             before_mtimes[seeded_after_second.name],
             seeded_after_second.stat().st_mtime_ns,
             msg="--since last should not rewrite the already-exported markdown",
+        )
+
+    # ─── --no-composer ─────────────────────────────────────────────────────
+
+    def test_no_composer_skips_ide_composer_data(self):
+        # The fixture seeds IDE composer data exclusively (no CLI sessions
+        # under CLI_CHATS_PATH). --no-composer must therefore drop the
+        # seeded composer and exit with "No conversations found.", leaving
+        # the output dir empty of .md files.
+        with _run_export(["--out", self.out_dir, "--no-zip", "--no-composer"],
+                         workspace_path=self.workspace_path,
+                         state_dir=self.state_dir):
+            pass
+
+        md_files = list(Path(self.out_dir).rglob("*.md"))
+        self.assertEqual(
+            md_files, [],
+            msg=f"--no-composer must produce zero markdown; got {[p.name for p in md_files]}",
+        )
+
+    # ─── --exclude-rules ───────────────────────────────────────────────────
+
+    def test_exclude_rules_filters_matching_composer(self):
+        # A rule whose word matches the composer's title must drop it
+        # before any markdown is written. The fixture's composer is named
+        # "Export E2E conversation" so a single-token rule of "E2E" is
+        # enough to match via the case-insensitive substring check.
+        rules_path = os.path.join(self.tmpdir, "exclusion-rules.txt")
+        with open(rules_path, "w", encoding="utf-8") as f:
+            f.write("E2E\n")
+
+        with _run_export(
+            ["--out", self.out_dir, "--no-zip", "--exclude-rules", rules_path],
+            workspace_path=self.workspace_path,
+            state_dir=self.state_dir,
+        ):
+            pass
+
+        md_files = list(Path(self.out_dir).rglob("*.md"))
+        matched = [p for p in md_files if HAPPY_COMPOSER_ID[:8] in p.name]
+        self.assertEqual(
+            matched, [],
+            msg=f"--exclude-rules failed to filter seeded composer; got {[p.name for p in md_files]}",
         )
 
 

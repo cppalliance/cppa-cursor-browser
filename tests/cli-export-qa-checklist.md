@@ -68,7 +68,7 @@ python app.py
 ```
 
 - [ ] Process stays running for at least 30 s without crash
-- [ ] `curl -sI http://127.0.0.1:3000/` returns `HTTP/1.0 200 OK` (or 200 over 1.1)
+- [ ] `curl -sI http://127.0.0.1:3000/` returns `HTTP/1.1 200 OK` (or `HTTP/1.0 200 OK` under some dev-server configurations)
 - [ ] Home page lists at least one workspace card (assuming real Cursor data)
 - [ ] No `Exception` / `Traceback` in server log
 
