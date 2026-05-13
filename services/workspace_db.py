@@ -20,7 +20,10 @@ def _collect_workspace_entries(workspace_path: str) -> list[dict]:
                 wj = os.path.join(full, "workspace.json")
                 if os.path.isfile(wj):
                     entries.append({"name": name, "workspaceJsonPath": wj})
-    except Exception:
+    except OSError:
+        # workspace_path missing / not readable / not a directory — return what
+        # we have so far. OSError covers FileNotFoundError, PermissionError,
+        # and NotADirectoryError.
         pass
     return entries
 
@@ -34,7 +37,11 @@ def _collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
             folders = get_workspace_folder_paths(wd)
             if not folders:
                 invalid.add(entry["name"])
-        except Exception:
+        except (OSError, ValueError, KeyError, TypeError):
+            # OSError: workspace.json unreadable. ValueError covers
+            # json.JSONDecodeError. KeyError / TypeError: malformed entry
+            # dict. Any of these mean we can't resolve folders → mark invalid,
+            # matching the pre-narrowing behaviour.
             invalid.add(entry["name"])
     return invalid
 
@@ -46,27 +53,33 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
         db_path = os.path.join(workspace_path, entry["name"], "state.vscdb")
         if not os.path.isfile(db_path):
             continue
+        # closing() guarantees .close() on scope exit (issue #17).
+        # Path.as_uri() percent-encodes reserved chars; ``f"file:{path}"``
+        # breaks sqlite URI parsing on paths with spaces, ``#``, etc.
+        db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        row: tuple | None = None
         try:
-            # closing() guarantees .close() on scope exit (issue #17).
-            # Path.as_uri() percent-encodes reserved chars; ``f"file:{path}"``
-            # breaks sqlite URI parsing on paths with spaces, ``#``, etc.
-            db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
             with closing(sqlite3.connect(db_uri, uri=True)) as conn:
                 row = conn.execute(
                     "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
                 ).fetchone()
-            if row and row[0]:
-                data = json.loads(row[0])
-                all_composers = data.get("allComposers")
-                if isinstance(all_composers, list):
-                    for c in all_composers:
-                        if not isinstance(c, dict):
-                            continue
-                        cid = c.get("composerId")
-                        if cid:
-                            mapping[cid] = entry["name"]
-        except Exception:
-            pass
+        except sqlite3.Error:
+            continue
+        if not (row and row[0]):
+            continue
+        try:
+            data = json.loads(row[0])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        all_composers = data.get("allComposers") if isinstance(data, dict) else None
+        if not isinstance(all_composers, list):
+            continue
+        for c in all_composers:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("composerId")
+            if cid:
+                mapping[cid] = entry["name"]
     return mapping
 
 

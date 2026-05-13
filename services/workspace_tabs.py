@@ -12,7 +12,7 @@ from utils.path_helpers import (
     to_epoch_ms,
 )
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
-from utils.text_extract import extract_text_from_bubble, format_tool_action
+from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.workspace_descriptor import _read_json_file
 from services.workspace_db import (
@@ -116,42 +116,41 @@ def assemble_workspace_tabs(
             except Exception:
                 pass
 
-        # Load messageRequestContext
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
-            parts = row["key"].split(":")
-            if len(parts) >= 3:
-                chat_id = parts[1]
-                context_id = parts[2]
-                try:
-                    ctx = json.loads(row["value"])
-                    message_request_context_map.setdefault(chat_id, []).append({
-                        **ctx,
-                        "contextId": context_id,
-                    })
-                except Exception:
-                    pass
-
-        # Build projectLayoutsMap
+        # Load messageRequestContext rows once; build both
+        # message_request_context_map and project_layouts_map from the same pass.
         project_layouts_map: dict[str, list] = {}
         for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
             parts = row["key"].split(":")
-            if len(parts) >= 2:
-                cid = parts[1]
-                try:
-                    ctx = json.loads(row["value"])
-                    layouts = ctx.get("projectLayouts")
-                    if isinstance(layouts, list):
-                        project_layouts_map.setdefault(cid, [])
-                        for layout in layouts:
-                            if isinstance(layout, str):
-                                try:
-                                    layout = json.loads(layout)
-                                except Exception:
-                                    continue
-                            if isinstance(layout, dict) and layout.get("rootPath"):
-                                project_layouts_map[cid].append(layout["rootPath"])
-                except Exception:
-                    pass
+            if len(parts) < 2:
+                continue
+            chat_id = parts[1]
+            try:
+                ctx = json.loads(row["value"])
+            except Exception:
+                continue
+            if not isinstance(ctx, dict):
+                continue
+
+            # Per-bubble context map (needs the contextId at parts[2])
+            if len(parts) >= 3:
+                context_id = parts[2]
+                message_request_context_map.setdefault(chat_id, []).append({
+                    **ctx,
+                    "contextId": context_id,
+                })
+
+            # Project-layout map (root paths used by the resolver)
+            layouts = ctx.get("projectLayouts")
+            if isinstance(layouts, list):
+                project_layouts_map.setdefault(chat_id, [])
+                for layout in layouts:
+                    if isinstance(layout, str):
+                        try:
+                            layout = json.loads(layout)
+                        except Exception:
+                            continue
+                    if isinstance(layout, dict) and layout.get("rootPath"):
+                        project_layouts_map[chat_id].append(layout["rootPath"])
 
         # Get composer data entries with conversations
         composer_rows = _safe_fetchall(
@@ -363,22 +362,13 @@ def assemble_workspace_tabs(
                 )):
                     continue
 
-                # Code block diffs as extra bubbles
+                # codeBlockDiffs are emitted as a structured ``tab.codeBlockDiffs``
+                # field below; the dashboard reads them from there (download.js,
+                # workspace.html). Previously this loop also pushed a synthetic
+                # ``Tool Action`` AI bubble into ``tab.bubbles``, double-representing
+                # every diff on the wire and forcing a ``synthetic`` filter in the
+                # response-time pass. Dropping the synthesis — frontend never read it.
                 diffs = code_block_diff_map.get(composer_id, [])
-                for diff in diffs:
-                    diff_text = format_tool_action(diff)
-                    if diff_text.strip():
-                        synthetic_ts = (
-                            to_epoch_ms(diff.get("timestamp"))
-                            or to_epoch_ms(diff.get("createdAt"))
-                            or max((b.get("timestamp") or 0) for b in bubbles)
-                        )
-                        bubbles.append({
-                            "type": "ai",
-                            "text": f"**Tool Action:**{diff_text}",
-                            "timestamp": synthetic_ts,
-                            "synthetic": True,
-                        })
 
                 bubbles.sort(key=lambda b: b.get("timestamp") or 0)
 
@@ -387,7 +377,7 @@ def assemble_workspace_tabs(
                 for b in bubbles:
                     if b["type"] == "user":
                         last_user_ts = b.get("timestamp")
-                    elif b["type"] == "ai" and last_user_ts is not None and not b.get("synthetic"):
+                    elif b["type"] == "ai" and last_user_ts is not None:
                         ts = b.get("timestamp")
                         if ts and ts > last_user_ts:
                             meta = b.setdefault("metadata", {})

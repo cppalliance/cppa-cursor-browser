@@ -117,5 +117,29 @@ class TestOpenGlobalDbConnectFailure(unittest.TestCase):
                     self.assertTrue(path.endswith("state.vscdb"))
 
 
+class TestBuildComposerMappingCorruptDb(unittest.TestCase):
+    def test_corrupt_state_vscdb_skipped_healthy_one_mapped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Healthy workspace
+            ok_dir = os.path.join(tmp, "ws-ok")
+            os.makedirs(ok_dir, exist_ok=True)
+            _make_state_vscdb(os.path.join(ok_dir, "state.vscdb"), "cid-ok")
+
+            # Corrupt workspace — file exists but has no ItemTable
+            bad_dir = os.path.join(tmp, "ws-bad")
+            os.makedirs(bad_dir, exist_ok=True)
+            conn = sqlite3.connect(os.path.join(bad_dir, "state.vscdb"))
+            conn.execute("CREATE TABLE other (x INTEGER)")
+            conn.commit()
+            conn.close()
+
+            entries = [
+                {"name": "ws-ok", "workspaceJsonPath": ""},
+                {"name": "ws-bad", "workspaceJsonPath": ""},
+            ]
+            mapping = _build_composer_id_to_workspace_id(tmp, entries)
+            self.assertEqual(mapping, {"cid-ok": "ws-ok"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -114,8 +114,11 @@ def _seed_workspace_with_diff(parent: str, *, diff_timestamp: int | None) -> str
     return ws_root
 
 
-class TestSyntheticBubbleTimestampNotNow(unittest.TestCase):
-    def test_synthetic_uses_diff_timestamp_when_present(self) -> None:
+class TestDiffsEmittedOnlyAsCodeBlockDiffs(unittest.TestCase):
+    """codeBlockDiffs are the single representation on the wire — never
+    duplicated as synthetic ``Tool Action`` bubbles in tab.bubbles."""
+
+    def test_diffs_appear_in_code_block_diffs_field(self) -> None:
         app = Flask(__name__)
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
@@ -128,10 +131,9 @@ class TestSyntheticBubbleTimestampNotNow(unittest.TestCase):
 
         tab = next((t for t in payload["tabs"] if t["id"] == "cmp-d"), None)
         self.assertIsNotNone(tab)
-        synthetic = next(b for b in tab["bubbles"] if b["text"].startswith("**Tool Action:**"))
-        self.assertEqual(synthetic["timestamp"], diff_ts)
+        self.assertTrue(tab["codeBlockDiffs"], "expected diffs on tab.codeBlockDiffs")
 
-    def test_synthetic_falls_back_to_max_bubble_timestamp(self) -> None:
+    def test_diffs_do_not_appear_as_synthetic_bubbles(self) -> None:
         app = Flask(__name__)
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
@@ -142,12 +144,11 @@ class TestSyntheticBubbleTimestampNotNow(unittest.TestCase):
                 payload, _ = assemble_workspace_tabs("global", ws_root, rules=[])
 
         tab = next(t for t in payload["tabs"] if t["id"] == "cmp-d")
-        synthetic = next(b for b in tab["bubbles"] if b["text"].startswith("**Tool Action:**"))
-        # synthetic must NOT use datetime.now() — it should be at or before
-        # the latest real bubble (which is the 1_715_000_500_000 we seeded,
-        # far in the past relative to today's time).
-        now_ms = int(__import__("datetime").datetime.now().timestamp() * 1000)
-        self.assertLess(synthetic["timestamp"], now_ms - 10_000_000_000)
+        tool_action_bubbles = [
+            b for b in tab["bubbles"] if (b.get("text") or "").startswith("**Tool Action:**")
+        ]
+        self.assertEqual(tool_action_bubbles, [],
+                         msg="diffs must not be double-represented as synthetic AI bubbles")
 
 
 def _seed_workspace_with_tool_former(parent: str) -> str:

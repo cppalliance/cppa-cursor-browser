@@ -61,5 +61,28 @@ class TestGlobalQueryErrorSwallowed(unittest.TestCase):
             self.assertIsNone(result)
 
 
+class TestLocalQueryErrorSwallowed(unittest.TestCase):
+    def test_corrupt_local_state_vscdb_returns_none_not_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_root = os.path.join(tmp, "workspaceStorage")
+            ws_dir = os.path.join(ws_root, "ws-bad-local")
+            os.makedirs(ws_dir, exist_ok=True)
+            # Local state.vscdb exists but has no ItemTable → execute raises
+            conn = sqlite3.connect(os.path.join(ws_dir, "state.vscdb"))
+            conn.execute("CREATE TABLE other (x INTEGER)")
+            conn.commit()
+            conn.close()
+
+            global_dir = os.path.join(tmp, "globalStorage")
+            os.makedirs(global_dir, exist_ok=True)
+            sqlite3.connect(os.path.join(global_dir, "state.vscdb")).close()
+
+            try:
+                result = _infer_workspace_name_from_context(ws_root, "ws-bad-local")
+            except sqlite3.Error:
+                self.fail("local query error should be caught, not propagated")
+            self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

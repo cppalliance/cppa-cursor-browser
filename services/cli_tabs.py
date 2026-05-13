@@ -14,15 +14,26 @@ def _get_cli_workspace_tabs(workspace_id: str):
     try:
         project_id = workspace_id[4:]
         cli_projects = list_cli_projects(get_cli_chats_path())
-        project = next((cp for cp in cli_projects if cp["project_id"] == project_id), None)
+        project = next(
+            (
+                cp for cp in cli_projects
+                if isinstance(cp, dict) and cp.get("project_id") == project_id
+            ),
+            None,
+        )
         if project is None:
             return jsonify({"error": "CLI project not found"}), 404
 
         rules = current_app.config.get("EXCLUSION_RULES") or []
-        ws_name = project["workspace_name"] or project_id[:12]
+        ws_name = project.get("workspace_name") or project_id[:12]
+        sessions = project.get("sessions") or []
+        if not isinstance(sessions, list):
+            sessions = []
         tabs = []
 
-        for session in project["sessions"]:
+        for session in sessions:
+            if not isinstance(session, dict):
+                continue
             session_id = session.get("session_id")
             if not session_id:
                 continue

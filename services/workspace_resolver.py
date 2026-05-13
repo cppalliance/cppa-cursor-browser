@@ -42,23 +42,27 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
     if not os.path.isfile(local_db_path):
         return None
     composer_ids: list[str] = []
+    # closing() guarantees .close() on scope exit (issue #17).
+    # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
+    # naive f"file:{path}" breaks sqlite URI parsing.
+    _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
+    row: tuple | None = None
     try:
-        # closing() guarantees .close() on scope exit (issue #17).
-        # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
-        # naive f"file:{path}" breaks sqlite URI parsing.
-        _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
             row = lconn.execute(
                 "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
             ).fetchone()
-        if row and row[0]:
-            data = json.loads(row[0])
-            for c in (data.get("allComposers") or []):
-                cid = c.get("composerId") if isinstance(c, dict) else None
-                if cid:
-                    composer_ids.append(cid)
-    except Exception:
+    except sqlite3.Error:
         return None
+    if row and row[0]:
+        try:
+            data = json.loads(row[0])
+        except (json.JSONDecodeError, ValueError):
+            return None
+        for c in (data.get("allComposers") or []):
+            cid = c.get("composerId") if isinstance(c, dict) else None
+            if cid:
+                composer_ids.append(cid)
     if not composer_ids:
         return None
 

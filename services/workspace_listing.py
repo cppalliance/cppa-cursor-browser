@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 from utils.cli_chat_reader import list_cli_projects
@@ -43,14 +44,19 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
     # closing semantics now baked into the context manager (issue #17).
     with _open_global_db(workspace_path) as (global_db, _):
         if global_db:
+            def _safe_fetchall(query: str, params: tuple = ()) -> list:
+                try:
+                    return global_db.execute(query, params).fetchall()
+                except sqlite3.Error:
+                    return []
             try:
-                composer_rows = global_db.execute(
+                composer_rows = _safe_fetchall(
                     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
-                ).fetchall()
+                )
 
-                ctx_rows = global_db.execute(
+                ctx_rows = _safe_fetchall(
                     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
-                ).fetchall()
+                )
                 project_layouts_map: dict[str, list] = {}
                 for row in ctx_rows:
                     parts = row["key"].split(":")
@@ -74,9 +80,9 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                     except Exception:
                         pass
 
-                bubble_rows = global_db.execute(
+                bubble_rows = _safe_fetchall(
                     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-                ).fetchall()
+                )
                 bubble_map: dict[str, dict] = {}
                 for row in bubble_rows:
                     parts = row["key"].split(":")
@@ -227,11 +233,21 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
     try:
         cli_projects = list_cli_projects(get_cli_chats_path())
         for cp in cli_projects:
-            ws_name = cp["workspace_name"] or cp["project_id"][:12]
+            if not isinstance(cp, dict):
+                continue
+            project_id = cp.get("project_id")
+            if not isinstance(project_id, str) or not project_id:
+                continue
+            ws_name = cp.get("workspace_name") or project_id[:12]
             if is_excluded_by_rules(rules, ws_name):
                 continue
+            sessions = cp.get("sessions") or []
+            if not isinstance(sessions, list):
+                continue
             cli_convos = []
-            for s in cp["sessions"]:
+            for s in sessions:
+                if not isinstance(s, dict):
+                    continue
                 session_id = s.get("session_id")
                 if not session_id:
                     continue
@@ -245,9 +261,9 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                     cli_convos.append(session_name)
             if not cli_convos:
                 continue
-            last_ms = cp["last_updated_ms"]
+            last_ms = cp.get("last_updated_ms")
             projects.append({
-                "id": f"cli:{cp['project_id']}",
+                "id": f"cli:{project_id}",
                 "name": ws_name,
                 "conversationCount": len(cli_convos),
                 "lastModified": (

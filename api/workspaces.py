@@ -68,20 +68,22 @@ def get_workspace(workspace_id):
             project_id = workspace_id[4:]
             cli_projects = list_cli_projects(get_cli_chats_path())
             for cp in cli_projects:
-                if cp["project_id"] == project_id:
-                    last_ms = cp["last_updated_ms"]
-                    return jsonify({
-                        "id": workspace_id,
-                        "name": cp["workspace_name"] or project_id[:12],
-                        "path": cp["workspace_path"],
-                        "folder": cp["workspace_path"],
-                        "lastModified": (
-                            datetime.fromtimestamp(last_ms / 1000, tz=timezone.utc).isoformat()
-                            if last_ms
-                            else datetime.now(tz=timezone.utc).isoformat()
-                        ),
-                        "source": "cli",
-                    })
+                if not isinstance(cp, dict) or cp.get("project_id") != project_id:
+                    continue
+                last_ms = cp.get("last_updated_ms")
+                workspace_path_field = cp.get("workspace_path")
+                return jsonify({
+                    "id": workspace_id,
+                    "name": cp.get("workspace_name") or project_id[:12],
+                    "path": workspace_path_field,
+                    "folder": workspace_path_field,
+                    "lastModified": (
+                        datetime.fromtimestamp(last_ms / 1000, tz=timezone.utc).isoformat()
+                        if last_ms
+                        else datetime.now(tz=timezone.utc).isoformat()
+                    ),
+                    "source": "cli",
+                })
             return jsonify({"error": "CLI project not found"}), 404
 
         workspace_path = resolve_workspace_path()
