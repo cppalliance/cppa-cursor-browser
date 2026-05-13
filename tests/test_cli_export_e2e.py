@@ -134,10 +134,11 @@ class TestGetGlobalStateDir(unittest.TestCase):
             os.environ["XDG_STATE_HOME"] = self._prior
 
     def test_uses_xdg_state_home_when_set(self):
-        os.environ["XDG_STATE_HOME"] = "/tmp/some-xdg-root"
+        xdg_root = os.path.join(tempfile.gettempdir(), "some-xdg-root")
+        os.environ["XDG_STATE_HOME"] = xdg_root
         self.assertEqual(
             export_script.get_global_state_dir(),
-            "/tmp/some-xdg-root/cursor-chat-browser",
+            os.path.join(xdg_root, "cursor-chat-browser"),
         )
 
     def test_falls_back_to_home_when_xdg_unset(self):
