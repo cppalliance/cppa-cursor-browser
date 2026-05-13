@@ -53,9 +53,11 @@ jobs:
 
       - name: Run pytest integration suite
         # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage
-        # and exercise the Flask routes via app.test_client(). Runs alongside
-        # unittest, not instead of — both suites are merge gates.
-        run: python -m pytest tests/ -v --tb=short
+        # and exercise the Flask routes via app.test_client(). Scoped to the
+        # new endpoint file because `pytest tests/` would also re-collect the
+        # 178 unittest.TestCase subclasses already run in the step above —
+        # ~2× the CI minutes for zero extra signal.
+        run: python -m pytest tests/test_api_endpoints.py -v --tb=short
 
   # ── Typecheck: mypy ───────────────────────────────────────────────────────
   # Codebase already has type hints across most of the surface (~70+ typed

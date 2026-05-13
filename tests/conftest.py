@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -9,51 +10,54 @@ from pathlib import Path
 from typing import Generator
 
 import pytest
+from flask.testing import FlaskClient
 
 REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from app import create_app
-
-
-HAPPY_COMPOSER_ID = "cmp-happy"
-HAPPY_BUBBLE_ID = "bub-happy"
-HAPPY_WORKSPACE_ID = "ws-happy"
+from tests._fixture_ids import (  # noqa: E402,F401  (re-export for legacy importers)
+    HAPPY_BUBBLE_ID,
+    HAPPY_COMPOSER_ID,
+    HAPPY_WORKSPACE_ID,
+)
 
 
 def _make_global_state_db(path: str) -> None:
     """globalStorage/state.vscdb with one composerData + one bubbleId row."""
-    conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
-    conn.execute(
-        "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-        (
-            f"composerData:{HAPPY_COMPOSER_ID}",
-            json.dumps({
-                "name": "Happy conversation",
-                "createdAt": 1_715_000_000_000,
-                "lastUpdatedAt": 1_715_000_500_000,
-                "fullConversationHeadersOnly": [
-                    {"bubbleId": HAPPY_BUBBLE_ID, "type": 1},
-                ],
-                "modelConfig": {"modelName": "gpt-4o"},
-            }),
-        ),
-    )
-    conn.execute(
-        "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-        (
-            f"bubbleId:{HAPPY_COMPOSER_ID}:{HAPPY_BUBBLE_ID}",
-            json.dumps({
-                "text": "find me by search term sentinel-grep",
-                "type": "user",
-                "createdAt": 1_715_000_400_000,
-            }),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    # contextlib.closing guarantees conn.close() even if an exec/commit raises
+    # mid-setup, so a failed fixture build can't leak a handle and lock the
+    # tempdir against cleanup.
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"composerData:{HAPPY_COMPOSER_ID}",
+                json.dumps({
+                    "name": "Happy conversation",
+                    "createdAt": 1_715_000_000_000,
+                    "lastUpdatedAt": 1_715_000_500_000,
+                    "fullConversationHeadersOnly": [
+                        {"bubbleId": HAPPY_BUBBLE_ID, "type": 1},
+                    ],
+                    "modelConfig": {"modelName": "gpt-4o"},
+                }),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"bubbleId:{HAPPY_COMPOSER_ID}:{HAPPY_BUBBLE_ID}",
+                json.dumps({
+                    "text": "find me by search term sentinel-grep",
+                    "type": "user",
+                    "createdAt": 1_715_000_400_000,
+                }),
+            ),
+        )
+        conn.commit()
 
 
 def _make_workspace(parent: str, workspace_id: str, project_folder: str) -> None:
@@ -63,17 +67,16 @@ def _make_workspace(parent: str, workspace_id: str, project_folder: str) -> None
     with open(os.path.join(ws_dir, "workspace.json"), "w", encoding="utf-8") as f:
         json.dump({"folder": project_folder}, f)
     db = os.path.join(ws_dir, "state.vscdb")
-    conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE ItemTable ([key] TEXT PRIMARY KEY, value TEXT)")
-    conn.execute(
-        "INSERT INTO ItemTable ([key], value) VALUES (?, ?)",
-        (
-            "composer.composerData",
-            json.dumps({"allComposers": [{"composerId": HAPPY_COMPOSER_ID}]}),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        conn.execute("CREATE TABLE ItemTable ([key] TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO ItemTable ([key], value) VALUES (?, ?)",
+            (
+                "composer.composerData",
+                json.dumps({"allComposers": [{"composerId": HAPPY_COMPOSER_ID}]}),
+            ),
+        )
+        conn.commit()
 
 
 @pytest.fixture
@@ -130,7 +133,7 @@ def client(workspace_storage: str):
 
 
 @pytest.fixture
-def empty_workspace_client() -> Generator:
+def empty_workspace_client() -> Generator[FlaskClient, None, None]:
     """Flask test client bound to a workspaceStorage with no workspaces.
 
     Useful for 404 tests where the workspace id is unknown.
