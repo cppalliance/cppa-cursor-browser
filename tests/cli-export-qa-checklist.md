@@ -24,7 +24,7 @@ Mark each row pass/fail and attach short notes for any unexpected output.
 
 ## 2. CLI: default zip export
 
-```
+```bash
 python scripts/export.py --out ./export
 ```
 
@@ -37,7 +37,7 @@ python scripts/export.py --out ./export
 
 ## 3. CLI: no-zip export
 
-```
+```bash
 python scripts/export.py --out ./export --no-zip
 ```
 
@@ -49,7 +49,7 @@ python scripts/export.py --out ./export --no-zip
 
 ## 4. CLI: incremental (`--since last`)
 
-```
+```bash
 python scripts/export.py --out ./export --no-zip --since last
 ```
 
@@ -63,18 +63,18 @@ python scripts/export.py --out ./export --no-zip --since last
 
 ## 5. App server launch
 
-```
-python app.py --port 3001
+```bash
+python app.py
 ```
 
 - [ ] Process stays running for at least 30 s without crash
-- [ ] `curl -sI http://127.0.0.1:3001/` returns `HTTP/1.0 200 OK` (or 200 over 1.1)
+- [ ] `curl -sI http://127.0.0.1:3000/` returns `HTTP/1.0 200 OK` (or 200 over 1.1)
 - [ ] Home page lists at least one workspace card (assuming real Cursor data)
 - [ ] No `Exception` / `Traceback` in server log
 
 ## 6. Browse flow (web UI)
 
-Open `http://127.0.0.1:3001/` in a browser.
+Open `http://127.0.0.1:3000/` in a browser.
 
 - [ ] Workspace list renders without console errors
 - [ ] Clicking a workspace card opens the workspace view
