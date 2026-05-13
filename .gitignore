@@ -29,6 +29,7 @@ instance/
 # Logs & local data
 *.log
 export/
+exports/
 
 # IDE / OS
 .idea/
