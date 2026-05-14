@@ -63,24 +63,31 @@ probe "/api/detect-environment"  "/api/detect-environment"  200
 probe "/api/search?q=foo"        "/api/search?q=foo"        200
 probe "/api/search (no q -> 400)" "/api/search"             400
 
-WS_ID=$(curl "${CURL_FLAGS[@]}" "$BASE/api/workspaces" | python3 -c "
+# Find a non-global workspace id to drive the workspace-scoped probes.
+# Failing to PARSE /api/workspaces is a real bug (200 with malformed JSON
+# would otherwise slip through as a false green), so the python parse
+# runs without `2>/dev/null` and exit-status is checked separately.
+if WS_ID=$(curl "${CURL_FLAGS[@]}" "$BASE/api/workspaces" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for w in data:
     if w.get('id') and w['id'] != 'global':
         print(w['id'])
         break
-" 2>/dev/null)
-
-if [ -n "$WS_ID" ]; then
-  echo ""
-  echo "=== Workspace-scoped routes (WS=$WS_ID) ==="
-  probe "/workspace/<id>"            "/workspace/$WS_ID"               200
-  probe "/api/workspaces/<id>"       "/api/workspaces/$WS_ID"          200
-  probe "/api/workspaces/<id>/tabs"  "/api/workspaces/$WS_ID/tabs"     200
+"); then
+  if [ -n "$WS_ID" ]; then
+    echo ""
+    echo "=== Workspace-scoped routes (WS=$WS_ID) ==="
+    probe "/workspace/<id>"            "/workspace/$WS_ID"               200
+    probe "/api/workspaces/<id>"       "/api/workspaces/$WS_ID"          200
+    probe "/api/workspaces/<id>/tabs"  "/api/workspaces/$WS_ID/tabs"     200
+  else
+    echo ""
+    echo "[skip] no non-global workspace found; workspace-scoped probes skipped"
+  fi
 else
-  echo ""
-  echo "[skip] no non-global workspace found; workspace-scoped probes skipped"
+  printf "\n  [FAIL]  %-44s parse error on /api/workspaces payload\n" "workspace-id extraction"
+  fail=$((fail + 1))
 fi
 
 echo ""
