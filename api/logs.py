@@ -133,7 +133,7 @@ def get_logs():
         except Exception:
             pass
 
-        logs.sort(key=lambda l: l.get("timestamp") or 0, reverse=True)
+        logs.sort(key=lambda log: log.get("timestamp") or 0, reverse=True)
         return jsonify({"logs": logs})
 
     except Exception as e:

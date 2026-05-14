@@ -75,9 +75,8 @@ jobs:
           python -m pip install 'flask>=3.0' 'fpdf2>=2.7' 'mypy>=1.10'
 
       - name: Run mypy
-        # Transitional only (maintainer consensus): keeps CI green until `mypy` exits
-        # zero on this repo — then delete this line so type errors fail the job.
-        continue-on-error: true
+        # No `continue-on-error` — mypy now exits zero on this repo (closes #29),
+        # so type errors must fail the job from here on.
         run: mypy --ignore-missing-imports --no-strict-optional --pretty .
 
   # ── Secret scan: gitleaks ─────────────────────────────────────────────────

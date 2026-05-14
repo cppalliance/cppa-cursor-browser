@@ -9,7 +9,6 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import zipfile
 from contextlib import closing
 from datetime import datetime
@@ -18,7 +17,7 @@ from pathlib import Path
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from utils.workspace_path import resolve_workspace_path
-from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
+from utils.path_helpers import get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
@@ -390,15 +389,15 @@ def export_chats():
                         status_str = f" ({tool_status})" if tool_status else ""
                         md += f"> **Tool: {tool_summary}**{status_str}\n"
                         if t.get("input"):
-                            md += f">\n> **INPUT:**\n> ```\n"
+                            md += ">\n> **INPUT:**\n> ```\n"
                             for iline in str(t["input"]).split("\n"):
                                 md += f"> {iline}\n"
-                            md += f"> ```\n"
+                            md += "> ```\n"
                         if t.get("output"):
-                            md += f">\n> **OUTPUT:**\n> ```\n"
+                            md += ">\n> **OUTPUT:**\n> ```\n"
                             for oline in str(t["output"]).split("\n"):
                                 md += f"> {oline}\n"
-                            md += f"> ```\n"
+                            md += "> ```\n"
                         md += "\n"
                     md += "---\n\n"
 
