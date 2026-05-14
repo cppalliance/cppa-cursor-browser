@@ -11,7 +11,7 @@ sections in order. Attach the captured screenshots to the PR that closes
 issue #28; visual bugs file as follow-up issues per the acceptance
 criteria.
 
-### Verification-method legend
+## Verification-method legend
 
 A reviewer should be able to audit any `[x]` and tell *how* it was
 verified. The default is **visual** — a human confirmed it in Chrome
@@ -262,7 +262,8 @@ Phantom rows removed (filed as enhancement ideas, not bugs):
 
 ## 8. Regression notes — fixes shipped in this PR
 
-During the QA pass, one visual bug was found and fixed in the same PR:
+During the QA pass, two visual overflow bugs were found and fixed in
+this same PR (both narrow CSS changes, no JS or template churn):
 
 - **`.main-content` grid column overflowing viewport on the right.**
   The right-hand conversation panel (`1fr` grid column in
@@ -275,11 +276,25 @@ During the QA pass, one visual bug was found and fixed in the same PR:
   Existing `overflow-x: auto` on `.prose pre` and `word-break: break-all`
   on `.tool-call-content` then take over inside the bubble.
 
+- **`.sidebar-item-time` truncation gap.** The chat-title
+  row inside each sidebar item already truncates with
+  `text-overflow: ellipsis; white-space: nowrap;`, but the time/model
+  row beneath it had no overflow handling, so a long model badge or
+  localised timestamp would overflow the fixed 280px sidebar column.
+  Brad flagged the asymmetry during the PR review. Fix: mirror the
+  title row's three properties on `.sidebar-item-time` at
+  [static/css/style.css:387–390](../static/css/style.css#L387-L390).
+  Same one-line shape as the title row; no other sidebar rules touched.
+
 - [x] **(visual)** Post-fix screenshots in `samples/qa/workspace-chrome.png`,
       `workspace-firefox.png`, `conversation-chrome.png`,
       `conversation-firefox.png` were captured *after* the
       `.main-content { min-width: 0 }` fix landed — the conversation
       column stays inside the viewport in all four.
+- ⏳ The `.sidebar-item-time` truncation fix is invisible on current
+      data (timestamps + model names fit today). The check is forward-
+      looking: drop it if a future row exceeds 280px, the ellipsis
+      should kick in instead of overflowing.
 
 ## 9. Sign-off
 

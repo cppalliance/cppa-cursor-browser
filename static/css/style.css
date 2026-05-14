@@ -382,7 +382,10 @@ h3 { font-size: 1.15rem; font-weight: 600; }
   border-color: var(--badge-bg);
 }
 .sidebar-item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-item-time { font-size: 0.75rem; opacity: 0.7; margin-top: 0.15rem; }
+/* Same truncation as .sidebar-item-title — a long model badge or localised
+ * timestamp would otherwise overflow the 280px .sidebar column horizontally
+ * (the title row handles its own overflow; the time row should too). */
+.sidebar-item-time { font-size: 0.75rem; opacity: 0.7; margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- Chat Bubbles ---------- */
 .chat-bubbles { display: flex; flex-direction: column; gap: 1rem; }
