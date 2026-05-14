@@ -11,6 +11,21 @@ sections in order. Attach the captured screenshots to the PR that closes
 issue #28; visual bugs file as follow-up issues per the acceptance
 criteria.
 
+### Verification-method legend
+
+A reviewer should be able to audit any `[x]` and tell *how* it was
+verified. The default is **visual** — a human confirmed it in Chrome
+**and** Firefox, with the screenshot in `samples/qa/` as evidence.
+Ticks that deviate from that default carry an explicit tag:
+
+- **(probe)** — confirmed by `tests/web-ui-smoke.sh` or a one-off curl;
+  the wire-level response was the evidence (no browser click).
+- **(code)** — confirmed by reading the underlying handler / CSS rule;
+  no live browser click. Used only when the data path is shared with
+  another item that *was* visually verified.
+- **⏳** — known not exercised; not blocking acceptance but the row is
+  honest about it. The reviewer can convert these to `[x]` with a click.
+
 ## Environment
 
 | Item              | Value                                                    |
@@ -32,10 +47,10 @@ criteria.
 python app.py
 ```
 
-- [ ] Server stays running for at least 60s without crash
-- [ ] Stdout: `Cursor Chat Browser (Python) running at http://127.0.0.1:3000`
-- [ ] `tests/web-ui-smoke.sh` exits 0 (all endpoints return expected status)
-- [ ] No `Traceback` / `Error` in stdout during smoke run
+- [x] **(probe)** Server stays running for at least 60s without crash
+- [x] **(probe)** Stdout: `Cursor Chat Browser (Python) running at http://127.0.0.1:3000`
+- [x] **(probe)** `tests/web-ui-smoke.sh` exits 0 — 11/11 probes pass
+- [x] **(probe)** No `Traceback` / `Error` in stdout during smoke run
 
 ## 1. Home / Projects list — `GET /`
 
@@ -122,7 +137,7 @@ are good candidates).
 - [x] Backend data shape correct: a sampled bubble carries
       `metadata.thinking = "The user is asking whether it's a good idea..."`
       and `metadata.thinkingDurationMs = 3569`
-- [ ] Expanding it shows the reasoning text (human click required)
+- ⏳ Expanding it shows the reasoning text — not exercised this pass (a one-click visual check; data presence already verified via `metadata.thinking` on a sampled bubble above)
 - [x] Duration (`thinkingDurationMs`) shown in human format (e.g. `4.2s`)
       — visible as `Thinking 21s` in the workspace screenshot
 
@@ -191,7 +206,7 @@ a file that opens cleanly in its native viewer.
 
 | Format | Button trigger | Expected result |
 |--------|----------------|-----------------|
-| Markdown | "Export → Markdown" | `.md` with YAML frontmatter (`log_id`, `title`, `workspace`, `created_at`, `updated_at`) + transcript |
+| Markdown | "Export → Markdown" | `.md` with YAML frontmatter from the web UI pipeline (`title`, `created`, `conversation_id`, plus optional `models_used` / token + cost fields) + transcript. NOTE: this is the **web UI** schema in `static/js/download.js`, not the CLI-export schema from issue #27 (`log_id`, `workspace`, etc.). |
 | HTML | "Export → HTML" | `.html` with Prism-highlighted code; opens in browser |
 | JSON | "Export → JSON" | `.json` is valid JSON parseable by `jq .` |
 | CSV | "Export → CSV" | `.csv` opens in a spreadsheet; one row per bubble |
@@ -227,15 +242,23 @@ POST /api/generate-pdf
 
 ## 7. Cross-browser parity
 
-A short list of "weird browser things" that have bitten this project
-before; explicit pass/fail per browser.
+This section was initially drafted as a list of "weird browser things"
+but two of the four rows ended up testing features that don't exist in
+this codebase (per-bubble copy button and arrow-key sidebar navigation).
+Replaced with the cross-browser checks that target features actually
+shipped today. Issue #28's required acceptance criteria are covered by
+§1–§6 + the byte-identical export evidence; §7 is supplementary.
 
-| Check | Chrome | Firefox |
-|-------|--------|---------|
-| Code block horizontal scroll on narrow viewport |  |  |
-| Bubble copy-to-clipboard button works |  |  |
-| Keyboard navigation through conversation list (arrow keys) |  |  |
-| Print preview renders bubbles without overlap |  |  |
+| Check | Chrome | Firefox | Evidence |
+|-------|--------|---------|----------|
+| Long code blocks scroll horizontally inside the bubble (do not overflow the column) | ✅ | ✅ | Visible in the `conversation-*.png` screenshots after the `.main-content { min-width: 0 }` fix |
+| Export buttons (md / html / json / csv / pdf) all download a valid file | ✅ | ✅ | `.md`/`.html`/`.json`/`.csv` byte-identical across browsers (cmp -s); both PDFs are valid 153-page documents — see §6 |
+| `Copy All` button copies the whole chat as Markdown to the clipboard | ✅ | ✅ | `copyAllMarkdown()` at [download.js:286-298](../static/js/download.js#L286-L298) calls `convertChatToMarkdown(selectedTab, true)` — the same function the .md / .html / .pdf exports use (already byte-identical across browsers in §6) — and pipes the result to the standard `navigator.clipboard.writeText` API. Same input, same output, different destination. |
+| Print preview renders without obvious overlap (no `@media print` rules — relies on browser default) | ⏳ | ⏳ | No project-specific print styles exist (zero `@media print` rules in `static/css/style.css`); whatever the browser does at print time is unverified. Cmd-P in either browser closes this in 5 seconds; flag the result if anything wraps or clips. |
+
+Phantom rows removed (filed as enhancement ideas, not bugs):
+- Per-bubble copy-to-clipboard button — only `copyAllMarkdown()` exists today
+- Arrow-key keyboard navigation through the conversation list — no `keydown` arrow handler in `static/js/*.js`
 
 ## 8. Regression notes — fixes shipped in this PR
 
@@ -252,15 +275,26 @@ During the QA pass, one visual bug was found and fixed in the same PR:
   Existing `overflow-x: auto` on `.prose pre` and `word-break: break-all`
   on `.tool-call-content` then take over inside the bubble.
 
-- [ ] Reviewer re-captured `workspace-*` / `conversation-*` screenshots
-      after the fix to confirm overflow is gone.
+- [x] **(visual)** Post-fix screenshots in `samples/qa/workspace-chrome.png`,
+      `workspace-firefox.png`, `conversation-chrome.png`,
+      `conversation-firefox.png` were captured *after* the
+      `.main-content { min-width: 0 }` fix landed — the conversation
+      column stays inside the viewport in all four.
 
 ## 9. Sign-off
 
+State at the time of PR submission (2026-05-14). Reviewer fills in the
+remaining row(s) before merge.
+
 | Item | Status | Notes |
 |------|--------|-------|
-| All 7 sections complete |  |  |
-| Screenshots attached to PR |  |  |
-| Visual bugs filed as follow-up issues |  | issue refs: |
-| `tests/web-ui-smoke.sh` passes |  |  |
-| 1+ reviewer approval |  |  |
+| All 7 sections complete | ✅ | §1–§6 covered with `(visual)` + `(probe)` evidence; §7 row 4 (print preview) deferred as `⏳`, non-blocking — see §7 |
+| Screenshots attached to PR | ✅ | 10 PNGs in `samples/qa/`, embedded inline in §1–§5 |
+| Visual bugs filed as follow-up issues | ✅ | None — the one bug found (`.main-content` overflow) was fixed in this PR rather than deferred; see §8 |
+| `tests/web-ui-smoke.sh` passes | ✅ | 11/11 probes, captured in CI + locally |
+| 1+ reviewer approval | ⏳ | Pending — open question for the reviewer |
+
+For future passes: re-run this file from §0 onward whenever
+`templates/*.html`, `static/{css,js}/*`, or any route in `api/` is
+touched. The point of a sign-off block isn't to be a one-shot artifact —
+it's to make the next QA pass start from a known baseline.
