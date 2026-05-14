@@ -90,7 +90,6 @@ def create_app(exclusion_rules_path=None):
 
 if __name__ == "__main__":
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(description="Cursor Chat Browser (Python)")
     parser.add_argument("--port", type=int, default=3000)

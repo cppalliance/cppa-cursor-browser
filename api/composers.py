@@ -5,6 +5,7 @@ API routes for composers — mirrors:
 """
 
 import json
+import logging
 import os
 import sqlite3
 from contextlib import closing
@@ -15,6 +16,7 @@ from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
 
 bp = Blueprint("composers", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _read_json_file(path: str):
@@ -67,8 +69,8 @@ def list_composers():
         composers.sort(key=lambda c: to_epoch_ms(c.get("lastUpdatedAt")), reverse=True)
         return jsonify(composers)
 
-    except Exception as e:
-        print(f"Failed to get composers: {e}")
+    except Exception:
+        _logger.exception("Failed to get composers")
         return jsonify({"error": "Failed to get composers"}), 500
 
 
@@ -122,6 +124,6 @@ def get_composer(composer_id):
 
         return jsonify({"error": "Composer not found"}), 404
 
-    except Exception as e:
-        print(f"Failed to get composer: {e}")
+    except Exception:
+        _logger.exception("Failed to get composer")
         return jsonify({"error": "Failed to get composer"}), 500

@@ -73,7 +73,7 @@ def _tokenize_rule(line: str) -> list:
     the string ``"OR"``, or a ``(kind, value)`` tuple where *kind* is
     ``"word"`` or ``"phrase"``.
     """
-    tokens = []
+    tokens: list[str | tuple[str, str]] = []
     rest = line.strip()
     while rest:
         # Skip whitespace
