@@ -55,9 +55,9 @@ jobs:
   # Codebase already has type hints across most of the surface (~70+ typed
   # functions). Mypy runs in lenient mode (--ignore-missing-imports for
   # untyped third-party deps; no strict-optional) so the gate isn't a wall
-  # of false positives on first run. continue-on-error keeps findings as
-  # warnings during the surface-cleanup phase; flip to required by removing
-  # continue-on-error once the surface is clean.
+  # of false positives. The transitional `continue-on-error: true` was
+  # removed in #29 once mypy reached zero errors on this repo — type
+  # failures now block merges.
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest

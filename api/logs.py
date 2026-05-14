@@ -4,6 +4,7 @@ GET /api/logs
 """
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -16,6 +17,7 @@ from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
 
 bp = Blueprint("logs", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _extract_chat_id_from_bubble_key(key: str) -> str | None:
@@ -69,8 +71,8 @@ def get_logs():
                         "type": "chat",
                         "messageCount": len(bubbles),
                     })
-            except Exception as e:
-                print(f"Error reading global storage: {e}")
+            except Exception:
+                _logger.exception("Error reading global storage")
 
         # Per-workspace (legacy)
         try:
@@ -136,6 +138,6 @@ def get_logs():
         logs.sort(key=lambda log: log.get("timestamp") or 0, reverse=True)
         return jsonify({"logs": logs})
 
-    except Exception as e:
-        print(f"Failed to get logs: {e}")
+    except Exception:
+        _logger.exception("Failed to get logs")
         return jsonify({"error": "Failed to get logs", "logs": []}), 500

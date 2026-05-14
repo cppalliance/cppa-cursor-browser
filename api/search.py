@@ -53,7 +53,7 @@ def _build_exclusion_searchable(
     metadata_parts: list[str] | None = None,
 ) -> str:
     """Build broad searchable text so exclusion rules cover visible output."""
-    combined: list = []
+    combined: list[str] = []
     if content_parts:
         combined.extend(p for p in content_parts if p)
     if metadata_parts:
