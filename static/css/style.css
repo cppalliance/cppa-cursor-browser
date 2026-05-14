@@ -313,6 +313,12 @@ h3 { font-size: 1.15rem; font-weight: 600; }
   .workspace-grid { grid-template-columns: 1fr; }
 }
 
+/* Grid items default to min-width: auto, so a long code block or unbroken
+ * URL inside .main-content would push the column wider than 1fr — overflowing
+ * the viewport on the right. min-width: 0 lets the column shrink and lets the
+ * existing overflow-x: auto on .prose pre handle the scroll inside the bubble. */
+.main-content { min-width: 0; }
+
 /* ---------- Sidebar ---------- */
 .sidebar {
   max-height: calc(100vh - 10rem);

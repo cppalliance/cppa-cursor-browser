@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Backend smoke probes for the web UI — boot the app, hit every
+# route a human reviewer would click, assert expected status, exit
+# non-zero on any failure.
+#
+# Usage: bash tests/web-ui-smoke.sh
+# Env:   WORKSPACE_PATH, CLI_CHATS_PATH inherited from the calling shell.
+
+set -u
+
+PORT="${CLAW_QA_PORT:-3001}"   # use 3001 so a running 3000 instance isn't disturbed
+BASE="http://127.0.0.1:${PORT}"
+LOG=$(mktemp)
+trap "rm -f $LOG" EXIT
+
+cd "$(dirname "$0")/.." || exit 1
+
+# Boot the app in the background on the chosen port.
+python3 app.py --port "$PORT" > "$LOG" 2>&1 &
+APP_PID=$!
+trap "kill $APP_PID 2>/dev/null; rm -f $LOG" EXIT
+
+# Wait up to 15s for /api/workspaces to respond.
+for i in $(seq 1 30); do
+  if curl -sf -o /dev/null "$BASE/api/workspaces"; then break; fi
+  sleep 0.5
+done
+
+if ! curl -sf -o /dev/null "$BASE/api/workspaces"; then
+  echo "[FAIL] app never became responsive on $PORT"
+  echo "--- boot log ---"; cat "$LOG"
+  exit 1
+fi
+
+fail=0
+probe() {
+  local label="$1" url="$2" expect="$3"
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE$url")
+  if [ "$code" = "$expect" ]; then
+    printf "  [pass]  %-44s %s (expected %s)\n" "$label" "$code" "$expect"
+  else
+    printf "  [FAIL]  %-44s %s (expected %s)\n" "$label" "$code" "$expect"
+    fail=$((fail + 1))
+  fi
+}
+
+echo "=== Page routes ==="
+probe "/"            "/"            200
+probe "/search"      "/search"      200
+probe "/config"      "/config"      200
+
+echo ""
+echo "=== JSON API ==="
+probe "/api/workspaces"          "/api/workspaces"          200
+probe "/api/composers"           "/api/composers"           200
+probe "/api/detect-environment"  "/api/detect-environment"  200
+probe "/api/search?q=foo"        "/api/search?q=foo"        200
+probe "/api/search (no q -> 400)" "/api/search"             400
+
+WS_ID=$(curl -s "$BASE/api/workspaces" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for w in data:
+    if w.get('id') and w['id'] != 'global':
+        print(w['id'])
+        break
+" 2>/dev/null)
+
+if [ -n "$WS_ID" ]; then
+  echo ""
+  echo "=== Workspace-scoped routes (WS=$WS_ID) ==="
+  probe "/workspace/<id>"            "/workspace/$WS_ID"               200
+  probe "/api/workspaces/<id>"       "/api/workspaces/$WS_ID"          200
+  probe "/api/workspaces/<id>/tabs"  "/api/workspaces/$WS_ID/tabs"     200
+else
+  echo ""
+  echo "[skip] no non-global workspace found; workspace-scoped probes skipped"
+fi
+
+echo ""
+if [ "$fail" -eq 0 ]; then
+  echo "all smoke probes pass"
+  exit 0
+else
+  echo "$fail probe(s) failed — see /tmp boot log for context"
+  echo "--- boot log tail ---"; tail -20 "$LOG"
+  exit 1
+fi
