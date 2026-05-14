@@ -208,7 +208,7 @@ a file that opens cleanly in its native viewer.
 | `.csv`  | 592 KB | 391 rows (1 header + 390 bubbles), 21 columns covering tokens, thinking, tool calls |
 
 Backend endpoint check (run earlier in this QA pass):
-```
+```text
 POST /api/generate-pdf
   → HTTP 200, Content-Type: application/pdf, %PDF-1.3 magic, %%EOF terminator
 ```

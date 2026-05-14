@@ -10,6 +10,9 @@ set -u
 
 PORT="${CLAW_QA_PORT:-3001}"   # use 3001 so a running 3000 instance isn't disturbed
 BASE="http://127.0.0.1:${PORT}"
+# Per-call curl bounds — connection setup capped at 2s, total wall-clock at
+# 5s — so a stalled socket can't hang the script indefinitely.
+CURL_FLAGS=(--silent --show-error --connect-timeout 2 --max-time 5)
 LOG=$(mktemp)
 trap "rm -f $LOG" EXIT
 
@@ -20,13 +23,15 @@ python3 app.py --port "$PORT" > "$LOG" 2>&1 &
 APP_PID=$!
 trap "kill $APP_PID 2>/dev/null; rm -f $LOG" EXIT
 
-# Wait up to 15s for /api/workspaces to respond.
+# Wait up to 15s for /api/workspaces to respond. Connection-refused during
+# this loop is expected (app is still booting), so stderr is muted; the
+# final check below re-runs with stderr visible if the wait times out.
 for i in $(seq 1 30); do
-  if curl -sf -o /dev/null "$BASE/api/workspaces"; then break; fi
+  if curl "${CURL_FLAGS[@]}" -f -o /dev/null "$BASE/api/workspaces" 2>/dev/null; then break; fi
   sleep 0.5
 done
 
-if ! curl -sf -o /dev/null "$BASE/api/workspaces"; then
+if ! curl "${CURL_FLAGS[@]}" -f -o /dev/null "$BASE/api/workspaces"; then
   echo "[FAIL] app never became responsive on $PORT"
   echo "--- boot log ---"; cat "$LOG"
   exit 1
@@ -36,7 +41,7 @@ fail=0
 probe() {
   local label="$1" url="$2" expect="$3"
   local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE$url")
+  code=$(curl "${CURL_FLAGS[@]}" -o /dev/null -w "%{http_code}" "$BASE$url")
   if [ "$code" = "$expect" ]; then
     printf "  [pass]  %-44s %s (expected %s)\n" "$label" "$code" "$expect"
   else
@@ -58,7 +63,7 @@ probe "/api/detect-environment"  "/api/detect-environment"  200
 probe "/api/search?q=foo"        "/api/search?q=foo"        200
 probe "/api/search (no q -> 400)" "/api/search"             400
 
-WS_ID=$(curl -s "$BASE/api/workspaces" | python3 -c "
+WS_ID=$(curl "${CURL_FLAGS[@]}" "$BASE/api/workspaces" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for w in data:
