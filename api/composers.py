@@ -124,7 +124,25 @@ def get_composer(composer_id):
 
                 if row and row[0]:
                     data = json.loads(row[0])
-                    for c in (data.get("allComposers") or []):
+                    # Mirror the envelope guards list_composers() applies at line 60–74
+                    # so a drifted local row (data not a dict, or allComposers missing
+                    # / non-list) surfaces as a logged SchemaError, not a 500.
+                    if not isinstance(data, dict):
+                        raise SchemaError(
+                            "WorkspaceComposers",
+                            "composer.composerData",
+                            hint=f"expected object, got {type(data).__name__}",
+                        )
+                    if "allComposers" not in data:
+                        raise SchemaError("WorkspaceComposers", "allComposers")
+                    all_composers = data.get("allComposers")
+                    if not isinstance(all_composers, list):
+                        raise SchemaError(
+                            "WorkspaceComposers",
+                            "allComposers",
+                            hint=f"expected list, got {type(all_composers).__name__}",
+                        )
+                    for c in all_composers:
                         if isinstance(c, dict) and c.get("composerId") == composer_id:
                             try:
                                 local = WorkspaceLocalComposer.from_dict(c)
@@ -135,6 +153,8 @@ def get_composer(composer_id):
                                 print(f"Schema drift in workspace-local composer {composer_id}: {e}")
                                 continue
                             return jsonify(local.raw)
+            except SchemaError as e:
+                print(f"Schema drift in {db_path}: {e}")
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 

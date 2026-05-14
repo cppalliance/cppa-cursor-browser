@@ -583,9 +583,12 @@ def list_workspaces():
                             try:
                                 bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
                                 bubble_map[bid] = bubble.raw
-                            except (SchemaError, json.JSONDecodeError, ValueError):
-                                # Skip malformed bubble rows — read-many path, one bad row
-                                # must not 500 the endpoint.
+                            except SchemaError as e:
+                                # Drift surfaces in logs so an operator sees disappearing
+                                # bubbles instead of guessing. The row is still skipped —
+                                # one bad bubble must not 500 the endpoint.
+                                print(f"Schema drift in bubble {bid}: {e}")
+                            except (json.JSONDecodeError, ValueError):
                                 pass
 
                     # Process each composer
@@ -1022,8 +1025,12 @@ def get_workspace_tabs(workspace_id):
                     try:
                         bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
                         bubble_map[bid] = bubble.raw
-                    except (SchemaError, json.JSONDecodeError, ValueError):
-                        # Skip malformed rows — one bad bubble must not 500 the tabs endpoint.
+                    except SchemaError as e:
+                        # Drift surfaces in logs so an operator can chase disappearing
+                        # bubbles instead of guessing. Bad row still skipped so the
+                        # tabs endpoint can't 500 on one malformed bubble.
+                        print(f"Schema drift in bubble {bid}: {e}")
+                    except (json.JSONDecodeError, ValueError):
                         pass
     
             # Load codeBlockDiffs

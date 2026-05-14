@@ -128,6 +128,38 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
                     "model is defined but not wired at the production read site",
             )
 
+    def test_bubble_schema_drift_is_logged_not_swallowed_silently(self):
+        # CodeRabbit: SchemaError used to be lumped in with JSONDecodeError /
+        # ValueError and skipped silently. Schema drift must now print a
+        # `Schema drift in bubble <bid>` line so disappearing bubbles can be
+        # traced. The well-formed row still loads alongside.
+        from app import create_app
+        # Seed a deliberately-malformed bubble row that will trip
+        # Bubble.from_dict's "expected non-empty str" gate on the bubble_id by
+        # putting a non-dict at the value slot.
+        global_db = os.path.join(self._tmp.name, "globalStorage", "state.vscdb")
+        with closing(sqlite3.connect(global_db)) as conn:
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                (f"bubbleId:{COMPOSER_ID}:bub-bad", json.dumps("not-a-dict")),
+            )
+            conn.commit()
+        app = create_app()
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+        import io
+        from contextlib import redirect_stdout
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            client = app.test_client()
+            response = client.get("/api/search?q=sentinel-wired")
+            self.assertEqual(response.status_code, 200)
+        out = captured.getvalue()
+        self.assertIn("Schema drift in bubble", out,
+            msg=f"expected drift log line, got stdout:\n{out!r}")
+        self.assertIn("bub-bad", out,
+            msg="drift log must include the offending bubble id")
+
     def test_workspace_tabs_endpoint_calls_composer_from_dict(self):
         # Brad's most-important finding: list_workspaces() at api/workspaces.py:605
         # validates each composer with Composer.from_dict, but get_workspace_tabs()
@@ -288,6 +320,47 @@ class TestGetComposerValidatesSchema(unittest.TestCase):
                     "/api/composers/<id> — the per-workspace path is bypassing "
                     "schema validation that list_composers performs.",
             )
+
+    def test_get_composer_handles_non_dict_envelope_via_fallback(self):
+        # CodeRabbit: data.get(...) used to crash with AttributeError when the
+        # per-workspace blob isn't a dict. Now must be caught as SchemaError
+        # so the function falls through to the global fallback instead of 500.
+        from app import create_app
+        ws_db = os.path.join(self.workspace_path, WORKSPACE_ID, "state.vscdb")
+        with closing(sqlite3.connect(ws_db)) as conn:
+            # Replace the dict envelope with a list — would have raised
+            # AttributeError on data.get(...) before the guards landed.
+            conn.execute(
+                "UPDATE ItemTable SET value = ? WHERE [key] = 'composer.composerData'",
+                (json.dumps(["not", "a", "dict"]),),
+            )
+            conn.commit()
+        app = create_app()
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+        client = app.test_client()
+        response = client.get(f"/api/composers/{COMPOSER_ID}")
+        # Global fallback still has the composer seeded, so this must return
+        # 200, not 500. The per-workspace drift gets logged and skipped.
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json().get("name"), "Wired conversation")
+
+    def test_get_composer_handles_non_list_all_composers_via_fallback(self):
+        from app import create_app
+        ws_db = os.path.join(self.workspace_path, WORKSPACE_ID, "state.vscdb")
+        with closing(sqlite3.connect(ws_db)) as conn:
+            conn.execute(
+                "UPDATE ItemTable SET value = ? WHERE [key] = 'composer.composerData'",
+                (json.dumps({"allComposers": "should-be-list"}),),
+            )
+            conn.commit()
+        app = create_app()
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+        client = app.test_client()
+        response = client.get(f"/api/composers/{COMPOSER_ID}")
+        # Drift surfaces via global fallback, not as a 500.
+        self.assertEqual(response.status_code, 200)
 
     def test_get_composer_calls_composer_from_dict_on_global_fallback(self):
         # When the per-workspace path misses (composer only in globalStorage),

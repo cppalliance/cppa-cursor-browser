@@ -150,9 +150,12 @@ def search():
                             bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
                             text = extract_text_from_bubble(bubble.raw)
                             bubble_map[bid] = {"text": text, "raw": bubble.raw}
-                        except (SchemaError, json.JSONDecodeError, ValueError):
-                            # Skip malformed bubble rows — search must keep returning
-                            # results from the well-formed ones.
+                        except SchemaError as e:
+                            # Drift logged so the operator can see why a chat dropped
+                            # out of search results; bad row still skipped so search
+                            # keeps returning results from the well-formed ones.
+                            print(f"Schema drift in bubble {bid}: {e}")
+                        except (json.JSONDecodeError, ValueError):
                             pass
 
                 # Search through composerData
