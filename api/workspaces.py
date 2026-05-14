@@ -873,7 +873,7 @@ def _get_cli_workspace_tabs(workspace_id: str):
 
             try:
                 messages = traverse_blobs(session["db_path"])
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort per-session skip; one corrupted session must not 500 the endpoint, and the failure mode is logged with exc_info so the concrete type is preserved.
                 _logger.warning("CLI: could not read session %s", session_id, exc_info=True)
                 continue
 
@@ -1395,7 +1395,7 @@ def get_workspace_tabs(workspace_id):
     
                     response["tabs"].append(tab)
     
-                except Exception:
+                except Exception:  # noqa: BLE001 — best-effort per-composer skip in a read-many loop; one malformed row must not 500 the tabs endpoint, and exc_info captures the concrete type for debugging.
                     _logger.warning("Error parsing composer data for %s", composer_id, exc_info=True)
     
             # Sort tabs by timestamp descending (newest first)
