@@ -38,6 +38,10 @@ class Composer:
             raise SchemaError("Composer", "createdAt")
 
         created_at = raw.get("createdAt")
+        # Numeric-only on purpose: a 2026-05 scan of 17/17 live composers on
+        # disk stored createdAt as int milliseconds. If Cursor ever switches
+        # to ISO strings, those rows would disappear from list/search via a
+        # drift warning — relax the check at that point, don't silently coerce.
         if not isinstance(created_at, (int, float)) or isinstance(created_at, bool):
             raise SchemaError(
                 "Composer",

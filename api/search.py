@@ -18,7 +18,7 @@ from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.cli_chat_reader import list_cli_projects, traverse_blobs, messages_to_bubbles
-from models import Composer, SchemaError
+from models import Bubble, Composer, SchemaError
 
 bp = Blueprint("search", __name__)
 
@@ -147,11 +147,12 @@ def search():
                     if len(parts) >= 3:
                         bid = parts[2]
                         try:
-                            b = json.loads(row["value"])
-                            if isinstance(b, dict):
-                                text = extract_text_from_bubble(b)
-                                bubble_map[bid] = {"text": text, "raw": b}
-                        except Exception:
+                            bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                            text = extract_text_from_bubble(bubble.raw)
+                            bubble_map[bid] = {"text": text, "raw": bubble.raw}
+                        except (SchemaError, json.JSONDecodeError, ValueError):
+                            # Skip malformed bubble rows — search must keep returning
+                            # results from the well-formed ones.
                             pass
 
                 # Search through composerData

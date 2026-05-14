@@ -191,6 +191,22 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             return
         self.fail("SchemaError did not propagate as ValueError")
 
+    def test_schema_error_message_distinguishes_missing_from_invalid(self) -> None:
+        # Operators grep logs for drift. "missing required field" must only fire
+        # when a key is absent; type / shape mismatches must read "invalid field"
+        # so the two failure modes can be told apart.
+        missing = SchemaError("Composer", "createdAt")
+        self.assertIn("missing required field", str(missing))
+        self.assertNotIn("invalid field", str(missing))
+
+        type_mismatch = SchemaError(
+            "Composer", "createdAt",
+            hint="expected timestamp number, got str",
+        )
+        self.assertIn("invalid field", str(type_mismatch))
+        self.assertNotIn("missing required field", str(type_mismatch))
+        self.assertIn("expected timestamp number, got str", str(type_mismatch))
+
     def test_non_dict_payload_raises_schema_error(self) -> None:
         bad_payloads: tuple[object, ...] = ([], "not a dict", 42, None, ("a", "b"))
         for bad in bad_payloads:

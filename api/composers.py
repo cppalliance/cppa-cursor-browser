@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
-from models import SchemaError, WorkspaceLocalComposer
+from models import Composer, SchemaError, Workspace, WorkspaceLocalComposer
 
 bp = Blueprint("composers", __name__)
 
@@ -41,9 +41,11 @@ def list_composers():
 
             workspace_folder = None
             try:
-                wd = _read_json_file(wj_path)
-                workspace_folder = wd.get("folder")
-            except Exception:
+                workspace = Workspace.from_dict(_read_json_file(wj_path), workspace_id=name)
+                workspace_folder = workspace.folder
+            except (SchemaError, OSError, ValueError):
+                # Missing / malformed workspace.json is non-fatal — the row still
+                # contributes its composer data, just without a folder hint.
                 pass
 
             try:
@@ -72,21 +74,27 @@ def list_composers():
                         )
                     for c in all_composers:
                         try:
-                            WorkspaceLocalComposer.from_dict(c)
+                            local = WorkspaceLocalComposer.from_dict(c)
                         except SchemaError as e:
                             print(f"Schema drift in {db_path}: {e}")
                             continue
+                        # Use the typed view downstream so the dataclass is
+                        # load-bearing, not just a filter (Brad's review): the
+                        # sort key and the JSON's composerId both read off the
+                        # validated values, not the raw dict.
+                        c["composerId"] = local.composer_id
+                        c["lastUpdatedAt"] = local.last_updated_at
                         c["conversation"] = c.get("conversation") or []
                         c["workspaceId"] = name
                         c["workspaceFolder"] = workspace_folder
-                        composers.append(c)
+                        composers.append((local, c))
             except SchemaError as e:
                 print(f"Schema drift in {db_path}: {e}")
             except Exception as e:
                 print(f"Failed reading composers from {db_path}: {e}")
 
-        composers.sort(key=lambda c: to_epoch_ms(c.get("lastUpdatedAt")), reverse=True)
-        return jsonify(composers)
+        composers.sort(key=lambda pair: to_epoch_ms(pair[0].last_updated_at), reverse=True)
+        return jsonify([c for _, c in composers])
 
     except Exception as e:
         print(f"Failed to get composers: {e}")
@@ -117,9 +125,17 @@ def get_composer(composer_id):
                 if row and row[0]:
                     data = json.loads(row[0])
                     for c in (data.get("allComposers") or []):
-                        if c.get("composerId") == composer_id:
-                            return jsonify(c)
-            except Exception:
+                        if isinstance(c, dict) and c.get("composerId") == composer_id:
+                            try:
+                                local = WorkspaceLocalComposer.from_dict(c)
+                            except SchemaError as e:
+                                # Same drift list_composers() logs and skips at line ~78,
+                                # so a single-composer fetch can't silently return malformed
+                                # JSON the list endpoint hid.
+                                print(f"Schema drift in workspace-local composer {composer_id}: {e}")
+                                continue
+                            return jsonify(local.raw)
+            except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 
         # Fallback: global storage
@@ -135,10 +151,18 @@ def get_composer(composer_id):
 
                 if row and row[0]:
                     raw = row[0] if isinstance(row[0], str) else row[0].decode("utf-8")
-                    composer = json.loads(raw)
-                    composer.setdefault("conversation", [])
-                    return jsonify(composer)
-            except Exception:
+                    try:
+                        composer = Composer.from_dict(json.loads(raw), composer_id=composer_id)
+                    except SchemaError as e:
+                        # Don't return malformed JSON to the client — surface the drift
+                        # as a 404 + log, matching the silent-skip behaviour of the
+                        # list endpoints for the same row.
+                        print(f"Schema drift in composer {composer_id}: {e}")
+                        return jsonify({"error": "Composer schema drift"}), 404
+                    payload = dict(composer.raw)
+                    payload.setdefault("conversation", [])
+                    return jsonify(payload)
+            except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 
         return jsonify({"error": "Composer not found"}), 404

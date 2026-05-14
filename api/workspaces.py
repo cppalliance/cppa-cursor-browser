@@ -33,7 +33,7 @@ from utils.path_helpers import (
 )
 from utils.text_extract import extract_text_from_bubble, format_tool_action
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
-from models import Composer, SchemaError
+from models import Bubble, Composer, SchemaError, Workspace
 
 bp = Blueprint("workspaces", __name__)
 
@@ -51,11 +51,11 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
         return "Other chats"
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
     try:
-        wd = _read_json_file(wj_path)
-        name = get_workspace_display_name(wd)
+        workspace = Workspace.from_dict(_read_json_file(wj_path), workspace_id=workspace_id)
+        name = get_workspace_display_name(workspace.raw)
         if name:
             return name
-    except Exception:
+    except (SchemaError, OSError, ValueError):
         pass
     return workspace_id
 
@@ -581,10 +581,11 @@ def list_workspaces():
                         if len(parts) >= 3:
                             bid = parts[2]
                             try:
-                                b = json.loads(row["value"])
-                                if isinstance(b, dict):
-                                    bubble_map[bid] = b
-                            except Exception:
+                                bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                                bubble_map[bid] = bubble.raw
+                            except (SchemaError, json.JSONDecodeError, ValueError):
+                                # Skip malformed bubble rows — read-many path, one bad row
+                                # must not 500 the endpoint.
                                 pass
 
                     # Process each composer
@@ -1019,10 +1020,10 @@ def get_workspace_tabs(workspace_id):
                 if len(parts) >= 3:
                     bid = parts[2]
                     try:
-                        b = json.loads(row["value"])
-                        if isinstance(b, dict):
-                            bubble_map[bid] = b
-                    except Exception:
+                        bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                        bubble_map[bid] = bubble.raw
+                    except (SchemaError, json.JSONDecodeError, ValueError):
+                        # Skip malformed rows — one bad bubble must not 500 the tabs endpoint.
                         pass
     
             # Load codeBlockDiffs
@@ -1097,8 +1098,17 @@ def get_workspace_tabs(workspace_id):
             for row in composer_rows:
                 composer_id = row["key"].split(":")[1]
                 try:
-                    cd = json.loads(row["value"])
-    
+                    composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
+                except SchemaError as e:
+                    # Skip the same drift list_workspaces() drops at line 605 so the two
+                    # primary conversation paths agree on what counts as a valid composer.
+                    print(f"Schema drift in composer {composer_id}: {e}")
+                    continue
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                try:
+                    cd = composer.raw
+
                     # Determine project
                     pid = _determine_project_for_conversation(
                         cd, composer_id, project_layouts_map,
@@ -1109,11 +1119,11 @@ def get_workspace_tabs(workspace_id):
                     if not pid and mapped_ws in invalid_workspace_ids:
                         pid = invalid_workspace_aliases.get(mapped_ws)
                     assigned = pid if pid else "global"
-    
+
                     if assigned not in matching_ws_ids:
                         continue
-    
-                    headers = cd.get("fullConversationHeadersOnly") or []
+
+                    headers = composer.full_conversation_headers_only
     
                     # Build bubbles
                     bubbles = []
