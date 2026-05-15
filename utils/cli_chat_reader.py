@@ -33,6 +33,7 @@ for a project.
 from __future__ import annotations
 
 import json
+from models import CliSessionMeta, SchemaError
 import os
 import re
 import sqlite3
@@ -94,10 +95,14 @@ def traverse_blobs(db_path: str) -> list[dict]:
         meta_row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
         if not meta_row or not meta_row[0]:
             return []
-        meta = json.loads(bytes.fromhex(meta_row[0]).decode("utf-8"))
-        root_id: str = meta.get("latestRootBlobId", "")
-        if not root_id:
+        try:
+            meta = CliSessionMeta.from_dict(
+                json.loads(bytes.fromhex(meta_row[0]).decode("utf-8"))
+            )
+        except (SchemaError, ValueError, UnicodeDecodeError, TypeError) as e:
+            print(f"Schema drift in CLI session meta at {db_path}: {e}")
             return []
+        root_id: str = meta.latest_root_blob_id
 
         # Load all blobs, classifying each as JSON or binary
         json_blobs: dict[str, dict] = {}

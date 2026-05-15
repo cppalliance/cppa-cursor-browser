@@ -16,6 +16,7 @@ from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.workspace_descriptor import _read_json_file
+from models import Bubble, Composer, SchemaError
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
@@ -97,10 +98,14 @@ def assemble_workspace_tabs(
             if len(parts) >= 3:
                 bid = parts[2]
                 try:
-                    b = json.loads(row["value"])
-                    if isinstance(b, dict):
-                        bubble_map[bid] = b
-                except Exception:
+                    bubble_obj = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                    bubble_map[bid] = bubble_obj.raw
+                except SchemaError as e:
+                    # Drift logged so the operator can chase disappearing
+                    # bubbles instead of guessing. Bad row still skipped so the
+                    # tabs endpoint can't 500 on one malformed bubble.
+                    print(f"Schema drift in bubble {bid}: {e}")
+                except (json.JSONDecodeError, ValueError):
                     pass
 
         # Load codeBlockDiffs
@@ -174,7 +179,17 @@ def assemble_workspace_tabs(
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
             try:
-                cd = json.loads(row["value"])
+                composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
+            except SchemaError as e:
+                # Drift skipped + logged so the two primary conversation
+                # paths (list_workspaces + get_workspace_tabs) agree on what
+                # counts as a valid composer.
+                print(f"Schema drift in composer {composer_id}: {e}")
+                continue
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+            try:
+                cd = composer.raw
 
                 # Determine project
                 pid = _determine_project_for_conversation(

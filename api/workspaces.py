@@ -21,14 +21,22 @@ from services.workspace_resolver import (
     _infer_workspace_name_from_context,
     # Re-exported for back-compat with existing tests that import from api.workspaces
     # directly (test_invalid_workspace_aliases, test_workspace_assignment_fallback,
-    # test_workspace_name_inference).  Production callers should import from
-    # services.workspace_resolver instead.
+    # test_workspace_name_inference, test_models_wired_at_read_sites).
+    # Production callers should import from services.workspace_resolver instead.
     _determine_project_for_conversation,  # noqa: F401
     _infer_invalid_workspace_aliases,  # noqa: F401
+    _get_workspace_display_name,  # noqa: F401
 )
 from services.cli_tabs import _get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import assemble_workspace_tabs
+
+# Re-exported for tests/test_models_wired_at_read_sites.py — the typed-model
+# spy harness patches `workspaces_mod.Bubble` / `.Composer` / `.Workspace` to
+# verify that production read paths actually call from_dict. The classes
+# themselves are wired inside the services modules now (post-#25 split);
+# importing them here keeps the spy resolution stable.
+from models import Bubble, Composer, Workspace  # noqa: F401
 
 bp = Blueprint("workspaces", __name__)
 _logger = logging.getLogger(__name__)

@@ -170,6 +170,7 @@ class TestSearchExclusionFiltering(unittest.TestCase):
                             {"bubbleId": "b-kwd-1"},
                             {"bubbleId": "b-kwd-2"},
                         ],
+                        "createdAt": 1739260000000,
                         "lastUpdatedAt": 1739270000000,
                     }
                 ),
@@ -186,6 +187,7 @@ class TestSearchExclusionFiltering(unittest.TestCase):
                         "fullConversationHeadersOnly": [
                             {"bubbleId": "b-roadmap-1"},
                         ],
+                        "createdAt": 1739261000000,
                         "lastUpdatedAt": 1739271000000,
                     }
                 ),

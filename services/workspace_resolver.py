@@ -15,6 +15,7 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import _basename_from_pathish, _read_json_file
 from services.workspace_db import _open_global_db
+from models import SchemaError, Workspace
 
 
 def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
@@ -23,11 +24,11 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
         return "Other chats"
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
     try:
-        wd = _read_json_file(wj_path)
-        name = get_workspace_display_name(wd)
+        workspace = Workspace.from_dict(_read_json_file(wj_path), workspace_id=workspace_id)
+        name = get_workspace_display_name(workspace.raw)
         if name:
             return name
-    except Exception:
+    except (SchemaError, OSError, ValueError):
         pass
     return workspace_id
 
