@@ -447,8 +447,15 @@ def _infer_invalid_workspace_aliases(
         if mapped not in invalid_workspace_ids:
             continue
         try:
-            cd = json.loads(row["value"])
-        except Exception:
+            # Validate via Composer.from_dict so a schema-drifted row can't
+            # steer the alias vote and misassign otherwise-valid composers to
+            # the wrong workspace. The downstream per-row loops in
+            # list_workspaces() / get_workspace_tabs() already drop drift,
+            # but this helper runs BEFORE that loop and its votes shape
+            # invalid_workspace_aliases for every other composer.
+            composer = Composer.from_dict(json.loads(row["value"]), composer_id=cid)
+            cd = composer.raw
+        except (SchemaError, json.JSONDecodeError, TypeError, ValueError):
             continue
         inferred = _determine_project_for_conversation(
             cd,

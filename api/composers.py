@@ -154,7 +154,14 @@ def get_composer(composer_id):
                                 # JSON the list endpoint hid.
                                 print(f"Schema drift in workspace-local composer {composer_id}: {e}")
                                 continue
-                            return jsonify(local.raw)
+                            # Match list_composers() at line 89 and the global
+                            # fallback below: `conversation` is normalised to []
+                            # whether it's absent or None, so the response shape
+                            # is identical regardless of which branch resolved
+                            # the composer (CodeRabbit on PR #30).
+                            payload = dict(local.raw)
+                            payload["conversation"] = payload.get("conversation") or []
+                            return jsonify(payload)
             except SchemaError as e:
                 print(f"Schema drift in {db_path}: {e}")
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
@@ -182,7 +189,7 @@ def get_composer(composer_id):
                         print(f"Schema drift in composer {composer_id}: {e}")
                         return jsonify({"error": "Composer schema drift"}), 404
                     payload = dict(composer.raw)
-                    payload.setdefault("conversation", [])
+                    payload["conversation"] = payload.get("conversation") or []
                     return jsonify(payload)
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
