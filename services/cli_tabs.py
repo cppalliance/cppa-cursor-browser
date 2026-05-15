@@ -60,7 +60,7 @@ def _get_cli_workspace_tabs(workspace_id: str):
             if not title or title.startswith("New Agent"):
                 for b in bubbles:
                     if b["type"] == "user" and b.get("text"):
-                        first_lines = [l for l in b["text"].split("\n") if l.strip()]
+                        first_lines = [ln for ln in b["text"].split("\n") if ln.strip()]
                         if first_lines:
                             title = first_lines[0][:100]
                             if len(title) == 100:

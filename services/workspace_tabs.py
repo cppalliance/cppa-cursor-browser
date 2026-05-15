@@ -345,7 +345,7 @@ def assemble_workspace_tabs(
                 if not cd.get("name") and bubbles:
                     first_msg = bubbles[0].get("text", "")
                     if first_msg:
-                        first_lines = [l for l in first_msg.split("\n") if l.strip()]
+                        first_lines = [ln for ln in first_msg.split("\n") if ln.strip()]
                         if first_lines:
                             title = first_lines[0][:100]
                             if len(title) == 100:

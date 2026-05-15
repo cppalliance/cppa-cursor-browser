@@ -4,6 +4,7 @@ GET /api/search?q=...&type=all|chat|composer
 """
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -15,11 +16,12 @@ from flask import Blueprint, current_app, jsonify, request
 
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
-from utils.path_helpers import normalize_file_path, get_workspace_folder_paths, to_epoch_ms
+from utils.path_helpers import to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.cli_chat_reader import list_cli_projects, traverse_blobs, messages_to_bubbles
 
 bp = Blueprint("search", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _json_dump_safe(value) -> str:
@@ -51,7 +53,7 @@ def _build_exclusion_searchable(
     metadata_parts: list[str] | None = None,
 ) -> str:
     """Build broad searchable text so exclusion rules cover visible output."""
-    combined = []
+    combined: list[str] = []
     if content_parts:
         combined.extend(p for p in content_parts if p)
     if metadata_parts:
@@ -231,7 +233,7 @@ def search():
                                 # Derive title from first bubble
                                 for text in bubble_texts:
                                     if text:
-                                        first_lines = [l for l in text.split("\n") if l.strip()]
+                                        first_lines = [ln for ln in text.split("\n") if ln.strip()]
                                         if first_lines:
                                             title = first_lines[0][:100]
                                         break
@@ -250,8 +252,8 @@ def search():
                     except Exception:
                         pass
 
-            except Exception as e:
-                print(f"Error searching global storage: {e}")
+            except Exception:
+                _logger.exception("Error searching global storage")
             finally:
                 if conn is not None:
                     conn.close()
@@ -435,8 +437,8 @@ def search():
                                 "type": "cli_agent",
                                 "source": "cli",
                             })
-            except Exception as e:
-                print(f"Error searching CLI sessions: {e}")
+            except Exception:
+                _logger.exception("Error searching CLI sessions")
 
         # Sort by timestamp descending
         def _ts(r):
@@ -451,6 +453,6 @@ def search():
 
         return jsonify({"results": results})
 
-    except Exception as e:
-        print(f"Search failed: {e}")
+    except Exception:
+        _logger.exception("Search failed")
         return jsonify({"error": "Search failed", "results": []}), 500

@@ -7,6 +7,7 @@ API routes for workspaces — mirrors:
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -30,6 +31,7 @@ from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import assemble_workspace_tabs
 
 bp = Blueprint("workspaces", __name__)
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +45,8 @@ def list_workspaces():
         rules = current_app.config.get("EXCLUSION_RULES") or []
         projects = list_workspace_projects(workspace_path, rules)
         return jsonify(projects)
-    except Exception as e:
-        print(f"Failed to get workspaces: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspaces")
         return jsonify({"error": "Failed to get workspaces"}), 500
 
 
@@ -120,8 +122,8 @@ def get_workspace(workspace_id):
             "lastModified": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
         })
 
-    except Exception as e:
-        print(f"Failed to get workspace: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspace")
         return jsonify({"error": "Failed to get workspace"}), 500
 
 
@@ -138,7 +140,7 @@ def get_workspace_tabs(workspace_id):
         rules = current_app.config.get("EXCLUSION_RULES") or []
         payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
         return jsonify(payload), status
-    except Exception as e:
-        print(f"Failed to get workspace tabs: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspace tabs")
         return jsonify({"error": "Failed to get workspace tabs"}), 500
 
