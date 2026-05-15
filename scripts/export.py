@@ -131,6 +131,13 @@ def resolve_workspace_path() -> str:
 
 
 def get_global_state_dir() -> str:
+    # Honor XDG_STATE_HOME when set so the export state file (and manifest)
+    # can be redirected — required for hermetic test runs and useful for
+    # users following the XDG Base Directory spec. Falls back to the
+    # historical ~/.cursor-chat-browser location when the env var is unset.
+    xdg = os.environ.get("XDG_STATE_HOME")
+    if xdg:
+        return os.path.join(xdg, "cursor-chat-browser")
     return os.path.join(str(Path.home()), ".cursor-chat-browser")
 
 
@@ -488,8 +495,9 @@ def main():
     exported = []
     count = 0
 
-    # Process IDE composers
-    for row in ide_composer_rows:
+    # Process IDE composers (skipped entirely when --no-composer was passed)
+    include_composer = opts.get("include_composer", True)
+    for row in ide_composer_rows if include_composer else []:
         composer_id = row["key"].split(":")[1]
         try:
             cd = json.loads(row["value"])
