@@ -46,10 +46,18 @@ jobs:
         # system packages on Linux — out of scope for the unittest suite.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'flask>=3.0' 'fpdf2>=2.7'
+          python -m pip install 'flask>=3.0' 'fpdf2>=2.7' 'pytest>=8'
 
       - name: Run unittest suite
         run: python -m unittest discover tests -v
+
+      - name: Run pytest integration suite
+        # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage
+        # and exercise the Flask routes via app.test_client(). Scoped to the
+        # new endpoint file because `pytest tests/` would also re-collect the
+        # 178 unittest.TestCase subclasses already run in the step above —
+        # ~2× the CI minutes for zero extra signal.
+        run: python -m pytest tests/test_api_endpoints.py -v --tb=short
 
   # ── Typecheck: mypy ───────────────────────────────────────────────────────
   # Codebase already has type hints across most of the surface (~70+ typed
