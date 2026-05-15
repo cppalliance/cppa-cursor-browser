@@ -35,6 +35,7 @@ from utils.path_helpers import (
 from utils.text_extract import extract_text_from_bubble, format_tool_action
 from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from models import Bubble, Composer, SchemaError, Workspace
 
 bp = Blueprint("workspaces", __name__)
 _logger = logging.getLogger(__name__)
@@ -53,11 +54,11 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
         return "Other chats"
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
     try:
-        wd = _read_json_file(wj_path)
-        name = get_workspace_display_name(wd)
+        workspace = Workspace.from_dict(_read_json_file(wj_path), workspace_id=workspace_id)
+        name = get_workspace_display_name(workspace.raw)
         if name:
             return name
-    except Exception:
+    except (SchemaError, OSError, ValueError):
         pass
     return workspace_id
 
@@ -446,8 +447,15 @@ def _infer_invalid_workspace_aliases(
         if mapped not in invalid_workspace_ids:
             continue
         try:
-            cd = json.loads(row["value"])
-        except Exception:
+            # Validate via Composer.from_dict so a schema-drifted row can't
+            # steer the alias vote and misassign otherwise-valid composers to
+            # the wrong workspace. The downstream per-row loops in
+            # list_workspaces() / get_workspace_tabs() already drop drift,
+            # but this helper runs BEFORE that loop and its votes shape
+            # invalid_workspace_aliases for every other composer.
+            composer = Composer.from_dict(json.loads(row["value"]), composer_id=cid)
+            cd = composer.raw
+        except (SchemaError, json.JSONDecodeError, TypeError, ValueError):
             continue
         inferred = _determine_project_for_conversation(
             cd,
@@ -583,10 +591,14 @@ def list_workspaces():
                         if len(parts) >= 3:
                             bid = parts[2]
                             try:
-                                b = json.loads(row["value"])
-                                if isinstance(b, dict):
-                                    bubble_map[bid] = b
-                            except Exception:
+                                bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                                bubble_map[bid] = bubble.raw
+                            except SchemaError as e:
+                                # Drift surfaces in logs so an operator sees disappearing
+                                # bubbles instead of guessing. The row is still skipped —
+                                # one bad bubble must not 500 the endpoint.
+                                print(f"Schema drift in bubble {bid}: {e}")
+                            except (json.JSONDecodeError, ValueError):
                                 pass
 
                     # Process each composer
@@ -603,9 +615,15 @@ def list_workspaces():
                     for row in composer_rows:
                         cid = row["key"].split(":")[1]
                         try:
-                            cd = json.loads(row["value"])
+                            composer = Composer.from_dict(json.loads(row["value"]), composer_id=cid)
+                        except SchemaError as e:
+                            print(f"Schema drift in composer {cid}: {e}")
+                            continue
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            continue
+                        try:
                             pid = _determine_project_for_conversation(
-                                cd, cid, project_layouts_map,
+                                composer.raw, cid, project_layouts_map,
                                 project_name_map, workspace_path_map,
                                 workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids
                             )
@@ -614,16 +632,16 @@ def list_workspaces():
                                 pid = invalid_workspace_aliases.get(mapped_ws)
                             assigned = pid if pid else "global"
 
-                            headers = cd.get("fullConversationHeadersOnly") or []
+                            headers = composer.full_conversation_headers_only
                             has_bubbles = any(bubble_map.get(h.get("bubbleId")) for h in headers)
                             if not has_bubbles:
                                 continue
 
                             conversation_map.setdefault(assigned, []).append({
                                 "composerId": cid,
-                                "name": cd.get("name") or f"Conversation {cid[:8]}",
-                                "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
-                                "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
+                                "name": composer.name or f"Conversation {cid[:8]}",
+                                "lastUpdatedAt": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or 0,
+                                "createdAt": to_epoch_ms(composer.created_at) or 0,
                             })
                         except Exception:
                             pass
@@ -1013,10 +1031,14 @@ def get_workspace_tabs(workspace_id):
                 if len(parts) >= 3:
                     bid = parts[2]
                     try:
-                        b = json.loads(row["value"])
-                        if isinstance(b, dict):
-                            bubble_map[bid] = b
-                    except Exception:
+                        bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                        bubble_map[bid] = bubble.raw
+                    except SchemaError as e:
+                        # Drift surfaces in logs so an operator can chase disappearing
+                        # bubbles instead of guessing. Bad row still skipped so the
+                        # tabs endpoint can't 500 on one malformed bubble.
+                        print(f"Schema drift in bubble {bid}: {e}")
+                    except (json.JSONDecodeError, ValueError):
                         pass
     
             # Load codeBlockDiffs
@@ -1091,8 +1113,17 @@ def get_workspace_tabs(workspace_id):
             for row in composer_rows:
                 composer_id = row["key"].split(":")[1]
                 try:
-                    cd = json.loads(row["value"])
-    
+                    composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
+                except SchemaError as e:
+                    # Skip the same drift list_workspaces() drops at line 605 so the two
+                    # primary conversation paths agree on what counts as a valid composer.
+                    print(f"Schema drift in composer {composer_id}: {e}")
+                    continue
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                try:
+                    cd = composer.raw
+
                     # Determine project
                     pid = _determine_project_for_conversation(
                         cd, composer_id, project_layouts_map,
@@ -1103,11 +1134,11 @@ def get_workspace_tabs(workspace_id):
                     if not pid and mapped_ws in invalid_workspace_ids:
                         pid = invalid_workspace_aliases.get(mapped_ws)
                     assigned = pid if pid else "global"
-    
+
                     if assigned not in matching_ws_ids:
                         continue
-    
-                    headers = cd.get("fullConversationHeadersOnly") or []
+
+                    headers = composer.full_conversation_headers_only
     
                     # Build bubbles
                     bubbles = []

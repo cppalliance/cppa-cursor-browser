@@ -39,6 +39,7 @@ from utils.cli_chat_reader import (  # noqa: E402
     messages_to_bubbles,
 )
 from utils.cursor_md_exporter import cursor_cli_session_to_markdown  # noqa: E402
+from models import ExportEntry, SchemaError  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
@@ -63,13 +64,13 @@ def _load_manifest_entries(manifest_path: str) -> dict:
                 if not line:
                     continue
                 try:
-                    entry = json.loads(line)
-                    log_id = entry.get("log_id")
-                    if log_id:
-                        existing[log_id] = entry
-                except Exception as e:
-                    _logger.debug("Skipping malformed manifest line in %s: %s", manifest_path, e)
-    except Exception as e:
+                    entry = ExportEntry.from_dict(json.loads(line))
+                    existing[entry.log_id] = entry.raw
+                except (SchemaError, json.JSONDecodeError, ValueError) as e:
+                    # Pre-PR-30 manifests lack title/workspace — skip them so the
+                    # next export rebuilds the entry under the new schema.
+                    _logger.debug("Skipping manifest line in %s: %s", manifest_path, e)
+    except OSError as e:
         _logger.debug("Failed to read manifest %s: %s", manifest_path, e)
     return existing
 
@@ -819,7 +820,8 @@ def main():
 
         rel_path = os.path.join(today, ws_slug, "chat", filename)
         exported.append({"id": composer_id, "rel_path": rel_path, "content": md,
-                         "out_path": out_path, "updatedAt": updated_at})
+                         "out_path": out_path, "updatedAt": updated_at,
+                         "title": title, "workspace": ws_display_name})
         count += 1
 
     # --- Cursor CLI sessions ---
@@ -916,6 +918,8 @@ def main():
                 "content": md,
                 "out_path": out_path,
                 "updatedAt": updated_ms,
+                "title": title,
+                "workspace": ws_name,
             })
             count += 1
 
@@ -948,6 +952,8 @@ def main():
         for entry in exported:
             existing[entry["id"]] = {
                 "log_id": entry["id"],
+                "title": entry["title"],
+                "workspace": entry["workspace"],
                 "path": os.path.relpath(entry["out_path"], out_dir),
                 "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
@@ -961,6 +967,8 @@ def main():
         for entry in exported:
             global_existing[entry["id"]] = {
                 "log_id": entry["id"],
+                "title": entry["title"],
+                "workspace": entry["workspace"],
                 "path": entry["out_path"],
                 "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
