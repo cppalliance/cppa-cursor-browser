@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime
+from typing import Any
 
 from utils.path_helpers import (
     get_workspace_folder_paths,
@@ -191,8 +192,10 @@ def assemble_workspace_tabs(
 
                 headers = cd.get("fullConversationHeadersOnly") or []
 
-                # Build bubbles
-                bubbles = []
+                # Build bubbles. Annotated as list[dict[str, Any]] so mypy
+                # treats nested .get("metadata") / m["inputTokens"] etc. as
+                # accessing dict values rather than `object`.
+                bubbles: list[dict[str, Any]] = []
                 for header in headers:
                     if not isinstance(header, dict):
                         continue
