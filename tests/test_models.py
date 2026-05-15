@@ -65,7 +65,8 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         self.assertEqual(ws_no_folder.folder, None)
 
     def test_non_string_workspace_id_raises(self) -> None:
-        for bad_id in (None, "", 123, [], {}, True, b"bytes"):
+        bad_ids: tuple[object, ...] = (None, "", 123, [], {}, True, b"bytes")
+        for bad_id in bad_ids:
             with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
                 Workspace.from_dict({}, workspace_id=bad_id)  # type: ignore[arg-type]
             self.assertEqual(cm.exception.field, "workspaceId")
@@ -106,7 +107,8 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertEqual(cm.exception.field, "createdAt")
 
     def test_non_numeric_created_at_raises(self) -> None:
-        for bad_value in ("2026-05-12", None, [], {}, True, False, b"bytes"):
+        bad_values: tuple[object, ...] = ("2026-05-12", None, [], {}, True, False, b"bytes")
+        for bad_value in bad_values:
             bad = dict(GOOD_COMPOSER_RAW, createdAt=bad_value)
             with self.assertRaises(SchemaError, msg=f"failed for {bad_value!r}") as cm:
                 Composer.from_dict(bad, composer_id="cid-001")
@@ -124,7 +126,8 @@ class ComposerMissingFieldSchema(unittest.TestCase):
         self.assertEqual(cm.exception.field, "composerId")
 
     def test_non_string_composer_id_raises(self) -> None:
-        for bad_id in (None, 123, [], {}, True, b"bytes"):
+        bad_ids: tuple[object, ...] = (None, 123, [], {}, True, b"bytes")
+        for bad_id in bad_ids:
             with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
                 Composer.from_dict(GOOD_COMPOSER_RAW, composer_id=bad_id)  # type: ignore[arg-type]
             self.assertEqual(cm.exception.field, "composerId")
@@ -151,7 +154,8 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             Bubble.from_dict({"text": "hi"}, bubble_id="")
 
     def test_non_string_bubble_id_raises(self) -> None:
-        for bad_id in (None, 123, [], {}, True, b"bytes"):
+        bad_ids: tuple[object, ...] = (None, 123, [], {}, True, b"bytes")
+        for bad_id in bad_ids:
             with self.assertRaises(SchemaError, msg=f"failed for {bad_id!r}") as cm:
                 Bubble.from_dict({"text": "hi"}, bubble_id=bad_id)  # type: ignore[arg-type]
             self.assertEqual(cm.exception.field, "bubbleId")
@@ -168,7 +172,8 @@ class ComposerMissingFieldSchema(unittest.TestCase):
             self.assertEqual(cm.exception.field, "composerId")
 
     def test_workspace_local_composer_non_dict_raises(self) -> None:
-        for bad in (None, [], "str", 42):
+        bad_inputs: tuple[object, ...] = (None, [], "str", 42)
+        for bad in bad_inputs:
             with self.assertRaises(SchemaError):
                 WorkspaceLocalComposer.from_dict(bad)  # type: ignore[arg-type]
 

@@ -8,6 +8,7 @@ API routes for workspaces — mirrors:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -32,10 +33,12 @@ from utils.path_helpers import (
     to_epoch_ms,
 )
 from utils.text_extract import extract_text_from_bubble, format_tool_action
+from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from models import Bubble, Composer, SchemaError, Workspace
 
 bp = Blueprint("workspaces", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
@@ -674,7 +677,6 @@ def list_workspaces():
             primary = group[0]
             all_ws_ids = [e["name"] for e in group]
 
-            db_path = os.path.join(workspace_path, primary["name"], "state.vscdb")
             try:
                 mtime = max(
                     os.path.getmtime(os.path.join(workspace_path, e["name"], "state.vscdb"))
@@ -769,14 +771,14 @@ def list_workspaces():
                     ),
                     "source": "cli",
                 })
-        except Exception as e:
-            print(f"Failed to load CLI projects: {e}")
+        except Exception:
+            _logger.exception("Failed to load CLI projects")
 
         projects.sort(key=lambda p: p["lastModified"], reverse=True)
         return jsonify(projects)
 
-    except Exception as e:
-        print(f"Failed to get workspaces: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspaces")
         return jsonify({"error": "Failed to get workspaces"}), 500
 
 
@@ -850,8 +852,8 @@ def get_workspace(workspace_id):
             "lastModified": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
         })
 
-    except Exception as e:
-        print(f"Failed to get workspace: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspace")
         return jsonify({"error": "Failed to get workspace"}), 500
 
 
@@ -859,7 +861,6 @@ def get_workspace(workspace_id):
 # GET /api/workspaces/<id>/tabs
 # ---------------------------------------------------------------------------
 
-from utils.tool_parser import parse_tool_call as _parse_tool_call
 
 
 def _get_cli_workspace_tabs(workspace_id: str):
@@ -883,8 +884,8 @@ def _get_cli_workspace_tabs(workspace_id: str):
 
             try:
                 messages = traverse_blobs(session["db_path"])
-            except Exception as e:
-                print(f"CLI: could not read session {session_id}: {e}")
+            except Exception:  # noqa: BLE001 — best-effort per-session skip; one corrupted session must not 500 the endpoint, and the failure mode is logged with exc_info so the concrete type is preserved.
+                _logger.warning("CLI: could not read session %s", session_id, exc_info=True)
                 continue
 
             bubbles = messages_to_bubbles(messages, created_ms)
@@ -896,7 +897,7 @@ def _get_cli_workspace_tabs(workspace_id: str):
             if not title or title.startswith("New Agent"):
                 for b in bubbles:
                     if b["type"] == "user" and b.get("text"):
-                        first_lines = [l for l in b["text"].split("\n") if l.strip()]
+                        first_lines = [ln for ln in b["text"].split("\n") if ln.strip()]
                         if first_lines:
                             title = first_lines[0][:100]
                             if len(title) == 100:
@@ -948,8 +949,8 @@ def _get_cli_workspace_tabs(workspace_id: str):
         tabs.sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
         return jsonify({"tabs": tabs})
 
-    except Exception as e:
-        print(f"Failed to get CLI workspace tabs: {e}")
+    except Exception:
+        _logger.exception("Failed to get CLI workspace tabs")
         return jsonify({"error": "Failed to get CLI workspace tabs"}), 500
 
 
@@ -1275,7 +1276,7 @@ def get_workspace_tabs(workspace_id):
                     if not cd.get("name") and bubbles:
                         first_msg = bubbles[0].get("text", "")
                         if first_msg:
-                            first_lines = [l for l in first_msg.split("\n") if l.strip()]
+                            first_lines = [ln for ln in first_msg.split("\n") if ln.strip()]
                             if first_lines:
                                 title = first_lines[0][:100]
                                 if len(title) == 100:
@@ -1418,14 +1419,14 @@ def get_workspace_tabs(workspace_id):
     
                     response["tabs"].append(tab)
     
-                except Exception as e:
-                    print(f"Error parsing composer data for {composer_id}: {e}")
+                except Exception:  # noqa: BLE001 — best-effort per-composer skip in a read-many loop; one malformed row must not 500 the tabs endpoint, and exc_info captures the concrete type for debugging.
+                    _logger.warning("Error parsing composer data for %s", composer_id, exc_info=True)
     
             # Sort tabs by timestamp descending (newest first)
             response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
     
             return jsonify(response)
 
-    except Exception as e:
-        print(f"Failed to get workspace tabs: {e}")
+    except Exception:
+        _logger.exception("Failed to get workspace tabs")
         return jsonify({"error": "Failed to get workspace tabs"}), 500

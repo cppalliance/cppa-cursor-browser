@@ -22,23 +22,24 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from utils.exclusion_rules import (
+# noqa: E402 — these imports must come after the sys.path.insert above so the
+# script can be run directly as `python scripts/export.py` from anywhere.
+from utils.exclusion_rules import (  # noqa: E402
     resolve_exclusion_rules_path,
     load_rules,
     build_searchable_text,
     is_excluded_by_rules,
 )
-from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths
-from utils.tool_parser import parse_tool_call
-from utils.workspace_path import get_cli_chats_path
-from utils.cli_chat_reader import (
+from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths  # noqa: E402
+from utils.tool_parser import parse_tool_call  # noqa: E402
+from utils.workspace_path import get_cli_chats_path  # noqa: E402
+from utils.cli_chat_reader import (  # noqa: E402
     list_cli_projects,
     traverse_blobs,
     messages_to_bubbles,
-    aggregate_session_stats,
 )
-from utils.cursor_md_exporter import cursor_cli_session_to_markdown
-from models import ExportEntry, SchemaError
+from utils.cursor_md_exporter import cursor_cli_session_to_markdown  # noqa: E402
+from models import ExportEntry, SchemaError  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def _json_dump_safe(value) -> str:
 
 def _load_manifest_entries(manifest_path: str) -> dict:
     """Load manifest entries keyed by log_id from a JSONL file."""
-    existing = {}
+    existing: dict = {}
     if not os.path.isfile(manifest_path):
         return existing
     try:
@@ -348,9 +349,9 @@ def main():
                         layouts = ctx.get("projectLayouts")
                         if isinstance(layouts, list):
                             project_layouts_map.setdefault(cid, [])
-                            for l in layouts:
+                            for layout in layouts:
                                 try:
-                                    o = json.loads(l) if isinstance(l, str) else l
+                                    o = json.loads(layout) if isinstance(layout, str) else layout
                                     if isinstance(o, dict) and o.get("rootPath"):
                                         project_layouts_map[cid].append(o["rootPath"])
                                 except Exception:
@@ -683,7 +684,7 @@ def main():
         created_ms = to_epoch_ms(cd.get("createdAt")) or ts
         fm_lines = ["---"]
         fm_lines.append(f"log_id: {composer_id}")
-        fm_lines.append(f"log_type: chat")
+        fm_lines.append("log_type: chat")
         fm_lines.append(f'title: "{title.replace(chr(34), chr(92)+chr(34))}"')
         fm_lines.append(f"created_at: {datetime.fromtimestamp(created_ms / 1000).isoformat()}")
         fm_lines.append(f"updated_at: {datetime.fromtimestamp(updated_at / 1000).isoformat() if updated_at else datetime.now().isoformat()}")
@@ -934,27 +935,27 @@ def main():
         zip_name = f"cursor-export-{today}.zip"
         zip_path = os.path.join(out_dir, zip_name)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for e in exported:
-                zf.writestr(e["rel_path"], e["content"])
+            for entry in exported:
+                zf.writestr(entry["rel_path"], entry["content"])
         print(f"Exported {count} chat(s) to {zip_path}")
     else:
         # Write individual Markdown files to disk
-        for e in exported:
-            os.makedirs(os.path.dirname(e["out_path"]), exist_ok=True)
-            with open(e["out_path"], "w", encoding="utf-8") as f:
-                f.write(e["content"])
+        for entry in exported:
+            os.makedirs(os.path.dirname(entry["out_path"]), exist_ok=True)
+            with open(entry["out_path"], "w", encoding="utf-8") as f:
+                f.write(entry["content"])
 
         # Manifest in output directory
         manifest_path = os.path.join(out_dir, "manifest.jsonl")
         existing = _load_manifest_entries(manifest_path)
 
-        for e in exported:
-            existing[e["id"]] = {
-                "log_id": e["id"],
-                "title": e["title"],
-                "workspace": e["workspace"],
-                "path": os.path.relpath(e["out_path"], out_dir),
-                "updated_at": datetime.fromtimestamp(e["updatedAt"] / 1000).isoformat() if e["updatedAt"] else datetime.now().isoformat(),
+        for entry in exported:
+            existing[entry["id"]] = {
+                "log_id": entry["id"],
+                "title": entry["title"],
+                "workspace": entry["workspace"],
+                "path": os.path.relpath(entry["out_path"], out_dir),
+                "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
 
         if existing:
@@ -963,13 +964,13 @@ def main():
         # Canonical manifest in user state dir so tracking survives changing --out paths
         global_manifest_path = os.path.join(state_dir, "manifest.jsonl")
         global_existing = _load_manifest_entries(global_manifest_path)
-        for e in exported:
-            global_existing[e["id"]] = {
-                "log_id": e["id"],
-                "title": e["title"],
-                "workspace": e["workspace"],
-                "path": e["out_path"],
-                "updated_at": datetime.fromtimestamp(e["updatedAt"] / 1000).isoformat() if e["updatedAt"] else datetime.now().isoformat(),
+        for entry in exported:
+            global_existing[entry["id"]] = {
+                "log_id": entry["id"],
+                "title": entry["title"],
+                "workspace": entry["workspace"],
+                "path": entry["out_path"],
+                "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
         if global_existing:
             _write_manifest_entries(global_manifest_path, global_existing)
