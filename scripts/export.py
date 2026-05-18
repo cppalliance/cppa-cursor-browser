@@ -30,7 +30,11 @@ from utils.exclusion_rules import (  # noqa: E402
     build_searchable_text,
     is_excluded_by_rules,
 )
-from utils.path_helpers import get_workspace_folder_paths as _shared_get_workspace_folder_paths  # noqa: E402
+from utils.path_helpers import (  # noqa: E402
+    get_workspace_folder_paths as _shared_get_workspace_folder_paths,
+    normalize_file_path,
+    to_epoch_ms,
+)
 from utils.tool_parser import parse_tool_call  # noqa: E402
 from utils.workspace_path import get_cli_chats_path  # noqa: E402
 from utils.cli_chat_reader import (  # noqa: E402
@@ -139,45 +143,6 @@ def get_global_state_dir() -> str:
     if xdg:
         return os.path.join(xdg, "cursor-chat-browser")
     return os.path.join(str(Path.home()), ".cursor-chat-browser")
-
-
-def normalize_file_path(p: str) -> str:
-    n = re.sub(r"^file:///", "", p or "")
-    n = re.sub(r"^file://", "", n)
-    try:
-        from urllib.parse import unquote
-        n = unquote(n)
-    except Exception:
-        pass
-    if sys.platform == "win32":
-        n = n.replace("/", "\\")
-        n = re.sub(r"^\\([a-zA-Z]:)", r"\1", n)
-        n = n.lower()
-    return n
-
-
-def to_epoch_ms(value) -> int:
-    """Convert a timestamp (int, float, or ISO-8601 string) to epoch ms."""
-    if value is None:
-        return 0
-    if isinstance(value, (int, float)):
-        if value > 1e12:
-            return int(value)
-        if value > 0:
-            return int(value * 1000)
-        return 0
-    if isinstance(value, str):
-        try:
-            cleaned = value.rstrip("Z") + "+00:00" if value.endswith("Z") else value
-            dt = datetime.fromisoformat(cleaned)
-            return int(dt.timestamp() * 1000)
-        except Exception:
-            pass
-        try:
-            return to_epoch_ms(float(value))
-        except Exception:
-            pass
-    return 0
 
 
 def slug(s: str) -> str:
