@@ -81,7 +81,7 @@ class TestNormalizeFilePathWindowsDrives(unittest.TestCase):
         out = normalize_file_path("file:///C:/Users/Dev/project")
         self.assertIn("users", out)
         self.assertIn("dev", out)
-        self.assertTrue(out.startswith("c:") or out.startswith("C:"))
+        self.assertTrue(out.startswith("c:"))
 
     def test_mixed_case_drive_lowercased(self) -> None:
         out = normalize_file_path(r"E:\Mixed\Case\Path")
