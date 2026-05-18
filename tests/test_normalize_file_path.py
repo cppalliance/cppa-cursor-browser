@@ -38,7 +38,7 @@ class TestNormalizeFilePathPercentEncoding(unittest.TestCase):
     def test_space_decoded(self) -> None:
         out = normalize_file_path("file:///C:/My%20Documents/file.txt")
         self.assertNotIn("%20", out)
-        self.assertIn("My Documents" if sys.platform != "win32" else "my documents", out)
+        self.assertIn("my documents", out)
 
     def test_hash_decoded(self) -> None:
         out = normalize_file_path("file:///C:/repo/src%23internal/mod.py")
