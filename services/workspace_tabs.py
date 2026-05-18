@@ -97,6 +97,8 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
+                if row["value"] is None:
+                    continue
                 try:
                     bubble_obj = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
                     bubble_map[bid] = bubble_obj.raw
