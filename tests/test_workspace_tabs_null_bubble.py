@@ -32,12 +32,26 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
             "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
             ("bubbleId:composer-abc:bubble-null", None),  # NULL value — the crash case
         )
-        # Also insert a healthy bubble so we verify good rows still load.
+        # Healthy bubble that should surface in the assembled tab.
         conn.execute(
             "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
             (
                 "bubbleId:composer-abc:bubble-ok",
-                json.dumps({"type": 1, "text": "hello", "createdAt": 0}),
+                json.dumps({"type": 1, "text": "hello world", "createdAt": 1739200000000}),
+            ),
+        )
+        # Composer referencing the healthy bubble — required for a tab to be built.
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                "composerData:composer-abc",
+                json.dumps({
+                    "name": "Test Chat",
+                    "modelConfig": {"modelName": "gpt-4o"},
+                    "fullConversationHeadersOnly": [{"bubbleId": "bubble-ok", "type": 1}],
+                    "lastUpdatedAt": 1739300000000,
+                    "createdAt": 1739200000000,
+                }),
             ),
         )
         conn.commit()
@@ -53,7 +67,7 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         from services.workspace_tabs import assemble_workspace_tabs
 
         try:
-            payload, status = assemble_workspace_tabs(
+            _payload, status = assemble_workspace_tabs(
                 workspace_id="global",
                 workspace_path=self.workspace_path,
                 rules=[],
@@ -64,7 +78,7 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_healthy_bubbles_still_load_when_null_row_present(self):
-        """Healthy bubble rows in the same table are not dropped by the None-guard."""
+        """The healthy bubble surfaces in a tab even when a NULL row is present."""
         from services.workspace_tabs import assemble_workspace_tabs
 
         payload, status = assemble_workspace_tabs(
@@ -74,7 +88,21 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertIsInstance(payload, dict)
-        self.assertIn("tabs", payload)
+        tabs = payload.get("tabs", [])
+        self.assertEqual(len(tabs), 1, "Expected exactly one tab for composer-abc")
+
+        tab = tabs[0]
+        self.assertEqual(tab["id"], "composer-abc")
+        self.assertEqual(tab["title"], "Test Chat")
+        self.assertIn("bubbles", tab)
+        self.assertIn("codeBlockDiffs", tab)
+
+        bubbles = tab["bubbles"]
+        self.assertEqual(len(bubbles), 1, "Expected exactly one bubble (null row skipped)")
+        bubble = bubbles[0]
+        self.assertEqual(bubble["type"], "user")
+        self.assertEqual(bubble["text"], "hello world")
+        self.assertIn("timestamp", bubble)
 
 
 if __name__ == "__main__":
