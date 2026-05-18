@@ -5,12 +5,18 @@ No HTTP server or port is used; pywebview calls the WSGI app
 directly in-process.
 """
 
-import webview
-
 from app import create_app
 
 
 def main():
+    try:
+        import webview
+    except ImportError:
+        raise SystemExit(
+            "pywebview is not installed. Install the [desktop] extra, e.g.\n"
+            '  pip install -e ".[desktop]"'
+        ) from None
+
     app = create_app()
     webview.create_window(
         "Cursor Chat Browser",

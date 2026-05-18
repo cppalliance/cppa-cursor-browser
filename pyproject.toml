@@ -9,7 +9,7 @@ description = "Flask web application for browsing and exporting Cursor AI chat h
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "C++ Alliance", email = "admin@cppalliance.org" }]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 
 # Runtime dependencies — bounded on both sides so CI resolves deterministically
 # and breaking major releases are caught at install time rather than at runtime.
@@ -18,9 +18,6 @@ requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0,<4",
     "fpdf2>=2.7,<3",
-    # fpdf2 depends on Pillow; declare a floor + cap so resolvers cannot pick
-    # known-vulnerable Pillow releases while staying on Pillow 10.x.
-    "pillow>=10.0.0,<11",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +60,7 @@ include = [
     "launcher.py",
 ]
 
+# sdist includes tests + ancillary files; wheel is runtime-only.
 [tool.hatch.build.targets.sdist]
 include = [
     "api/",
@@ -90,4 +88,5 @@ no_strict_optional = true
 pretty = true
 # Exclude virtual-env and build artefact directories so that `mypy .` from the
 # repo root matches CI behaviour (CI runs in a clean runner without a local venv).
-exclude = ["venv/", "\\.venv/", "build/", "dist/"]
+# Anchored regexes — unanchored `venv/` would match any path segment containing "venv/".
+exclude = ["^venv/", "^\\.venv/", "^build/", "^dist/"]
