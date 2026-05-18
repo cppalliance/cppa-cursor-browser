@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cppa-cursor-browser"
+version = "0.1.0"
+description = "Flask web application for browsing and exporting Cursor AI chat histories"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "C++ Alliance", email = "admin@cppalliance.org" }]
+requires-python = ">=3.11"
+
+# Runtime dependencies — bounded on both sides so CI resolves deterministically
+# and breaking major releases are caught at install time rather than at runtime.
+# Upper bounds are conservative: pin to current known-compatible major version.
+# See also: requirements.txt (backward-compat alias; pyproject.toml is canonical).
+dependencies = [
+    "flask>=3.0,<4",
+    "fpdf2>=2.7,<3",
+]
+
+[project.optional-dependencies]
+# Desktop launcher (pywebview pulls in heavy system libs — GTK/Qt on Linux —
+# so it is intentionally excluded from the web-server and CI installs).
+desktop = ["pywebview>=5.0,<6"]
+
+# Development tooling: testing + type checking.
+dev = [
+    "pytest>=8,<9",
+    "mypy>=1.10,<2",
+]
+
+[project.scripts]
+# Primary CLI: export Cursor chat histories to Markdown / zip.
+# Usage: cursor-chat-export [--since all|last] [--out DIR] [--no-zip] [--help]
+cursor-chat-export = "scripts.export:main"
+
+# Desktop launcher (requires the [desktop] extra to be installed).
+cursor-chat-browser = "launcher:main"
+
+[project.urls]
+Repository = "https://github.com/cppalliance/cppa-cursor-browser"
+Issues = "https://github.com/cppalliance/cppa-cursor-browser/issues"
+
+# ── Build configuration ────────────────────────────────────────────────────────
+# Flat layout (no src/ directory): enumerate every importable package and the
+# two top-level application modules so the installed wheel has the same import
+# surface as the repo checkout.
+[tool.hatch.build.targets.wheel]
+include = [
+    "api/",
+    "models/",
+    "scripts/",
+    "services/",
+    "utils/",
+    "app.py",
+    "launcher.py",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "api/",
+    "models/",
+    "scripts/",
+    "services/",
+    "utils/",
+    "tests/",
+    "templates/",
+    "static/",
+    "app.py",
+    "launcher.py",
+    "requirements.txt",
+    "README.md",
+    "LICENSE",
+    "cursor-browser.spec",
+]
+
+# ── Mypy ──────────────────────────────────────────────────────────────────────
+# Mirrors the flags used in .github/workflows/tests.yml so local `mypy .`
+# and CI produce identical results.
+[tool.mypy]
+ignore_missing_imports = true
+no_strict_optional = true
+pretty = true
+# Exclude virtual-env and build artefact directories so that `mypy .` from the
+# repo root matches CI behaviour (CI runs in a clean runner without a local venv).
+exclude = ["venv/", "\\.venv/", "build/", "dist/"]

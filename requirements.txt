@@ -1,3 +1,11 @@
+# Backward-compatibility shim — pyproject.toml is the canonical source of
+# truth for dependencies.  This file is retained so that
+# legacy workflows running `pip install -r requirements.txt` keep working,
+# but bounded version specifiers and the lock file live in pyproject.toml.
+#
+# Prefer: pip install -e .           (installs the package + runtime deps)
+#         pip install -e ".[dev]"    (+ pytest and mypy)
+#         pip install -e ".[desktop]" (+ pywebview for the GUI launcher)
 flask>=3.0
 fpdf2>=2.7
 pywebview>=5.0
