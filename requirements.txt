@@ -8,4 +8,4 @@
 #         pip install -e ".[desktop]" (+ pywebview for the GUI launcher)
 flask>=3.0
 fpdf2>=2.7
-pywebview>=5.0
+# pywebview is desktop-only — install with: pip install -e ".[desktop]"
