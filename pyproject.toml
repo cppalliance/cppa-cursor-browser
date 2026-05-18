@@ -54,6 +54,8 @@ include = [
     "scripts/",
     "services/",
     "utils/",
+    "templates/",
+    "static/",
     "app.py",
     "launcher.py",
 ]
