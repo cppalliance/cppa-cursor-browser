@@ -4,39 +4,47 @@ CLI: Export Cursor chats to Markdown (zip archive by default).
 Usage: python scripts/export.py [--since all|last] [--out DIR] [--no-zip] [--no-composer]
 Run with --help for full usage information.
 Env: WORKSPACE_PATH for Cursor workspaceStorage path.
+
+When the package is installed via ``pip install -e .`` (or ``pip install .``),
+this module is importable as ``scripts.export`` without any sys.path hacks.
+The guard below is only necessary for direct invocation (``python scripts/export.py``).
 """
 
 import json
 import logging
 import os
-import re
 import sqlite3
 import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote as _url_unquote
 
-# Ensure project root is on path when run as python scripts/export.py
-_project_root = Path(__file__).resolve().parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
+# sys.path guard: only needed when the script is invoked directly
+# (``python scripts/export.py``). When installed via the pyproject.toml
+# entry point (``cursor-chat-export``) or imported as a module, the
+# project root is already on sys.path.
+if __name__ == "__main__":
+    _project_root = Path(__file__).resolve().parent.parent
+    if str(_project_root) not in sys.path:
+        sys.path.insert(0, str(_project_root))
 
-# noqa: E402 — these imports must come after the sys.path.insert above so the
-# script can be run directly as `python scripts/export.py` from anywhere.
 from utils.exclusion_rules import (  # noqa: E402
     resolve_exclusion_rules_path,
     load_rules,
     build_searchable_text,
     is_excluded_by_rules,
 )
-from utils.path_helpers import (  # noqa: E402
-    get_workspace_folder_paths as _shared_get_workspace_folder_paths,
-    normalize_file_path,
-    to_epoch_ms,
+from utils.path_helpers import to_epoch_ms  # noqa: E402
+from utils.text_extract import (  # noqa: E402
+    extract_text_from_bubble,
+    slug,
 )
 from utils.tool_parser import parse_tool_call  # noqa: E402
-from utils.workspace_path import get_cli_chats_path  # noqa: E402
+from utils.workspace_path import (  # noqa: E402
+    get_default_workspace_path,
+    get_cli_chats_path,
+    resolve_workspace_path,
+)
 from utils.cli_chat_reader import (  # noqa: E402
     list_cli_projects,
     traverse_blobs,
@@ -44,6 +52,19 @@ from utils.cli_chat_reader import (  # noqa: E402
 )
 from utils.cursor_md_exporter import cursor_cli_session_to_markdown  # noqa: E402
 from models import ExportEntry, SchemaError  # noqa: E402
+from services.workspace_db import (  # noqa: E402
+    _build_composer_id_to_workspace_id,
+    _collect_invalid_workspace_ids,
+    _collect_workspace_entries,
+    _open_global_db,
+)
+from services.workspace_resolver import (  # noqa: E402
+    _determine_project_for_conversation,
+    _get_workspace_display_name,
+    _infer_invalid_workspace_aliases,
+    _create_project_name_to_workspace_id_map,
+    _create_workspace_path_to_id_map,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -87,53 +108,6 @@ def _write_manifest_entries(manifest_path: str, entries_by_id: dict):
             f.write(json.dumps(entry) + "\n")
 
 
-def get_default_workspace_path() -> str:
-    home = str(Path.home())
-    release = ""
-    try:
-        release = os.uname().release.lower()
-    except AttributeError:
-        pass
-    is_wsl = "microsoft" in release or "wsl" in release
-    is_remote = bool(
-        os.environ.get("SSH_CONNECTION")
-        or os.environ.get("SSH_CLIENT")
-        or os.environ.get("SSH_TTY")
-    )
-
-    if is_wsl:
-        import subprocess
-        username = os.getenv("USER", "")
-        try:
-            username = subprocess.check_output(
-                ["cmd.exe", "/c", "echo", "%USERNAME%"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except Exception:
-            pass
-        return f"/mnt/c/Users/{username}/AppData/Roaming/Cursor/User/workspaceStorage"
-
-    if sys.platform == "win32":
-        return os.path.join(home, "AppData", "Roaming", "Cursor", "User", "workspaceStorage")
-    elif sys.platform == "darwin":
-        return os.path.join(home, "Library", "Application Support", "Cursor", "User", "workspaceStorage")
-    elif sys.platform == "linux":
-        if is_remote:
-            return os.path.join(home, ".cursor-server", "data", "User", "workspaceStorage")
-        return os.path.join(home, ".config", "Cursor", "User", "workspaceStorage")
-    return os.path.join(home, "workspaceStorage")
-
-
-def resolve_workspace_path() -> str:
-    env = os.environ.get("WORKSPACE_PATH", "").strip()
-    if env:
-        if env.startswith("~/"):
-            return os.path.join(str(Path.home()), env[2:])
-        return env
-    return get_default_workspace_path()
-
-
 def get_global_state_dir() -> str:
     # Honor XDG_STATE_HOME when set so the export state file (and manifest)
     # can be redirected — required for hermetic test runs and useful for
@@ -143,55 +117,6 @@ def get_global_state_dir() -> str:
     if xdg:
         return os.path.join(xdg, "cursor-chat-browser")
     return os.path.join(str(Path.home()), ".cursor-chat-browser")
-
-
-def slug(s: str) -> str:
-    s = re.sub(r'[<>:"/\\|?*]', "_", s or "")
-    s = re.sub(r"\s+", "-", s)
-    s = re.sub(r"-+", "-", s)
-    s = s.strip("-")
-    return s[:80] or "untitled"
-
-
-def extract_text_from_rich_text(children) -> str:
-    if not isinstance(children, list):
-        return ""
-    t = ""
-    for c in children:
-        if not isinstance(c, dict):
-            continue
-        if c.get("type") == "text" and c.get("text"):
-            t += c["text"]
-        elif c.get("type") == "code" and c.get("children"):
-            t += "\n```\n" + extract_text_from_rich_text(c["children"]) + "\n```\n"
-        elif c.get("children"):
-            t += extract_text_from_rich_text(c["children"])
-    return t
-
-
-def extract_text_from_bubble(bubble) -> str:
-    if not bubble or not isinstance(bubble, dict):
-        return ""
-    t = ""
-    if bubble.get("text") and str(bubble["text"]).strip():
-        t = bubble["text"]
-    if not t and bubble.get("richText"):
-        try:
-            r = json.loads(bubble["richText"]) if isinstance(bubble["richText"], str) else bubble["richText"]
-            if isinstance(r, dict) and r.get("root") and r["root"].get("children"):
-                t = extract_text_from_rich_text(r["root"]["children"])
-        except Exception:
-            pass
-    cbs = bubble.get("codeBlocks")
-    if isinstance(cbs, list):
-        for cb in cbs:
-            if isinstance(cb, dict) and cb.get("content"):
-                t += f"\n\n```{cb.get('language', '')}\n{cb['content']}\n```"
-    return t
-
-
-def get_workspace_folder_paths(wd) -> list:
-    return _shared_get_workspace_folder_paths(wd)
 
 
 def parse_args():
@@ -243,7 +168,6 @@ def main():
     if opts.get("base_dir"):
         os.environ["WORKSPACE_PATH"] = opts["base_dir"]
     workspace_path = resolve_workspace_path()
-    global_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
     state_dir = get_global_state_dir()
     state_path = os.path.join(state_dir, "export_state.json")
@@ -258,209 +182,124 @@ def main():
         except Exception:
             pass
 
-    # Pre-initialize IDE data — populated below only if the IDE database is accessible.
-    workspace_entries: list = []
-    workspace_path_to_id: dict = {}
-    project_name_to_ws: dict = {}
-    workspace_id_to_slug: dict = {}
+    # ── Workspace scanning via service layer ──────────────────────────────────
+    workspace_entries = _collect_workspace_entries(workspace_path)
+    invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
+    project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
+    workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
+    composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+
+    # Build display-name and slug maps from workspace entries.
+    # Entries whose workspace.json cannot be resolved are omitted so the
+    # usage-site fallback (slug(ws_id[:12])) applies — matching original
+    # behaviour where unresolvable workspaces were skipped.
     workspace_id_to_display_name: dict[str, str] = {}
+    workspace_id_to_slug: dict[str, str] = {}
+    for e in workspace_entries:
+        display = _get_workspace_display_name(workspace_path, e["name"])
+        if display != e["name"]:  # successfully resolved a human-readable name
+            workspace_id_to_display_name[e["name"]] = display
+            workspace_id_to_slug[e["name"]] = slug(display)
+
+    # ── Database reading via service layer ────────────────────────────────────
     project_layouts_map: dict = {}
     bubble_map: dict = {}
     code_block_diff_map: dict = {}
     ide_composer_rows: list = []
+    invalid_workspace_aliases: dict = {}
 
-    # Load IDE chat data — skipped gracefully when the database is absent or locked.
-    if not os.path.isfile(global_path):
-        print(f"Note: Cursor IDE global storage not found at {global_path} — skipping IDE chats.", file=sys.stderr)
-    else:
-        _conn = None
-        try:
-            _conn = sqlite3.connect(f"file:{global_path}?mode=ro", uri=True)
-            _conn.row_factory = sqlite3.Row
-
-            # Build workspace entries
-            try:
-                for name in os.listdir(workspace_path):
-                    full = os.path.join(workspace_path, name)
-                    if os.path.isdir(full):
-                        wp = os.path.join(full, "workspace.json")
-                        if os.path.isfile(wp):
-                            workspace_entries.append({"name": name, "workspaceJsonPath": wp})
-            except Exception:
-                pass
-
-            for e in workspace_entries:
+    with _open_global_db(workspace_path) as (global_db, global_db_path):
+        if global_db is None:
+            print(
+                f"Note: Cursor IDE global storage not found at {global_db_path}"
+                " — skipping IDE chats.",
+                file=sys.stderr,
+            )
+        else:
+            def _safe_fetchall(query: str, params: tuple = ()) -> list:
                 try:
-                    with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
-                        wd = json.load(f)
-                    folders = get_workspace_folder_paths(wd)
-                    first_folder = folders[0] if folders else None
-                    if isinstance(first_folder, str) and first_folder:
-                        fn = re.sub(r"^file://", "", first_folder).replace("\\", "/").split("/")[-1]
-                        if fn:
-                            workspace_id_to_slug[e["name"]] = slug(fn)
-                            workspace_id_to_display_name[e["name"]] = _url_unquote(fn)
-                    for folder in get_workspace_folder_paths(wd):
-                        norm = normalize_file_path(folder)
-                        workspace_path_to_id[norm] = e["name"]
-                        fn2 = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
-                        if fn2:
-                            project_name_to_ws[fn2] = e["name"]
-                except Exception:
-                    pass
+                    return global_db.execute(query, params).fetchall()
+                except sqlite3.Error:
+                    return []
 
             # Project layouts
-            try:
-                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
-                    parts = row["key"].split(":")
-                    if len(parts) < 2:
-                        continue
-                    cid = parts[1]
-                    try:
-                        ctx = json.loads(row["value"])
-                        layouts = ctx.get("projectLayouts")
-                        if isinstance(layouts, list):
-                            project_layouts_map.setdefault(cid, [])
-                            for layout in layouts:
-                                try:
-                                    o = json.loads(layout) if isinstance(layout, str) else layout
-                                    if isinstance(o, dict) and o.get("rootPath"):
-                                        project_layouts_map[cid].append(o["rootPath"])
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            for row in _safe_fetchall(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
+            ):
+                parts = row["key"].split(":")
+                if len(parts) < 2:
+                    continue
+                cid = parts[1]
+                try:
+                    ctx = json.loads(row["value"])
+                    layouts = ctx.get("projectLayouts")
+                    if isinstance(layouts, list):
+                        project_layouts_map.setdefault(cid, [])
+                        for layout in layouts:
+                            try:
+                                o = json.loads(layout) if isinstance(layout, str) else layout
+                                if isinstance(o, dict) and o.get("rootPath"):
+                                    project_layouts_map[cid].append(o["rootPath"])
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
             # Bubble map
-            try:
-                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
-                    parts = row["key"].split(":")
-                    if len(parts) >= 3:
-                        bid = parts[2]
-                        try:
-                            b = json.loads(row["value"])
-                            if isinstance(b, dict):
-                                bubble_map[bid] = b
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-            # Code block diffs
-            try:
-                for row in _conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
-                    parts = row["key"].split(":")
-                    cid = parts[1] if len(parts) > 1 else None
-                    if not cid:
-                        continue
+            for row in _safe_fetchall(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            ):
+                parts = row["key"].split(":")
+                if len(parts) >= 3:
+                    bid = parts[2]
                     try:
-                        d = json.loads(row["value"])
-                        code_block_diff_map.setdefault(cid, []).append({
-                            **d,
-                            "diffId": parts[2] if len(parts) > 2 else None,
-                        })
+                        b = json.loads(row["value"])
+                        if isinstance(b, dict):
+                            bubble_map[bid] = b
                     except Exception:
                         pass
-            except Exception:
-                pass
 
-            ide_composer_rows = _conn.execute(
+            # Code block diffs
+            for row in _safe_fetchall(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"
+            ):
+                parts = row["key"].split(":")
+                cid = parts[1] if len(parts) > 1 else None
+                if not cid:
+                    continue
+                try:
+                    d = json.loads(row["value"])
+                    code_block_diff_map.setdefault(cid, []).append({
+                        **d,
+                        "diffId": parts[2] if len(parts) > 2 else None,
+                    })
+                except Exception:
+                    pass
+
+            ide_composer_rows = _safe_fetchall(
                 "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
                 " AND value LIKE '%fullConversationHeadersOnly%'"
-            ).fetchall()
-        except Exception as e:
-            print(f"Warning: Could not read Cursor IDE chats ({e}) — skipping.", file=sys.stderr)
-        finally:
-            # Guaranteed close on every exit path (issue #17). Replaces the
-            # previous duplicate close-in-success-and-error pattern.
-            if _conn is not None:
-                try:
-                    _conn.close()
-                except Exception:
-                    pass
+            )
 
-    def get_project_from_file_path(fp):
-        np = normalize_file_path(fp)
-        best = None
-        best_len = 0
-        for e in workspace_entries:
-            try:
-                with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
-                    wd = json.load(f)
-                for folder in get_workspace_folder_paths(wd):
-                    wp = normalize_file_path(folder)
-                    if np.startswith(wp) and len(wp) > best_len:
-                        best_len = len(wp)
-                        best = e["name"]
-            except Exception:
-                pass
-        return best
-
-    def assign_workspace(cd, cid):
-        # Try project layouts
-        pl = project_layouts_map.get(cid, [])
-        best_layout = None
-        best_len = 0
-        for rp in pl:
-            match = get_project_from_file_path(rp)
-            if match:
-                nl = len(normalize_file_path(rp))
-                if nl > best_len:
-                    best_len = nl
-                    best_layout = match
-        if best_layout:
-            return best_layout
-
-        # Try file paths
-        paths = []
-        for fi in (cd.get("newlyCreatedFiles") or []):
-            if isinstance(fi, dict) and fi.get("uri") and fi["uri"].get("path"):
-                paths.append(normalize_file_path(fi["uri"]["path"]))
-        for fp in (cd.get("codeBlockData") or {}).keys():
-            paths.append(normalize_file_path(re.sub(r"^file://", "", fp)))
-        for h in (cd.get("fullConversationHeadersOnly") or []):
-            b = bubble_map.get(h.get("bubbleId"))
-            if not b:
-                continue
-            for fp in (b.get("relevantFiles") or []):
-                if fp:
-                    paths.append(normalize_file_path(fp))
-            for u in (b.get("attachedFileCodeChunksUris") or []):
-                if isinstance(u, dict) and u.get("path"):
-                    paths.append(normalize_file_path(u["path"]))
-            for fs_entry in (b.get("context", {}).get("fileSelections") or []):
-                if isinstance(fs_entry, dict) and isinstance(fs_entry.get("uri"), dict) and fs_entry["uri"].get("path"):
-                    paths.append(normalize_file_path(fs_entry["uri"]["path"]))
-
-        sep = "\\" if sys.platform == "win32" else "/"
-        best_id = None
-        best_l = 0
-        for p in paths:
-            for e in workspace_entries:
-                try:
-                    with open(e["workspaceJsonPath"], "r", encoding="utf-8") as f:
-                        wd = json.load(f)
-                    for folder in get_workspace_folder_paths(wd):
-                        fn = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
-                        if not fn:
-                            continue
-                        needle = sep + fn + sep
-                        needle_end = sep + fn
-                        if needle in p or p.endswith(needle_end):
-                            if len(fn) > best_l:
-                                best_l = len(fn)
-                                best_id = e["name"]
-                except Exception:
-                    pass
-        return best_id or "global"
+            # Workspace aliases for invalid (folder-less) workspace entries —
+            # must be computed while the DB connection is still open because
+            # _infer_invalid_workspace_aliases reads composer rows directly.
+            invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                composer_rows=ide_composer_rows,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map=bubble_map,
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+            )
 
     today = datetime.now().strftime("%Y-%m-%d")
     exported = []
     count = 0
 
-    # Process IDE composers (skipped entirely when --no-composer was passed)
+    # ── Process IDE composers ────────────────────────────────────────────────
     include_composer = opts.get("include_composer", True)
     for row in ide_composer_rows if include_composer else []:
         composer_id = row["key"].split(":")[1]
@@ -477,7 +316,17 @@ def main():
         if since == "last" and updated_at <= last_export:
             continue
 
-        ws_id = assign_workspace(cd, composer_id)
+        # Workspace assignment via service layer
+        pid = _determine_project_for_conversation(
+            cd, composer_id, project_layouts_map,
+            project_name_map, workspace_path_map,
+            workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
+        )
+        mapped_ws = composer_id_to_ws.get(composer_id)
+        if not pid and mapped_ws in invalid_workspace_ids:
+            pid = invalid_workspace_aliases.get(mapped_ws)
+        ws_id = pid if pid else "global"
+
         ws_slug = "other-chats" if ws_id == "global" else (workspace_id_to_slug.get(ws_id) or slug(ws_id[:12]))
         ws_display_name = "Other chats" if ws_id == "global" else (workspace_id_to_display_name.get(ws_id) or ws_slug)
         title = cd.get("name") or f"Chat {composer_id[:8]}"
@@ -797,7 +646,7 @@ def main():
                          "title": title, "workspace": ws_display_name})
         count += 1
 
-    # --- Cursor CLI sessions ---
+    # ── Cursor CLI sessions ──────────────────────────────────────────────────
     try:
         cli_projects = list_cli_projects(get_cli_chats_path())
     except Exception as e:
