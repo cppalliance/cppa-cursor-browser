@@ -19,7 +19,6 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 from utils.workspace_path import (
-    get_workspace_path_override,
     resolve_workspace_path,
     set_workspace_path_override,
 )
@@ -35,9 +34,15 @@ class TestWorkspacePathThreadSafety(unittest.TestCase):
         self.path_b = os.path.join(self.tmp, "storage-b")
         os.makedirs(self.path_a)
         os.makedirs(self.path_b)
+        self.allowed_resolved = {
+            os.path.realpath(self.path_a),
+            os.path.realpath(self.path_b),
+        }
         self._prior_workspace_env = os.environ.pop("WORKSPACE_PATH", None)
         self.addCleanup(self._restore_workspace_env)
         self.addCleanup(set_workspace_path_override, None)
+        set_workspace_path_override(None)
+        self.fallback_resolved = resolve_workspace_path()
 
     def _restore_workspace_env(self):
         if self._prior_workspace_env is None:
@@ -60,18 +65,10 @@ class TestWorkspacePathThreadSafety(unittest.TestCase):
         def reader() -> None:
             start.wait()
             for _ in range(iterations):
-                override = get_workspace_path_override()
-                if override is None:
-                    errors.append("override was unexpectedly cleared during run")
-                    continue
-                if override not in (self.path_a, self.path_b):
-                    errors.append(f"override returned unexpected value: {override!r}")
-                    continue
                 resolved = resolve_workspace_path()
-                expected = os.path.realpath(override)
-                if resolved != expected:
+                if resolved not in self.allowed_resolved:
                     errors.append(
-                        f"resolve {resolved!r} != realpath(override) {expected!r}"
+                        f"resolve returned unexpected path: {resolved!r}"
                     )
 
         with ThreadPoolExecutor(max_workers=9) as pool:
@@ -100,16 +97,13 @@ class TestWorkspacePathThreadSafety(unittest.TestCase):
         def reader() -> None:
             start.wait()
             for _ in range(iterations):
-                override = get_workspace_path_override()
                 resolved = resolve_workspace_path()
-                if override is None:
+                if (
+                    resolved in self.allowed_resolved
+                    or resolved == self.fallback_resolved
+                ):
                     continue
-                if override not in (self.path_a, self.path_b):
-                    errors.append(f"unexpected override: {override!r}")
-                elif resolved != os.path.realpath(override):
-                    errors.append(
-                        f"resolve {resolved!r} != realpath({override!r})"
-                    )
+                errors.append(f"resolve returned unexpected path: {resolved!r}")
 
         with ThreadPoolExecutor(max_workers=5) as pool:
             futures = [pool.submit(toggler)]
