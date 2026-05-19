@@ -5,20 +5,27 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import threading
 
 from .path_helpers import expand_tilde_path
 
-# Module-level override set via the /api/set-workspace endpoint
+# Module-level override set via POST /api/set-workspace (or --base-dir).
+# All reads and writes are serialized by _workspace_path_lock so threaded
+# WSGI workers (gunicorn --threads, waitress, etc.) cannot observe torn
+# state between set_workspace_path_override and resolve_workspace_path.
+_workspace_path_lock = threading.Lock()
 _workspace_path_override: str | None = None
 
 
-def set_workspace_path_override(path: str):
+def set_workspace_path_override(path: str | None) -> None:
     global _workspace_path_override
-    _workspace_path_override = path
+    with _workspace_path_lock:
+        _workspace_path_override = path
 
 
 def get_workspace_path_override() -> str | None:
-    return _workspace_path_override
+    with _workspace_path_lock:
+        return _workspace_path_override
 
 
 def get_default_workspace_path() -> str:
@@ -64,8 +71,10 @@ def resolve_workspace_path() -> str:
     is only tilde-expanded — trusted-operator escape hatch, not the same checks
     as the API (issue #15).
     """
-    if _workspace_path_override:
-        return expand_tilde_path(_workspace_path_override)
+    with _workspace_path_lock:
+        override = _workspace_path_override
+    if override:
+        return expand_tilde_path(override)
     env_path = os.environ.get("WORKSPACE_PATH", "").strip()
     if env_path:
         return expand_tilde_path(env_path)
