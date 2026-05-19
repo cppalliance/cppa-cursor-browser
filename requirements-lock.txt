@@ -13,5 +13,5 @@ fpdf2==2.8.7              # via -r requirements.txt
 itsdangerous==2.2.0       # via flask
 jinja2==3.1.6             # via flask
 markupsafe==3.0.3         # via flask, jinja2, werkzeug
-pillow==10.4.0            # via -r requirements.txt, fpdf2
+pillow==12.2.0            # via -r requirements.txt, fpdf2
 werkzeug==3.1.8           # via flask
