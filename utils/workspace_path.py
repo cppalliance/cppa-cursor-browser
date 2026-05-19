@@ -10,9 +10,9 @@ import threading
 from .path_helpers import expand_tilde_path
 
 # Module-level override set via POST /api/set-workspace (or --base-dir).
-# All reads and writes are serialized by _workspace_path_lock so threaded
-# WSGI workers (gunicorn --threads, waitress, etc.) cannot observe torn
-# state between set_workspace_path_override and resolve_workspace_path.
+# Reads and writes are serialized by _workspace_path_lock so threaded WSGI
+# workers (gunicorn --threads, waitress, etc.) always see the latest override
+# from another thread and resolve_workspace_path's snapshot+expand stays consistent.
 _workspace_path_lock = threading.Lock()
 _workspace_path_override: str | None = None
 

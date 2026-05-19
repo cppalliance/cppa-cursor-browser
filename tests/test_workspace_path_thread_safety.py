@@ -34,14 +34,13 @@ class TestWorkspacePathThreadSafety(unittest.TestCase):
         self.path_b = os.path.join(self.tmp, "storage-b")
         os.makedirs(self.path_a)
         os.makedirs(self.path_b)
-        self.allowed_resolved = {
-            os.path.realpath(self.path_a),
-            os.path.realpath(self.path_b),
-        }
+        # Match resolve_workspace_path() (expand_tilde only — no realpath).
+        self.allowed_resolved = {self.path_a, self.path_b}
         self._prior_workspace_env = os.environ.pop("WORKSPACE_PATH", None)
         self.addCleanup(self._restore_workspace_env)
         self.addCleanup(set_workspace_path_override, None)
-        set_workspace_path_override(None)
+        # With WORKSPACE_PATH popped and override None, this is resolve()'s
+        # "override cleared" path — used by test_concurrent_clear_and_set.
         self.fallback_resolved = resolve_workspace_path()
 
     def _restore_workspace_env(self):
