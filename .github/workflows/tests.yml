@@ -41,12 +41,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install runtime + test dependencies
-        # Only what the tests actually exercise. `pywebview` from
-        # requirements.txt is the desktop-launcher dep and pulls GTK / Qt
-        # system packages on Linux — out of scope for the unittest suite.
+        # Install from the pinned lock file for deterministic dependency
+        # resolution (closes #47). pytest is added on top — it is not in
+        # requirements-lock.txt because it is a dev-only dep. pywebview is
+        # the desktop-launcher dep and pulls GTK / Qt system libraries on
+        # Linux — intentionally excluded from the CI unittest matrix.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'flask>=3.0' 'fpdf2>=2.7' 'pytest>=8'
+          python -m pip install -r requirements-lock.txt
+          python -m pip install 'pytest>=8,<9'
 
       - name: Run unittest suite
         run: python -m unittest discover tests -v
@@ -78,9 +81,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install runtime deps + mypy
+        # Install from the pinned lock file for deterministic resolution,
+        # then add mypy (dev-only; not in requirements-lock.txt).
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'flask>=3.0' 'fpdf2>=2.7' 'mypy>=1.10'
+          python -m pip install -r requirements-lock.txt
+          python -m pip install 'mypy>=1.10,<2'
 
       - name: Run mypy
         # No `continue-on-error` — mypy now exits zero on this repo (closes #29),

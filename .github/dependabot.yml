@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned to immutable commit SHAs up-to-date.
+  # Dependabot opens a PR whenever a newer SHA is available for a pinned action.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+
+  # Keep Python runtime dependencies up-to-date within the bounded ranges
+  # declared in requirements.txt / pyproject.toml.
+  # Dependabot opens a PR for each package that has a new version available.
+  # After merging, regenerate requirements-lock.txt by running the
+  # "Update dependency lock file" workflow (or locally with pip-compile).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"

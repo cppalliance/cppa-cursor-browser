@@ -20,7 +20,7 @@ dependencies = [
     "fpdf2>=2.7,<3",
     # Security floor: fpdf2 allows Pillow>=8.3.2, so 9.x can still be resolved.
     # CVE-2024-28219 (buffer overflow) fixed in Pillow 10.3.0 — https://nvd.nist.gov/vuln/detail/CVE-2024-28219
-    "pillow>=10.3.0",
+    "pillow>=10.3.0,<11",
 ]
 
 [project.optional-dependencies]
