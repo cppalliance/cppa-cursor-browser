@@ -2,7 +2,7 @@
 
 A cursorDiskKV row with a NULL value column previously caused
 json.loads(None) -> TypeError, which propagated as a 500 response.
-The fix uses ``_loads_disk_kv_value`` in ``services/workspace_tabs.py`` so
+The fix uses ``_try_loads_kv_value`` in ``services/workspace_tabs.py`` so
 NULL / unparseable cursorDiskKV values are skipped without raising.
 """
 

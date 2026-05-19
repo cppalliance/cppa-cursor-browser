@@ -37,8 +37,8 @@ def _extract_chat_id_from_code_block_diff_key(key: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _loads_disk_kv_value(raw: Any) -> Any | None:
-    """Parse a cursorDiskKV ``value`` column; ``None`` if missing or unparseable."""
+def _try_loads_kv_value(raw: str | None) -> Any | None:
+    """Parse a cursorDiskKV ``value`` column; ``None`` on missing or unparseable input (no raise)."""
     if raw is None:
         return None
     try:
@@ -107,7 +107,7 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
-                parsed = _loads_disk_kv_value(row["value"])
+                parsed = _try_loads_kv_value(row["value"])
                 if parsed is None:
                     continue
                 try:
@@ -124,7 +124,7 @@ def assemble_workspace_tabs(
             chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
             if not chat_id:
                 continue
-            d = _loads_disk_kv_value(row["value"])
+            d = _try_loads_kv_value(row["value"])
             if not isinstance(d, dict):
                 continue
             code_block_diff_map.setdefault(chat_id, []).append({
@@ -140,7 +140,7 @@ def assemble_workspace_tabs(
             if len(parts) < 2:
                 continue
             chat_id = parts[1]
-            ctx = _loads_disk_kv_value(row["value"])
+            ctx = _try_loads_kv_value(row["value"])
             if not isinstance(ctx, dict):
                 continue
 
@@ -158,7 +158,7 @@ def assemble_workspace_tabs(
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
                     if isinstance(layout, str):
-                        layout = _loads_disk_kv_value(layout)
+                        layout = _try_loads_kv_value(layout)
                         if not isinstance(layout, dict):
                             continue
                     if isinstance(layout, dict) and layout.get("rootPath"):
@@ -184,7 +184,7 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            parsed = _loads_disk_kv_value(row["value"])
+            parsed = _try_loads_kv_value(row["value"])
             if parsed is None:
                 continue
             try:
