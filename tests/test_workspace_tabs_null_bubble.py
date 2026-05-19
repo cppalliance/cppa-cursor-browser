@@ -2,8 +2,8 @@
 
 A cursorDiskKV row with a NULL value column previously caused
 json.loads(None) -> TypeError, which propagated as a 500 response.
-The fix adds an explicit None-guard before json.loads in the bubble
-loading loop of services/workspace_tabs.py.
+The fix uses ``_loads_disk_kv_value`` in ``services/workspace_tabs.py`` so
+NULL / unparseable cursorDiskKV values are skipped without raising.
 """
 
 import json
@@ -11,6 +11,13 @@ import os
 import sqlite3
 import tempfile
 import unittest
+
+from services.workspace_tabs import assemble_workspace_tabs
+
+# cursorDiskKV keys use typed prefixes; tabs[].id is the bare suffix only
+# (assemble_workspace_tabs: composer_id = row["key"].split(":")[1]).
+COMPOSER_ID = "composer-abc"
+COMPOSER_KV_KEY = f"composerData:{COMPOSER_ID}"
 
 
 class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
@@ -30,13 +37,13 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
         conn.execute(
             "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-            ("bubbleId:composer-abc:bubble-null", None),  # NULL value — the crash case
+            (f"bubbleId:{COMPOSER_ID}:bubble-null", None),  # NULL value — the crash case
         )
         # Healthy bubble that should surface in the assembled tab.
         conn.execute(
             "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
             (
-                "bubbleId:composer-abc:bubble-ok",
+                f"bubbleId:{COMPOSER_ID}:bubble-ok",
                 json.dumps({"type": 1, "text": "hello world", "createdAt": 1739200000000}),
             ),
         )
@@ -44,7 +51,7 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         conn.execute(
             "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
             (
-                "composerData:composer-abc",
+                COMPOSER_KV_KEY,
                 json.dumps({
                     "name": "Test Chat",
                     "modelConfig": {"modelName": "gpt-4o"},
@@ -64,8 +71,6 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
 
     def test_null_bubble_row_is_skipped_without_exception(self):
         """assemble_workspace_tabs must not raise when a bubble row has NULL value."""
-        from services.workspace_tabs import assemble_workspace_tabs
-
         try:
             _payload, status = assemble_workspace_tabs(
                 workspace_id="global",
@@ -75,34 +80,34 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         except TypeError as exc:
             self.fail(f"NULL bubble row raised TypeError: {exc}")
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 200, "NULL bubble row must not turn tabs load into an error response")
 
     def test_healthy_bubbles_still_load_when_null_row_present(self):
         """The healthy bubble surfaces in a tab even when a NULL row is present."""
-        from services.workspace_tabs import assemble_workspace_tabs
-
         payload, status = assemble_workspace_tabs(
             workspace_id="global",
             workspace_path=self.workspace_path,
             rules=[],
         )
-        self.assertEqual(status, 200)
-        self.assertIsInstance(payload, dict)
+        self.assertEqual(status, 200, "tabs endpoint must succeed when only the null bubble row is bad")
+        self.assertIsInstance(payload, dict, "tabs response must be a JSON object envelope")
         tabs = payload.get("tabs", [])
-        self.assertEqual(len(tabs), 1, "Expected exactly one tab for composer-abc")
+        self.assertEqual(len(tabs), 1, f"Expected exactly one tab for {COMPOSER_ID}")
 
         tab = tabs[0]
-        self.assertEqual(tab["id"], "composer-abc")
-        self.assertEqual(tab["title"], "Test Chat")
-        self.assertIn("bubbles", tab)
-        self.assertIn("codeBlockDiffs", tab)
+        # GET /tabs and workspace.html ?tab= use bare composer id, not the KV key.
+        self.assertEqual(tab["id"], COMPOSER_ID, "tab id must be bare composer id (KV key suffix only)")
+        self.assertNotEqual(tab["id"], COMPOSER_KV_KEY, "tab id must not include composerData: prefix")
+        self.assertEqual(tab["title"], "Test Chat", "composer name from seeded cursorDiskKV row")
+        self.assertIn("bubbles", tab, "tab payload must include bubbles for the conversation view")
+        self.assertIn("codeBlockDiffs", tab, "tab payload must include codeBlockDiffs field (may be empty)")
 
         bubbles = tab["bubbles"]
         self.assertEqual(len(bubbles), 1, "Expected exactly one bubble (null row skipped)")
         bubble = bubbles[0]
-        self.assertEqual(bubble["type"], "user")
-        self.assertEqual(bubble["text"], "hello world")
-        self.assertIn("timestamp", bubble)
+        self.assertEqual(bubble["type"], "user", "header type 1 maps to user bubble")
+        self.assertEqual(bubble["text"], "hello world", "healthy bubble text must surface in the tab")
+        self.assertIn("timestamp", bubble, "bubble must carry a timestamp for ordering/display")
 
 
 if __name__ == "__main__":
