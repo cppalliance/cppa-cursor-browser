@@ -1,13 +1,15 @@
-"""Tests for utils.path_helpers path/timestamp helpers (closes #46).
+"""Tests for utils.path_helpers path/timestamp helpers (closes #44, #46).
 
 Covers ``normalize_file_path`` and ``to_epoch_ms``, both previously duplicated
 in scripts/export.py. All call-sites in the web app and CLI export script now
 use the shared implementations in utils.path_helpers.
 
-Test inventory (this module only): 21 cases — 12 ``normalize_file_path``,
+Test inventory (this module only): 23 cases — 14 ``normalize_file_path``,
 9 ``to_epoch_ms``. On win32, 2 cases skip (POSIX passthrough in
-``TestNormalizeFilePathPosixPassthrough`` only). A full-suite run may report
-more skips (e.g. ``skipped=4``) from other test modules, not this file.
+``TestNormalizeFilePathPosixPassthrough`` only). On non-win32, 2 cases skip
+(``TestNormalizeFilePathWindowsNative`` — exercised on windows-latest CI).
+A full-suite run may report more skips (e.g. ``skipped=4``) from other test
+modules, not this file.
 """
 
 import sys
@@ -89,6 +91,20 @@ class TestNormalizeFilePathWindowsDrives(unittest.TestCase):
         out = normalize_file_path(r"E:\Mixed\Case\Path")
         self.assertTrue(out.startswith("e:"))
         self.assertEqual(out, r"e:\mixed\case\path")
+
+
+class TestNormalizeFilePathWindowsNative(unittest.TestCase):
+    """Win32-only edge cases — run on actual Windows runners in CI (#44)."""
+
+    @unittest.skipUnless(sys.platform == "win32", "native win32 path semantics")
+    def test_leading_backslash_before_drive_stripped(self) -> None:
+        out = normalize_file_path(r"\C:\Users\Dev\project")
+        self.assertEqual(out, r"c:\users\dev\project")
+
+    @unittest.skipUnless(sys.platform == "win32", "native win32 path semantics")
+    def test_file_uri_backslashes_normalised(self) -> None:
+        out = normalize_file_path(r"file:///C:\Users\Dev\project")
+        self.assertEqual(out, r"c:\users\dev\project")
 
 
 class TestNormalizeFilePathPosixPassthrough(unittest.TestCase):
