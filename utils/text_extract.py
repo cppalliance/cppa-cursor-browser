@@ -1,7 +1,6 @@
 """Text extraction helpers mirroring the bubble/richText parsing in the Node.js codebase."""
 
 import json
-import re
 
 
 def extract_text_from_rich_text(children: list) -> str:
@@ -50,15 +49,6 @@ def extract_text_from_bubble(bubble: dict) -> str:
                 text += f"\n\n```{lang}\n{cb['content']}\n```"
 
     return text
-
-
-def slug(s: str) -> str:
-    """Convert a string to a filesystem-safe slug (max 80 chars)."""
-    s = re.sub(r'[<>:"/\\|?*]', "_", s or "")
-    s = re.sub(r"\s+", "-", s)
-    s = re.sub(r"-+", "-", s)
-    s = s.strip("-")
-    return s[:80] or "untitled"
 
 
 def format_tool_action(action: dict) -> str:
