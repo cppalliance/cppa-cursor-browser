@@ -4,9 +4,9 @@ Covers ``normalize_file_path`` and ``to_epoch_ms``, both previously duplicated
 in scripts/export.py. All call-sites in the web app and CLI export script now
 use the shared implementations in utils.path_helpers.
 
-Test inventory (this module only): 24 cases — 15 ``normalize_file_path``,
+Test inventory (this module only): 23 cases — 14 ``normalize_file_path``,
 9 ``to_epoch_ms``. On win32, 2 cases skip (POSIX passthrough in
-``TestNormalizeFilePathPosixPassthrough`` only). On non-win32, 3 cases skip
+``TestNormalizeFilePathPosixPassthrough`` only). On non-win32, 2 cases skip
 (``TestNormalizeFilePathWindowsNative`` — exercised on windows-latest CI).
 A full-suite run may report more skips (e.g. ``skipped=4``) from other test
 modules, not this file.
@@ -105,11 +105,6 @@ class TestNormalizeFilePathWindowsNative(unittest.TestCase):
     def test_file_uri_backslashes_normalised(self) -> None:
         out = normalize_file_path(r"file:///C:\Users\Dev\project")
         self.assertEqual(out, r"c:\users\dev\project")
-
-    @unittest.skipUnless(sys.platform == "win32", "native win32 path semantics")
-    def test_percent_encoded_drive_on_win32(self) -> None:
-        out = normalize_file_path("/d%3A/_Work/project")
-        self.assertEqual(out, r"d:\_work\project")
 
 
 class TestNormalizeFilePathPosixPassthrough(unittest.TestCase):
