@@ -18,6 +18,8 @@ from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
+    _load_bubble_map,
+    _load_project_layouts_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -54,46 +56,8 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
                 )
 
-                ctx_rows = _safe_fetchall(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
-                )
-                project_layouts_map: dict[str, list] = {}
-                for row in ctx_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) < 2:
-                        continue
-                    cid = parts[1]
-                    try:
-                        ctx = json.loads(row["value"])
-                        layouts = ctx.get("projectLayouts")
-                        if isinstance(layouts, list):
-                            if cid not in project_layouts_map:
-                                project_layouts_map[cid] = []
-                            for layout in layouts:
-                                if isinstance(layout, str):
-                                    try:
-                                        layout = json.loads(layout)
-                                    except Exception:
-                                        continue
-                                if isinstance(layout, dict) and layout.get("rootPath"):
-                                    project_layouts_map[cid].append(layout["rootPath"])
-                    except Exception:
-                        pass
-
-                bubble_rows = _safe_fetchall(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-                )
-                bubble_map: dict[str, dict] = {}
-                for row in bubble_rows:
-                    parts = row["key"].split(":")
-                    if len(parts) >= 3:
-                        bid = parts[2]
-                        try:
-                            b = json.loads(row["value"])
-                            if isinstance(b, dict):
-                                bubble_map[bid] = b
-                        except Exception:
-                            pass
+                project_layouts_map: dict[str, list] = _load_project_layouts_map(global_db)
+                bubble_map: dict[str, dict] = _load_bubble_map(global_db)
 
                 invalid_workspace_aliases = _infer_invalid_workspace_aliases(
                     composer_rows=composer_rows,

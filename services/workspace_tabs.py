@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 from datetime import datetime
 from typing import Any
@@ -21,6 +20,7 @@ from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
+    _load_code_block_diff_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -31,10 +31,6 @@ from services.workspace_resolver import (
     _infer_invalid_workspace_aliases,
 )
 
-
-def _extract_chat_id_from_code_block_diff_key(key: str) -> str | None:
-    m = re.match(r"^codeBlockDiff:([^:]+):", key)
-    return m.group(1) if m else None
 
 
 def _try_loads_kv_value(raw: str | None) -> Any | None:
@@ -120,17 +116,7 @@ def assemble_workspace_tabs(
                     print(f"Schema drift in bubble {bid}: {e}")
 
         # Load codeBlockDiffs
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
-            chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
-            if not chat_id:
-                continue
-            d = _try_loads_kv_value(row["value"])
-            if not isinstance(d, dict):
-                continue
-            code_block_diff_map.setdefault(chat_id, []).append({
-                **d,
-                "diffId": row["key"].split(":")[2] if len(row["key"].split(":")) > 2 else None,
-            })
+        code_block_diff_map = _load_code_block_diff_map(global_db)
 
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.

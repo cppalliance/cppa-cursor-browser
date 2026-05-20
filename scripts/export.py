@@ -41,7 +41,6 @@ from utils.text_extract import (  # noqa: E402
 )
 from utils.tool_parser import parse_tool_call  # noqa: E402
 from utils.workspace_path import (  # noqa: E402
-    get_default_workspace_path,
     get_cli_chats_path,
     resolve_workspace_path,
 )
@@ -50,12 +49,18 @@ from utils.cli_chat_reader import (  # noqa: E402
     traverse_blobs,
     messages_to_bubbles,
 )
-from utils.cursor_md_exporter import cursor_cli_session_to_markdown  # noqa: E402
+from utils.cursor_md_exporter import (  # noqa: E402
+    cursor_cli_session_to_markdown,
+    cursor_ide_chat_to_markdown,
+)
 from models import ExportEntry, SchemaError  # noqa: E402
 from services.workspace_db import (  # noqa: E402
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
+    _load_bubble_map,
+    _load_code_block_diff_map,
+    _load_project_layouts_map,
     _open_global_db,
 )
 from services.workspace_resolver import (  # noqa: E402
@@ -216,74 +221,18 @@ def main():
                 file=sys.stderr,
             )
         else:
-            def _safe_fetchall(query: str, params: tuple = ()) -> list:
-                try:
-                    return global_db.execute(query, params).fetchall()
-                except sqlite3.Error:
-                    return []
+            project_layouts_map = _load_project_layouts_map(global_db)
+            bubble_map = _load_bubble_map(global_db)
+            code_block_diff_map = _load_code_block_diff_map(global_db)
 
-            # Project layouts
-            for row in _safe_fetchall(
-                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
-            ):
-                parts = row["key"].split(":")
-                if len(parts) < 2:
-                    continue
-                cid = parts[1]
-                try:
-                    ctx = json.loads(row["value"])
-                    layouts = ctx.get("projectLayouts")
-                    if isinstance(layouts, list):
-                        project_layouts_map.setdefault(cid, [])
-                        for layout in layouts:
-                            try:
-                                o = json.loads(layout) if isinstance(layout, str) else layout
-                                if isinstance(o, dict) and o.get("rootPath"):
-                                    project_layouts_map[cid].append(o["rootPath"])
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+            try:
+                ide_composer_rows = global_db.execute(
+                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+                    " AND value LIKE '%fullConversationHeadersOnly%'"
+                ).fetchall()
+            except sqlite3.Error:
+                pass
 
-            # Bubble map
-            for row in _safe_fetchall(
-                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-            ):
-                parts = row["key"].split(":")
-                if len(parts) >= 3:
-                    bid = parts[2]
-                    try:
-                        b = json.loads(row["value"])
-                        if isinstance(b, dict):
-                            bubble_map[bid] = b
-                    except Exception:
-                        pass
-
-            # Code block diffs
-            for row in _safe_fetchall(
-                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"
-            ):
-                parts = row["key"].split(":")
-                cid = parts[1] if len(parts) > 1 else None
-                if not cid:
-                    continue
-                try:
-                    d = json.loads(row["value"])
-                    code_block_diff_map.setdefault(cid, []).append({
-                        **d,
-                        "diffId": parts[2] if len(parts) > 2 else None,
-                    })
-                except Exception:
-                    pass
-
-            ide_composer_rows = _safe_fetchall(
-                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-                " AND value LIKE '%fullConversationHeadersOnly%'"
-            )
-
-            # Workspace aliases for invalid (folder-less) workspace entries —
-            # must be computed while the DB connection is still open because
-            # _infer_invalid_workspace_aliases reads composer rows directly.
             invalid_workspace_aliases = _infer_invalid_workspace_aliases(
                 composer_rows=ide_composer_rows,
                 project_layouts_map=project_layouts_map,
@@ -359,291 +308,39 @@ def main():
                     bubble_texts
                     + bubble_meta_parts
                     + code_diff_parts
-                    + [
-                        _json_dump_safe(model_config),
-                        _json_dump_safe(cd),
-                    ]
+                    + [_json_dump_safe(model_config), _json_dump_safe(cd)]
                 )
                 if p
             ),
         )
         if is_excluded_by_rules(exclusion_rules, searchable):
             continue
+
         title_slug = slug(title)
         ts = updated_at or int(datetime.now().timestamp() * 1000)
         ts_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%dT%H-%M-%S")
         filename = f"{ts_str}__{title_slug}__{composer_id[:8]}.md"
-        rel_dir = os.path.join(today, ws_slug, "chat")
-        out_path = os.path.join(out_dir, rel_dir, filename)
+        out_path = os.path.join(out_dir, today, ws_slug, "chat", filename)
 
-        # Build bubbles with full metadata
-        bubbles = []
-        for h in headers:
-            b = bubble_map.get(h.get("bubbleId"))
-            if not b:
-                continue
-            text = extract_text_from_bubble(b)
-            has_tool = isinstance(b.get("toolFormerData"), dict)
-            has_thinking = bool(b.get("thinking"))
-            if not text.strip() and not has_tool and not has_thinking:
-                continue
-            if not text.strip() and has_tool:
-                text = f"**Tool: {b['toolFormerData'].get('name', 'unknown')}**"
-
-            btype = "user" if h.get("type") == 1 else "ai"
-
-            thinking = None
-            thinking_duration_ms = None
-            if b.get("thinking"):
-                thinking = b["thinking"] if isinstance(b["thinking"], str) else (
-                    b["thinking"].get("text") if isinstance(b["thinking"], dict) else None
-                )
-                thinking_duration_ms = b.get("thinkingDurationMs")
-
-            tool_info = None
-            if has_tool:
-                tool_info = parse_tool_call(b["toolFormerData"])
-
-            model_info = (b.get("modelInfo") or {}).get("modelName")
-            if model_info == "default":
-                model_info = None
-
-            ctx_window = b.get("contextWindowStatusAtCreation") or {}
-            ctx_tokens_used = ctx_window.get("tokensUsed", 0)
-            ctx_token_limit = ctx_window.get("tokenLimit", 0)
-            ctx_pct_remaining = ctx_window.get("percentageRemainingFloat") or ctx_window.get("percentageRemaining")
-
-            bubbles.append({
-                "type": btype,
-                "text": text,
-                "timestamp": to_epoch_ms(b.get("createdAt")) or to_epoch_ms(b.get("timestamp")) or int(datetime.now().timestamp() * 1000),
-                "tool": tool_info,
-                "thinking": thinking,
-                "thinkingDurationMs": thinking_duration_ms,
-                "model": model_info,
-                "contextTokensUsed": ctx_tokens_used if ctx_tokens_used > 0 else None,
-                "contextTokenLimit": ctx_token_limit if ctx_token_limit > 0 else None,
-                "contextPctRemaining": round(ctx_pct_remaining, 1) if ctx_pct_remaining else None,
-            })
-
-        # Code block diffs
-        for d in code_block_diff_map.get(composer_id, []):
-            bubbles.append({
-                "type": "ai",
-                "text": f"**Code edit:** {json.dumps(d)}",
-                "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
-            })
-
-        bubbles.sort(key=lambda bub: bub.get("timestamp") or 0)
-
-        # Compute per-assistant-bubble response times
-        last_user_ts = None
-        for bub in bubbles:
-            if bub["type"] == "user":
-                last_user_ts = bub.get("timestamp")
-            elif bub["type"] == "ai" and last_user_ts:
-                bts = bub.get("timestamp")
-                if bts and bts > last_user_ts:
-                    bub["responseTimeMs"] = bts - last_user_ts
-
-        # Session-level aggregates
-        total_response_ms = sum(bub.get("responseTimeMs", 0) for bub in bubbles)
-        total_thinking_ms = sum(bub.get("thinkingDurationMs", 0) or 0 for bub in bubbles)
-        total_tool_calls = sum(1 for bub in bubbles if bub.get("tool"))
-        max_ctx_used = max((bub.get("contextTokensUsed") or 0) for bub in bubbles) if bubbles else 0
-        ctx_limit = max((bub.get("contextTokenLimit") or 0) for bub in bubbles) if bubbles else 0
-
-        tool_breakdown = {}
-        for bub in bubbles:
-            if bub.get("tool"):
-                tn = bub["tool"].get("name", "unknown")
-                tool_breakdown[tn] = tool_breakdown.get(tn, 0) + 1
-
-        lines_added = cd.get("totalLinesAdded", 0)
-        lines_removed = cd.get("totalLinesRemoved", 0)
-
-        # Wall-clock duration from bubble timestamps
-        ts_vals = [bub["timestamp"] for bub in bubbles if bub.get("timestamp")]
-        wall_clock_sec = int((max(ts_vals) - min(ts_vals)) / 1000) if len(ts_vals) >= 2 else None
-
-        # Collect file/command activity and tool result stats from tool calls
-        files_read_list = []
-        files_written_list = []
-        commands_run_list = []
-        tool_result_stats = {
-            "terminal_success": 0, "terminal_error": 0,
-            "file_reads": 0, "file_edits": 0,
-            "searches": 0, "web": 0,
-        }
-        for bub in bubbles:
-            if not bub.get("tool"):
-                continue
-            t = bub["tool"]
-            tn = t.get("name", "")
-            status = t.get("status") or ""
-            raw_input = str(t.get("input") or "").strip()
-            first_line = raw_input.split("\n")[0] if raw_input else ""
-            if tn == "read_file_v2" and first_line:
-                files_read_list.append(first_line)
-                tool_result_stats["file_reads"] += 1
-            elif tn == "edit_file_v2" and first_line:
-                files_written_list.append(first_line)
-                tool_result_stats["file_edits"] += 1
-            elif tn == "run_terminal_command_v2" and raw_input:
-                commands_run_list.append(raw_input)
-                if status == "completed":
-                    tool_result_stats["terminal_success"] += 1
-                elif status in ("error", "failed"):
-                    tool_result_stats["terminal_error"] += 1
-                else:
-                    tool_result_stats["terminal_success"] += 1
-            elif tn in ("ripgrep_raw_search", "glob_file_search", "semantic_search_full"):
-                tool_result_stats["searches"] += 1
-            elif tn in ("web_search", "web_fetch"):
-                tool_result_stats["web"] += 1
-
-        # Frontmatter
-        created_ms = to_epoch_ms(cd.get("createdAt")) or ts
-        fm_lines = ["---"]
-        fm_lines.append(f"log_id: {composer_id}")
-        fm_lines.append("log_type: chat")
-        fm_lines.append(f'title: "{title.replace(chr(34), chr(92)+chr(34))}"')
-        fm_lines.append(f"created_at: {datetime.fromtimestamp(created_ms / 1000).isoformat()}")
-        fm_lines.append(f"updated_at: {datetime.fromtimestamp(updated_at / 1000).isoformat() if updated_at else datetime.now().isoformat()}")
-        fm_lines.append(f"workspace: {ws_slug}")
-        fm_lines.append(f'workspace_name: "{ws_display_name}"')
-        if model_name and model_name != "default":
-            fm_lines.append(f"model: {model_name}")
-        fm_lines.append(f"message_count: {len(bubbles)}")
-        if total_tool_calls:
-            fm_lines.append(f"total_tool_calls: {total_tool_calls}")
-        if tool_breakdown:
-            fm_lines.append("tool_call_breakdown:")
-            for tn, cnt in sorted(tool_breakdown.items(), key=lambda x: -x[1]):
-                fm_lines.append(f"  {tn}: {cnt}")
-        total_think = sum(1 for bub in bubbles if bub.get("thinking"))
-        if total_think:
-            fm_lines.append(f"thinking_count: {total_think}")
-        if wall_clock_sec is not None:
-            fm_lines.append(f"wall_clock_seconds: {wall_clock_sec}")
-        if total_response_ms:
-            fm_lines.append(f"total_response_time_sec: {total_response_ms / 1000:.1f}")
-        if total_thinking_ms:
-            fm_lines.append(f"total_thinking_time_sec: {total_thinking_ms / 1000:.1f}")
-        if max_ctx_used and ctx_limit:
-            fm_lines.append(f"max_context_tokens_used: {max_ctx_used}")
-            fm_lines.append(f"context_token_limit: {ctx_limit}")
-        if lines_added or lines_removed:
-            fm_lines.append(f"lines_added: {lines_added}")
-            fm_lines.append(f"lines_removed: {lines_removed}")
-        if files_read_list or files_written_list:
-            fm_lines.append(f"files_read: {len(files_read_list)}")
-            fm_lines.append(f"files_written: {len(files_written_list)}")
-        if commands_run_list:
-            fm_lines.append(f"commands_run: {len(commands_run_list)}")
-        fm_lines.append("---")
-        fm_str = "\n".join(fm_lines) + "\n\n"
-
-        # Header
-        header = f"# {title}\n\n"
-        meta_parts = []
-        if created_ms:
-            meta_parts.append(f"Created: {datetime.fromtimestamp(created_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
-        if model_name and model_name != "default":
-            meta_parts.append(f"Model: {model_name}")
-        if total_tool_calls:
-            meta_parts.append(f"Tool calls: {total_tool_calls}")
-        if wall_clock_sec is not None:
-            hrs, rem = divmod(wall_clock_sec, 3600)
-            mins, secs = divmod(rem, 60)
-            dur = f"{hrs}h {mins}m" if hrs else (f"{mins}m {secs}s" if mins else f"{secs}s")
-            meta_parts.append(f"Duration: {dur}")
-        header += f"_{' | '.join(meta_parts)}_\n\n---\n\n" if meta_parts else "---\n\n"
-
-        # Session summary block
-        summary = ""
-        if files_read_list or files_written_list or commands_run_list:
-            summary += "## Session Summary\n\n"
-            if files_written_list or files_read_list:
-                summary += "### Files Touched\n\n"
-                summary += "| Action | File |\n|--------|------|\n"
-                for fp in files_written_list:
-                    summary += f"| Edit | `{fp}` |\n"
-                for fp in files_read_list:
-                    summary += f"| Read | `{fp}` |\n"
-                summary += "\n"
-            if commands_run_list:
-                summary += "### Commands Run\n\n"
-                for i, cmd in enumerate(commands_run_list, 1):
-                    summary += f"{i}. `{cmd}`\n"
-                summary += "\n"
-            non_zero = {k: v for k, v in tool_result_stats.items() if v > 0}
-            if non_zero:
-                summary += "### Tool Results\n\n"
-                labels = {
-                    "terminal_success": "Terminal Success",
-                    "terminal_error": "Terminal Error",
-                    "file_reads": "File Reads",
-                    "file_edits": "File Edits",
-                    "searches": "Searches",
-                    "web": "Web Fetches",
-                }
-                for k, v in non_zero.items():
-                    summary += f"- {labels.get(k, k)}: {v}\n"
-                summary += "\n"
-            summary += "---\n\n"
-
-        # Body
-        body = ""
-        for bub in bubbles:
-            role = "User" if bub["type"] == "user" else "Assistant"
-            body += f"### {role}\n\n"
-            # Per-message metadata line
-            meta_parts = []
-            if bub.get("model"):
-                meta_parts.append(f"Model: {bub['model']}")
-            if bub.get("responseTimeMs"):
-                meta_parts.append(f"Response: {bub['responseTimeMs'] / 1000:.1f}s")
-            if bub.get("thinkingDurationMs"):
-                meta_parts.append(f"Thinking: {bub['thinkingDurationMs'] / 1000:.1f}s")
-            if bub.get("contextTokensUsed") and bub.get("contextTokenLimit"):
-                pct = bub["contextTokensUsed"] / bub["contextTokenLimit"] * 100
-                meta_parts.append(f"Context: {bub['contextTokensUsed']:,} / {bub['contextTokenLimit']:,} tokens ({pct:.0f}% used)")
-            elif bub.get("contextPctRemaining") is not None:
-                meta_parts.append(f"Context: {bub['contextPctRemaining']}% remaining")
-            if meta_parts:
-                body += f"_{' | '.join(meta_parts)}_\n\n"
-            if bub.get("timestamp"):
-                body += f"_{datetime.fromtimestamp(bub['timestamp'] / 1000).isoformat()}_\n\n"
-            if bub.get("thinking"):
-                dur_str = f" ({bub['thinkingDurationMs'] / 1000:.1f}s)" if bub.get("thinkingDurationMs") else ""
-                body += f"<details><summary>Thinking{dur_str}</summary>\n\n{bub['thinking']}\n\n</details>\n\n"
-            body += bub["text"] + "\n\n"
-            if bub.get("tool"):
-                t = bub["tool"]
-                tool_summary = t.get("summary") or t.get("name") or "unknown"
-                tool_status = t.get("status") or ""
-                status_str = f" ({tool_status})" if tool_status else ""
-                body += f"> **Tool: {tool_summary}**{status_str}\n"
-                if t.get("input"):
-                    body += "> **INPUT:**\n> ```\n"
-                    for iline in str(t["input"]).split("\n"):
-                        body += f"> {iline}\n"
-                    body += "> ```\n"
-                if t.get("output"):
-                    body += "> **OUTPUT:**\n> ```\n"
-                    for oline in str(t["output"]).split("\n"):
-                        body += f"> {oline}\n"
-                    body += "> ```\n"
-                body += "\n"
-            body += "---\n\n"
-
-        md = fm_str + header + summary + body
+        # Markdown generation via shared exporter
+        md = cursor_ide_chat_to_markdown(
+            composer_data=cd,
+            composer_id=composer_id,
+            bubble_map=bubble_map,
+            code_block_diff_map=code_block_diff_map,
+            workspace_info={"ws_slug": ws_slug, "ws_display_name": ws_display_name},
+        )
 
         rel_path = os.path.join(today, ws_slug, "chat", filename)
-        exported.append({"id": composer_id, "rel_path": rel_path, "content": md,
-                         "out_path": out_path, "updatedAt": updated_at,
-                         "title": title, "workspace": ws_display_name})
+        exported.append({
+            "id": composer_id,
+            "rel_path": rel_path,
+            "content": md,
+            "out_path": out_path,
+            "updatedAt": updated_at,
+            "title": title,
+            "workspace": ws_display_name,
+        })
         count += 1
 
     # ── Cursor CLI sessions ──────────────────────────────────────────────────
@@ -717,10 +414,8 @@ def main():
             title_slug = slug(title)
             ts_str = datetime.fromtimestamp(created_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S")
             filename = f"{ts_str}__{title_slug}__{session_id[:8]}.md"
-            rel_dir = os.path.join(today, ws_slug_cli, "cli")
-            out_path = os.path.join(out_dir, rel_dir, filename)
+            out_path = os.path.join(out_dir, today, ws_slug_cli, "cli", filename)
 
-            # Delegate Markdown generation to the shared exporter.
             md = cursor_cli_session_to_markdown(
                 session["db_path"],
                 session_meta=meta,
@@ -753,7 +448,6 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     if use_zip:
-        # Archive all exported Markdown files into a single zip
         zip_name = f"cursor-export-{today}.zip"
         zip_path = os.path.join(out_dir, zip_name)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -761,16 +455,13 @@ def main():
                 zf.writestr(entry["rel_path"], entry["content"])
         print(f"Exported {count} chat(s) to {zip_path}")
     else:
-        # Write individual Markdown files to disk
         for entry in exported:
             os.makedirs(os.path.dirname(entry["out_path"]), exist_ok=True)
             with open(entry["out_path"], "w", encoding="utf-8") as f:
                 f.write(entry["content"])
 
-        # Manifest in output directory
         manifest_path = os.path.join(out_dir, "manifest.jsonl")
         existing = _load_manifest_entries(manifest_path)
-
         for entry in exported:
             existing[entry["id"]] = {
                 "log_id": entry["id"],
@@ -779,11 +470,9 @@ def main():
                 "path": os.path.relpath(entry["out_path"], out_dir),
                 "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
-
         if existing:
             _write_manifest_entries(manifest_path, existing)
 
-        # Canonical manifest in user state dir so tracking survives changing --out paths
         global_manifest_path = os.path.join(state_dir, "manifest.jsonl")
         global_existing = _load_manifest_entries(global_manifest_path)
         for entry in exported:
@@ -798,7 +487,6 @@ def main():
             _write_manifest_entries(global_manifest_path, global_existing)
         print(f"Exported {count} chat(s) to {out_dir}")
 
-    # Save state
     state = {
         "lastExportTime": datetime.now().isoformat(),
         "exportedCount": count,
