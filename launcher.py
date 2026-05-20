@@ -5,10 +5,24 @@ No HTTP server or port is used; pywebview calls the WSGI app
 directly in-process.
 """
 
+from __future__ import annotations
+
+import argparse
+import sys
+
 from app import create_app
 
 
-def main():
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="cursor-chat-browser",
+        description=(
+            "Cursor Chat Browser - opens the Flask app in a native OS window "
+            "via pywebview (no HTTP server or port)."
+        ),
+    )
+    parser.parse_args(argv)
+
     try:
         import webview
     except ImportError:
@@ -28,4 +42,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
