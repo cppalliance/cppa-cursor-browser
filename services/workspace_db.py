@@ -10,6 +10,106 @@ from utils.path_helpers import get_workspace_folder_paths
 from utils.workspace_descriptor import _read_json_file
 
 
+# ── Global-DB KV loaders ────────────────────────────────────────────────────
+# Each function accepts an already-opened sqlite3.Connection (row_factory must
+# be set to sqlite3.Row by the caller, as _open_global_db does) and returns
+# a populated dict.  sqlite3.Error is caught internally so a missing or
+# corrupt table cannot propagate to callers.
+
+
+def _load_bubble_map(global_db) -> dict[str, dict]:
+    """Load all ``bubbleId:*`` KV entries into ``{bubble_id: bubble_dict}``.
+
+    Skips rows whose JSON value is not a dict; JSON parse errors are silently
+    discarded so a single malformed row cannot block the rest.
+    """
+    bubble_map: dict[str, dict] = {}
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+        ).fetchall()
+    except sqlite3.Error:
+        return bubble_map
+    for row in rows:
+        parts = row["key"].split(":")
+        if len(parts) < 3:
+            continue
+        bid = parts[2]
+        try:
+            b = json.loads(row["value"])
+            if isinstance(b, dict):
+                bubble_map[bid] = b
+        except Exception:
+            pass
+    return bubble_map
+
+
+def _load_project_layouts_map(global_db) -> dict[str, list]:
+    """Load ``projectLayouts`` from ``messageRequestContext:*`` KV entries.
+
+    Returns ``{composer_id: [root_path_str, ...]}``.  String-encoded layout
+    objects are JSON-decoded before the ``rootPath`` field is extracted.
+    """
+    layouts_map: dict[str, list] = {}
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
+        ).fetchall()
+    except sqlite3.Error:
+        return layouts_map
+    for row in rows:
+        parts = row["key"].split(":")
+        if len(parts) < 2:
+            continue
+        cid = parts[1]
+        try:
+            ctx = json.loads(row["value"])
+            layouts = ctx.get("projectLayouts")
+            if not isinstance(layouts, list):
+                continue
+            layouts_map.setdefault(cid, [])
+            for layout in layouts:
+                try:
+                    o = json.loads(layout) if isinstance(layout, str) else layout
+                    if isinstance(o, dict) and o.get("rootPath"):
+                        layouts_map[cid].append(o["rootPath"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return layouts_map
+
+
+def _load_code_block_diff_map(global_db) -> dict[str, list]:
+    """Load ``codeBlockDiff:*`` KV entries into ``{composer_id: [diff_dict]}``.
+
+    Each diff dict contains all fields from the raw JSON value plus a
+    ``diffId`` key taken from the third path component of the KV key.
+    """
+    diff_map: dict[str, list] = {}
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"
+        ).fetchall()
+    except sqlite3.Error:
+        return diff_map
+    for row in rows:
+        parts = row["key"].split(":")
+        cid = parts[1] if len(parts) > 1 else None
+        if not cid:
+            continue
+        try:
+            d = json.loads(row["value"])
+            if isinstance(d, dict):
+                diff_map.setdefault(cid, []).append({
+                    **d,
+                    "diffId": parts[2] if len(parts) > 2 else None,
+                })
+        except Exception:
+            pass
+    return diff_map
+
+
 def _collect_workspace_entries(workspace_path: str) -> list[dict]:
     """Scan workspace directory and return entries with workspace.json."""
     entries = []

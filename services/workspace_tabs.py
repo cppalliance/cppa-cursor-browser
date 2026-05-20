@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 from datetime import datetime
 from typing import Any
@@ -21,6 +20,7 @@ from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
+    _load_code_block_diff_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -32,9 +32,15 @@ from services.workspace_resolver import (
 )
 
 
-def _extract_chat_id_from_code_block_diff_key(key: str) -> str | None:
-    m = re.match(r"^codeBlockDiff:([^:]+):", key)
-    return m.group(1) if m else None
+
+def _try_loads_kv_value(raw: str | None) -> Any | None:
+    """Parse a cursorDiskKV ``value`` column; ``None`` on missing or unparseable input (no raise)."""
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def assemble_workspace_tabs(
@@ -97,30 +103,20 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
+                parsed = _try_loads_kv_value(row["value"])
+                if parsed is None:
+                    continue
                 try:
-                    bubble_obj = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
+                    bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
                     bubble_map[bid] = bubble_obj.raw
                 except SchemaError as e:
                     # Drift logged so the operator can chase disappearing
                     # bubbles instead of guessing. Bad row still skipped so the
                     # tabs endpoint can't 500 on one malformed bubble.
                     print(f"Schema drift in bubble {bid}: {e}")
-                except (json.JSONDecodeError, ValueError):
-                    pass
 
         # Load codeBlockDiffs
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"):
-            chat_id = _extract_chat_id_from_code_block_diff_key(row["key"])
-            if not chat_id:
-                continue
-            try:
-                d = json.loads(row["value"])
-                code_block_diff_map.setdefault(chat_id, []).append({
-                    **d,
-                    "diffId": row["key"].split(":")[2] if len(row["key"].split(":")) > 2 else None,
-                })
-            except Exception:
-                pass
+        code_block_diff_map = _load_code_block_diff_map(global_db)
 
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.
@@ -130,10 +126,7 @@ def assemble_workspace_tabs(
             if len(parts) < 2:
                 continue
             chat_id = parts[1]
-            try:
-                ctx = json.loads(row["value"])
-            except Exception:
-                continue
+            ctx = _try_loads_kv_value(row["value"])
             if not isinstance(ctx, dict):
                 continue
 
@@ -151,9 +144,8 @@ def assemble_workspace_tabs(
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
                     if isinstance(layout, str):
-                        try:
-                            layout = json.loads(layout)
-                        except Exception:
+                        layout = _try_loads_kv_value(layout)
+                        if not isinstance(layout, dict):
                             continue
                     if isinstance(layout, dict) and layout.get("rootPath"):
                         project_layouts_map[chat_id].append(layout["rootPath"])
@@ -178,15 +170,16 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
+            parsed = _try_loads_kv_value(row["value"])
+            if parsed is None:
+                continue
             try:
-                composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
+                composer = Composer.from_dict(parsed, composer_id=composer_id)
             except SchemaError as e:
                 # Drift skipped + logged so the two primary conversation
                 # paths (list_workspaces + get_workspace_tabs) agree on what
                 # counts as a valid composer.
                 print(f"Schema drift in composer {composer_id}: {e}")
-                continue
-            except (json.JSONDecodeError, TypeError, ValueError):
                 continue
             try:
                 cd = composer.raw
