@@ -71,7 +71,9 @@ pip install -r requirements-lock.txt
 
 Runtime version **bounds** live in `pyproject.toml` under `[project.dependencies]` (`flask`, `fpdf2`, `pillow`, etc.). `requirements.txt` mirrors those specifiers for backward compatibility — keep them identical when you change deps.
 
-**CI** installs from `requirements-lock.txt`, which pins exact versions (including transitive packages). Regenerate the lock after editing bounds:
+**CI** installs from `requirements-lock.txt`, which pins exact versions (including transitive packages). The lock is produced on **Linux** (same as CI and `update-lock.yml`); `pip-compile` on Windows may add platform-only pins such as `colorama` — do not commit those.
+
+Regenerate after editing bounds (prefer **Actions → Update dependency lock file → Run workflow**, or on Linux / WSL):
 
 ```bash
 pip install pip-tools
