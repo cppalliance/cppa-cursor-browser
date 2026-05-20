@@ -366,13 +366,13 @@ def cursor_ide_chat_to_markdown(
     fm_lines = ["---"]
     fm_lines.append(f"log_id: {composer_id}")
     fm_lines.append("log_type: chat")
-    fm_lines.append(f'title: "{title.replace(chr(34), chr(92) + chr(34))}"')
+    fm_lines.append(f"title: {json.dumps(title, ensure_ascii=False)}")
     fm_lines.append(f"created_at: {datetime.fromtimestamp(created_ms / 1000).isoformat()}")
     fm_lines.append(
         f"updated_at: {datetime.fromtimestamp(updated_at / 1000).isoformat() if updated_at else datetime.now().isoformat()}"
     )
     fm_lines.append(f"workspace: {ws_slug}")
-    fm_lines.append(f'workspace_name: "{ws_display_name}"')
+    fm_lines.append(f"workspace_name: {json.dumps(ws_display_name, ensure_ascii=False)}")
     if model_name and model_name != "default":
         fm_lines.append(f"model: {model_name}")
     fm_lines.append(f"message_count: {len(bubbles)}")
