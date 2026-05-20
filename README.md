@@ -61,6 +61,36 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+For reproducible installs (same versions as CI), use the pinned lock file:
+
+```bash
+pip install -r requirements-lock.txt
+```
+
+### Dependency bounds and lock file
+
+Runtime version **bounds** live in `pyproject.toml` under `[project.dependencies]` (`flask`, `fpdf2`, `pillow`, etc.). `requirements.txt` mirrors those specifiers for backward compatibility — keep them identical when you change deps.
+
+**CI** installs from `requirements-lock.txt`, which pins exact versions (including transitive packages). The lock is produced on **Linux** (same as CI and `update-lock.yml`); `pip-compile` on Windows may add platform-only pins such as `colorama` — do not commit those.
+
+Regenerate after editing bounds (prefer **Actions → Update dependency lock file → Run workflow**, or on Linux / WSL):
+
+```bash
+pip install pip-tools
+pip-compile requirements.txt \
+  --output-file requirements-lock.txt \
+  --no-header \
+  --annotation-style=line \
+  --allow-unsafe
+```
+
+Then restore the comment header at the top of `requirements-lock.txt` (see the existing file) and commit both `requirements.txt` / `pyproject.toml` and `requirements-lock.txt`.
+
+**Automated updates:**
+
+- **Dependabot** (`.github/dependabot.yml`) — weekly PRs for `pip` and `github-actions` when newer versions fit the declared bounds. Merging a Dependabot **pip** PR does **not** refresh the lock file; run the lock workflow or `pip-compile` locally afterward.
+- **Update dependency lock file** (`.github/workflows/update-lock.yml`) — scheduled Mondays 08:00 UTC (and manual **Actions → Run workflow**) runs `pip-compile --upgrade` and opens a PR with an updated `requirements-lock.txt`.
+
 ## Quick Start (Web UI)
 
 ```bash
@@ -73,7 +103,7 @@ The Werkzeug debugger is **off by default** and must be opted in explicitly via 
 
 ## Tests
 
-Run the full suite from the repository root (install `requirements.txt` first):
+Run the full suite from the repository root (install `requirements-lock.txt` or `requirements.txt` first):
 
 ```bash
 python -m unittest discover tests -v
@@ -147,7 +177,9 @@ Cursor CLI agent sessions are read from `~/.cursor/chats/` (the default path use
 ```
 cursor-chat-browser-python/
 ├── app.py                  # Flask application entry point
-├── requirements.txt        # Python dependencies
+├── requirements.txt        # Runtime bounds (mirrors pyproject.toml)
+├── requirements-lock.txt   # Pinned lock file used by CI
+├── pyproject.toml          # Package metadata and canonical dependency bounds
 ├── api/                    # API route blueprints
 │   ├── workspaces.py       # /api/workspaces endpoints
 │   ├── composers.py        # /api/composers endpoints

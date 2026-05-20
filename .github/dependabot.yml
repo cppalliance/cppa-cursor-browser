@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned to immutable commit SHAs up-to-date.
+  # Dependabot opens a PR whenever a newer SHA is available for a pinned action.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+
+  # Keep Python runtime dependencies up-to-date within the bounded ranges in
+  # pyproject.toml [project.dependencies] (requirements.txt must stay in sync).
+  # Dependabot opens a PR when a newer version fits those bounds — it does NOT
+  # refresh requirements-lock.txt. CI installs from the lock, so after merging a
+  # Dependabot pip PR you must regenerate the lock: run the "Update dependency
+  # lock file" workflow (Actions tab) or pip-compile locally (see README).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
