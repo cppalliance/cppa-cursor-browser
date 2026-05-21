@@ -179,7 +179,7 @@ def main():
     last_export = 0
     if since == "last" and os.path.isfile(state_path):
         try:
-            with open(state_path, "r") as f:
+            with open(state_path, "r", encoding="utf-8") as f:
                 st = json.load(f)
             ts = st.get("lastExportTime")
             if ts:
