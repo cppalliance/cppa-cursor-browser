@@ -78,6 +78,7 @@ include = [
     "launcher.py",
     "requirements.txt",
     "README.md",
+    "DEPLOYMENT.md",
     "LICENSE",
     "cursor-browser.spec",
 ]
