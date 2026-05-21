@@ -101,6 +101,10 @@ Open <http://localhost:3000> in your browser.
 
 The Werkzeug debugger is **off by default** and must be opted in explicitly via the `--debug` flag or by setting `FLASK_DEBUG=1`. (Note: `FLASK_ENV=development` is **not** consulted - only `FLASK_DEBUG` is. See issue #9 for the rationale.)
 
+## Deployment
+
+For production WSGI servers (gunicorn, waitress), threading constraints, multi-process caveats, and path-configuration trust boundaries, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
 ## Tests
 
 Run the full suite from the repository root (install `requirements-lock.txt` or `requirements.txt` first):
@@ -166,9 +170,7 @@ The application automatically detects your Cursor workspace storage location:
 | Linux | `~/.config/Cursor/User/workspaceStorage` |
 | Linux (SSH) | `~/.cursor-server/data/User/workspaceStorage` |
 
-To override, set the `WORKSPACE_PATH` environment variable or use the Configuration page in the web UI.
-
-Paths submitted through **`POST /api/set-workspace`** (and **`POST /api/validate-path`**) are validated the same way: canonical resolution (`realpath`), directory checks, and Cursor workspace markers (`state.vscdb` under immediate subdirectories). The **`WORKSPACE_PATH`** environment variable is only tilde-expanded — it is a **trusted-operator** escape hatch for automation and known-good paths, not a substitute for those API checks when untrusted input matters.
+To override, set the `WORKSPACE_PATH` environment variable or use the Configuration page in the web UI. API-validated paths vs trusted env-var overrides are documented in **[DEPLOYMENT.md](DEPLOYMENT.md#path-configuration)**.
 
 Cursor CLI agent sessions are read from `~/.cursor/chats/` (the default path used by the `cursor agent` CLI). Override with the `CLI_CHATS_PATH` environment variable.
 
@@ -223,7 +225,7 @@ pyinstaller cursor-browser.spec
 
 This produces `dist/CursorChatBrowser/` containing `CursorChatBrowser.exe` and its supporting files. Move the folder anywhere you like, then pin the `.exe` to Start or the taskbar.
 
-The desktop app uses [pywebview](https://pywebview.flowrl.com/) to render the Flask UI inside a native window via Edge WebView2 (pre-installed on Windows 10/11). No HTTP server or port is opened - pywebview calls the WSGI app directly in-process.
+The desktop app uses [pywebview](https://pywebview.flowrl.com/) to render the Flask UI inside a native window via Edge WebView2 (pre-installed on Windows 10/11). No HTTP server or port is opened - pywebview calls the WSGI app directly in-process. See **[DEPLOYMENT.md](DEPLOYMENT.md#desktop-mode-pywebview)** for threading details.
 
 ## Technology Stack
 
