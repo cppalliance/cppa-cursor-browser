@@ -58,9 +58,9 @@ from services.workspace_db import (  # noqa: E402
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
-    _load_bubble_map,
-    _load_code_block_diff_map,
-    _load_project_layouts_map,
+    load_bubble_map,
+    load_code_block_diff_map,
+    load_project_layouts_map,
     _open_global_db,
 )
 from services.workspace_resolver import (  # noqa: E402
@@ -221,9 +221,9 @@ def main():
                 file=sys.stderr,
             )
         else:
-            project_layouts_map = _load_project_layouts_map(global_db)
-            bubble_map = _load_bubble_map(global_db)
-            code_block_diff_map = _load_code_block_diff_map(global_db)
+            project_layouts_map = load_project_layouts_map(global_db)
+            bubble_map = load_bubble_map(global_db)
+            code_block_diff_map = load_code_block_diff_map(global_db)
 
             try:
                 ide_composer_rows = global_db.execute(

@@ -208,7 +208,7 @@ def cursor_ide_chat_to_markdown(
         into ``code_block_diff_map``.
     bubble_map:
         Global ``{bubble_id: bubble_dict}`` map loaded from
-        ``cursorDiskKV`` (see ``services.workspace_db._load_bubble_map``).
+        ``cursorDiskKV`` (see ``services.workspace_db.load_bubble_map``).
     code_block_diff_map:
         Optional ``{composer_id: [diff_dict]}`` map.  When ``None`` no code
         edit bubbles are appended.
@@ -364,7 +364,7 @@ def cursor_ide_chat_to_markdown(
 
     # ── Frontmatter ───────────────────────────────────────────────────────────
     fm_lines = ["---"]
-    fm_lines.append(f"log_id: {composer_id}")
+    fm_lines.append(f"log_id: {json.dumps(composer_id, ensure_ascii=False)}")
     fm_lines.append("log_type: chat")
     fm_lines.append(f"title: {json.dumps(title, ensure_ascii=False)}")
     fm_lines.append(f"created_at: {datetime.fromtimestamp(created_ms / 1000).isoformat()}")
@@ -374,14 +374,14 @@ def cursor_ide_chat_to_markdown(
     fm_lines.append(f"workspace: {ws_slug}")
     fm_lines.append(f"workspace_name: {json.dumps(ws_display_name, ensure_ascii=False)}")
     if model_name and model_name != "default":
-        fm_lines.append(f"model: {model_name}")
+        fm_lines.append(f"model: {json.dumps(model_name, ensure_ascii=False)}")
     fm_lines.append(f"message_count: {len(bubbles)}")
     if total_tool_calls:
         fm_lines.append(f"total_tool_calls: {total_tool_calls}")
     if tool_breakdown:
         fm_lines.append("tool_call_breakdown:")
         for tn, cnt in sorted(tool_breakdown.items(), key=lambda x: -x[1]):
-            fm_lines.append(f"  {tn}: {cnt}")
+            fm_lines.append(f"  {json.dumps(tn, ensure_ascii=False)}: {cnt}")
     total_think = sum(1 for bub in bubbles if bub.get("thinking"))
     if total_think:
         fm_lines.append(f"thinking_count: {total_think}")

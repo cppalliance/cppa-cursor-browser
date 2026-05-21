@@ -22,8 +22,8 @@ from utils.cursor_md_exporter import cursor_ide_chat_to_markdown
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_workspace_entries,
-    _load_bubble_map,
-    _load_code_block_diff_map,
+    load_bubble_map,
+    load_code_block_diff_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -116,8 +116,8 @@ def export_chats():
             if global_db is None:
                 return jsonify({"error": "Cursor global storage not found"}), 404
 
-            bubble_map = _load_bubble_map(global_db)
-            code_block_diff_map = _load_code_block_diff_map(global_db)
+            bubble_map = load_bubble_map(global_db)
+            code_block_diff_map = load_code_block_diff_map(global_db)
 
             try:
                 composer_rows = global_db.execute(

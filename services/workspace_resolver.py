@@ -13,7 +13,7 @@ from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
 )
-from utils.workspace_descriptor import _basename_from_pathish, _read_json_file
+from utils.workspace_descriptor import basename_from_pathish, read_json_file
 from services.workspace_db import _open_global_db
 from models import SchemaError, Workspace
 
@@ -24,7 +24,7 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
         return "Other chats"
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
     try:
-        workspace = Workspace.from_dict(_read_json_file(wj_path), workspace_id=workspace_id)
+        workspace = Workspace.from_dict(read_json_file(wj_path), workspace_id=workspace_id)
         name = get_workspace_display_name(workspace.raw)
         if name:
             return name
@@ -103,7 +103,7 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
                         obj = layout
                     if not isinstance(obj, dict):
                         continue
-                    hint = _basename_from_pathish(obj.get("rootPath"))
+                    hint = basename_from_pathish(obj.get("rootPath"))
                     if hint:
                         counts[hint] = counts.get(hint, 0) + 1
 
@@ -121,7 +121,7 @@ def _get_project_from_file_path(
     best_len = 0
     for entry in workspace_entries:
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             for folder in get_workspace_folder_paths(wd):
                 wp = normalize_file_path(folder)
                 try:
@@ -140,7 +140,7 @@ def _create_project_name_to_workspace_id_map(workspace_entries):
     mapping = {}
     for entry in workspace_entries:
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             for folder in get_workspace_folder_paths(wd):
                 wp = re.sub(r"^file://", "", folder)
                 parts = wp.replace("\\", "/").split("/")
@@ -156,7 +156,7 @@ def _create_workspace_path_to_id_map(workspace_entries):
     out = {}
     for entry in workspace_entries:
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             for folder in get_workspace_folder_paths(wd):
                 normalized = normalize_file_path(folder)
                 out[normalized] = entry["name"]
@@ -269,7 +269,7 @@ def _determine_project_for_conversation(
     folder_name_to_ws = []
     for entry in workspace_entries:
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             for folder in get_workspace_folder_paths(wd):
                 name = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
                 if name:

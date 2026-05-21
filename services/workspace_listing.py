@@ -12,14 +12,14 @@ from utils.path_helpers import (
     normalize_file_path,
     to_epoch_ms,
 )
-from utils.workspace_descriptor import _read_json_file
+from utils.workspace_descriptor import read_json_file
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
-    _load_bubble_map,
-    _load_project_layouts_map,
+    load_bubble_map,
+    load_project_layouts_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -56,8 +56,8 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
                 )
 
-                project_layouts_map: dict[str, list] = _load_project_layouts_map(global_db)
-                bubble_map: dict[str, dict] = _load_bubble_map(global_db)
+                project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
+                bubble_map: dict[str, dict] = load_bubble_map(global_db)
 
                 invalid_workspace_aliases = _infer_invalid_workspace_aliases(
                     composer_rows=composer_rows,
@@ -109,7 +109,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
     for entry in workspace_entries:
         norm_folder = ""
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             folders = get_workspace_folder_paths(wd)
             first_folder = folders[0] if folders else None
             if first_folder:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from contextlib import closing, contextmanager
 from pathlib import Path
 
+_logger = logging.getLogger(__name__)
+
 from utils.path_helpers import get_workspace_folder_paths
-from utils.workspace_descriptor import _read_json_file
+from utils.workspace_descriptor import read_json_file
 
 
 # ── Global-DB KV loaders ────────────────────────────────────────────────────
@@ -17,11 +20,11 @@ from utils.workspace_descriptor import _read_json_file
 # corrupt table cannot propagate to callers.
 
 
-def _load_bubble_map(global_db) -> dict[str, dict]:
+def load_bubble_map(global_db) -> dict[str, dict]:
     """Load all ``bubbleId:*`` KV entries into ``{bubble_id: bubble_dict}``.
 
-    Skips rows whose JSON value is not a dict; JSON parse errors are silently
-    discarded so a single malformed row cannot block the rest.
+    Skips rows whose JSON value is not a dict; JSON parse errors are logged at
+    DEBUG level so a single malformed row cannot block the rest.
     """
     bubble_map: dict[str, dict] = {}
     try:
@@ -39,12 +42,12 @@ def _load_bubble_map(global_db) -> dict[str, dict]:
             b = json.loads(row["value"])
             if isinstance(b, dict):
                 bubble_map[bid] = b
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
     return bubble_map
 
 
-def _load_project_layouts_map(global_db) -> dict[str, list]:
+def load_project_layouts_map(global_db) -> dict[str, list]:
     """Load ``projectLayouts`` from ``messageRequestContext:*`` KV entries.
 
     Returns ``{composer_id: [root_path_str, ...]}``.  String-encoded layout
@@ -73,14 +76,14 @@ def _load_project_layouts_map(global_db) -> dict[str, list]:
                     o = json.loads(layout) if isinstance(layout, str) else layout
                     if isinstance(o, dict) and o.get("rootPath"):
                         layouts_map[cid].append(o["rootPath"])
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+                    _logger.debug("Skipping malformed layout entry in %s: %s", row["key"], e)
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug("Skipping malformed messageRequestContext row %s: %s", row["key"], e)
     return layouts_map
 
 
-def _load_code_block_diff_map(global_db) -> dict[str, list]:
+def load_code_block_diff_map(global_db) -> dict[str, list]:
     """Load ``codeBlockDiff:*`` KV entries into ``{composer_id: [diff_dict]}``.
 
     Each diff dict contains all fields from the raw JSON value plus a
@@ -105,8 +108,8 @@ def _load_code_block_diff_map(global_db) -> dict[str, list]:
                     **d,
                     "diffId": parts[2] if len(parts) > 2 else None,
                 })
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug("Skipping malformed codeBlockDiff row %s: %s", row["key"], e)
     return diff_map
 
 
@@ -133,7 +136,7 @@ def _collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
     invalid: set[str] = set()
     for entry in workspace_entries:
         try:
-            wd = _read_json_file(entry["workspaceJsonPath"])
+            wd = read_json_file(entry["workspaceJsonPath"])
             folders = get_workspace_folder_paths(wd)
             if not folders:
                 invalid.add(entry["name"])

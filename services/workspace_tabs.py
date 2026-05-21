@@ -14,13 +14,13 @@ from utils.path_helpers import (
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call as _parse_tool_call
-from utils.workspace_descriptor import _read_json_file
+from utils.workspace_descriptor import read_json_file
 from models import Bubble, Composer, SchemaError
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
     _collect_workspace_entries,
-    _load_code_block_diff_map,
+    load_code_block_diff_map,
     _open_global_db,
 )
 from services.workspace_resolver import (
@@ -64,7 +64,7 @@ def assemble_workspace_tabs(
         target_folder = ""
         wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
         try:
-            wd = _read_json_file(wj_path)
+            wd = read_json_file(wj_path)
             folders = get_workspace_folder_paths(wd)
             first_folder = folders[0] if folders else None
             if first_folder:
@@ -74,7 +74,7 @@ def assemble_workspace_tabs(
         if target_folder:
             for entry in workspace_entries:
                 try:
-                    wd2 = _read_json_file(entry["workspaceJsonPath"])
+                    wd2 = read_json_file(entry["workspaceJsonPath"])
                     folders2 = get_workspace_folder_paths(wd2)
                     f2 = folders2[0] if folders2 else None
                     if f2 and normalize_file_path(f2) == target_folder:
@@ -116,7 +116,7 @@ def assemble_workspace_tabs(
                     print(f"Schema drift in bubble {bid}: {e}")
 
         # Load codeBlockDiffs
-        code_block_diff_map = _load_code_block_diff_map(global_db)
+        code_block_diff_map = load_code_block_diff_map(global_db)
 
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.
