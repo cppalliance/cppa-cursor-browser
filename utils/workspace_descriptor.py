@@ -7,7 +7,7 @@ import sys
 from urllib.parse import unquote, urlparse
 
 
-def _read_json_file(path: str):
+def read_json_file(path: str):
     """Read a workspace.json with Cursor indirection applied."""
     return _resolve_workspace_descriptor(path)
 
@@ -70,7 +70,7 @@ def _resolve_workspace_descriptor(path: str, depth: int = 0):
     return out
 
 
-def _basename_from_pathish(path_value: str | None) -> str | None:
+def basename_from_pathish(path_value: str | None) -> str | None:
     """Extract a readable leaf folder name from file URI or filesystem path."""
     if not path_value:
         return None

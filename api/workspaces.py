@@ -16,7 +16,7 @@ from flask import Blueprint, current_app, jsonify
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.cli_chat_reader import list_cli_projects
 from utils.path_helpers import get_workspace_folder_paths, get_workspace_display_name
-from utils.workspace_descriptor import _read_json_file
+from utils.workspace_descriptor import read_json_file
 from services.workspace_resolver import (
     _infer_workspace_name_from_context,
     # Re-exported for back-compat with existing tests that import from api.workspaces
@@ -107,7 +107,7 @@ def get_workspace(workspace_id):
         folder = None
         workspace_name = workspace_id
         try:
-            wd = _read_json_file(wj_path)
+            wd = read_json_file(wj_path)
             folder_paths = get_workspace_folder_paths(wd)
             folder = folder_paths[0] if folder_paths else wd.get("folder")
             derived_name = get_workspace_display_name(wd)
