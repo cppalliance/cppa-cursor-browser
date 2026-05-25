@@ -23,6 +23,7 @@
     <p>Searching...</p>
   </div>
 
+  <div id="parse-warnings-host"></div>
   <p id="result-count" class="text-muted" style="display:none"></p>
   <div id="results-container"></div>
 </div>
@@ -81,6 +82,7 @@ async function performSearch(query, type) {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${type}`);
     const data = await res.json();
     const results = data.results || [];
+    showIncompleteResultsBanner('parse-warnings-host', data.warnings);
 
     loading.style.display = 'none';
     countEl.style.display = 'block';

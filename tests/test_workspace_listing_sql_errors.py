@@ -39,7 +39,7 @@ class TestListingCursorDiskKvCorruptDoesNotRaise(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = _seed_corrupt_global_db(tmp)
             try:
-                projects = list_workspace_projects(ws_root, rules=[])
+                projects, _warnings = list_workspace_projects(ws_root, rules=[])
             except sqlite3.Error:
                 self.fail("sqlite3.Error should be caught inside _safe_fetchall")
 

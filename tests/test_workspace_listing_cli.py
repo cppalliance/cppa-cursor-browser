@@ -28,7 +28,7 @@ class TestMalformedCliSessionSkipped(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, \
              patch("services.workspace_listing.list_cli_projects", return_value=[cli_project]):
-            projects = list_workspace_projects(tmp, rules=[])
+            projects, _warnings = list_workspace_projects(tmp, rules=[])
 
         cli_entries = [p for p in projects if p.get("source") == "cli"]
         self.assertEqual(len(cli_entries), 1, msg=f"expected one CLI project, got {cli_entries}")
@@ -52,7 +52,7 @@ class TestMalformedCliProjectRecordSkipped(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp, \
              patch("services.workspace_listing.list_cli_projects", return_value=garbage_then_real):
-            projects = list_workspace_projects(tmp, rules=[])
+            projects, _warnings = list_workspace_projects(tmp, rules=[])
 
         cli_entries = [p for p in projects if p.get("source") == "cli"]
         self.assertEqual(len(cli_entries), 1)
@@ -67,7 +67,7 @@ class TestMalformedCliProjectRecordSkipped(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp, \
              patch("services.workspace_listing.list_cli_projects", return_value=bad):
-            projects = list_workspace_projects(tmp, rules=[])
+            projects, _warnings = list_workspace_projects(tmp, rules=[])
 
         cli_entries = [p for p in projects if p.get("source") == "cli"]
         self.assertEqual([p["id"] for p in cli_entries], ["cli:ok"])
@@ -82,7 +82,7 @@ class TestMalformedCliProjectRecordSkipped(unittest.TestCase):
         }]
         with tempfile.TemporaryDirectory() as tmp, \
              patch("services.workspace_listing.list_cli_projects", return_value=minimal):
-            projects = list_workspace_projects(tmp, rules=[])
+            projects, _warnings = list_workspace_projects(tmp, rules=[])
 
         cli_entries = [p for p in projects if p.get("source") == "cli"]
         self.assertEqual(len(cli_entries), 1)

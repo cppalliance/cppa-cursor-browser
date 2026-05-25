@@ -36,6 +36,9 @@
   --success-bg: #052e16;
   --success-border: #166534;
   --danger-bg: #450a0a;
+  --warning-bg: #422006;
+  --warning-border: #854d0e;
+  --warning-text: #fcd34d;
   --danger-border: #991b1b;
   --code-bg: #1e1e1e;
   --spinner: #3b82f6;
@@ -74,6 +77,9 @@
   --success-bg: #f0fdf4;
   --success-border: #bbf7d0;
   --danger-bg: #fef2f2;
+  --warning-bg: #fffbeb;
+  --warning-border: #fcd34d;
+  --warning-text: #92400e;
   --danger-border: #fecaca;
   --code-bg: #f5f5f5;
   --spinner: #2563eb;
@@ -249,6 +255,7 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .alert-info { background: var(--info-bg); border: 1px solid var(--info-border); color: var(--info-text); }
 .alert-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
 .alert-danger { background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger); }
+.alert-warning { background: var(--warning-bg); border: 1px solid var(--warning-border); color: var(--warning-text); }
 
 /* ---------- Badges ---------- */
 .badge {

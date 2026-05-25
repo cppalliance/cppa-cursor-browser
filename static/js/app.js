@@ -86,3 +86,48 @@ function formatDate(timestamp) {
 function sanitizeFilename(name) {
   return (name || '').replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').slice(0, 120);
 }
+
+/**
+ * Normalize GET /api/workspaces body: plain array (no warnings) or
+ * { projects, warnings } when parse failures occurred (issue #67).
+ */
+function normalizeWorkspacesResponse(body) {
+  if (Array.isArray(body)) {
+    return { projects: body, warnings: [] };
+  }
+  if (body && typeof body === 'object') {
+    return {
+      projects: body.projects || [],
+      warnings: body.warnings || [],
+    };
+  }
+  return { projects: [], warnings: [] };
+}
+
+/** Human-readable text from API ``warnings`` entries. */
+function formatParseWarnings(warnings) {
+  if (!warnings || !warnings.length) return '';
+  return warnings.map(w => w.detail || `${w.count || 0} items could not be loaded`).join(' ');
+}
+
+/**
+ * Show or replace an incomplete-results banner (issue #67).
+ * @param {string} containerId - element to prepend into
+ * @param {Array} warnings - API warnings array
+ */
+function showIncompleteResultsBanner(containerId, warnings) {
+  const container = document.getElementById(containerId);
+  if (!container || !warnings || !warnings.length) return;
+
+  const existing = container.querySelector('.incomplete-results-banner');
+  if (existing) existing.remove();
+
+  const text = formatParseWarnings(warnings);
+  const banner = document.createElement('div');
+  banner.className = 'alert alert-warning incomplete-results-banner';
+  banner.setAttribute('role', 'status');
+  banner.textContent = text
+    ? `Some results may be incomplete: ${text}`
+    : 'Some results may be incomplete due to parse errors.';
+  container.insertBefore(banner, container.firstChild);
+}

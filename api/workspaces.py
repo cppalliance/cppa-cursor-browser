@@ -55,7 +55,9 @@ def list_workspaces():
     try:
         workspace_path = resolve_workspace_path()
         rules = current_app.config.get("EXCLUSION_RULES") or []
-        projects = list_workspace_projects(workspace_path, rules)
+        projects, warnings = list_workspace_projects(workspace_path, rules)
+        if warnings:
+            return jsonify({"projects": projects, "warnings": warnings})
         return jsonify(projects)
     except Exception:
         _logger.exception("Failed to get workspaces")

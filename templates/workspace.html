@@ -30,6 +30,8 @@
     </div>
   </div>
 
+  <div id="parse-warnings-host"></div>
+
   <!-- Project info -->
   <div class="project-info card" style="margin-bottom:1.5rem">
     <h2 id="project-name">Loading...</h2>
@@ -67,6 +69,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const wsInfo = await wsRes.json();
     const data = await tabsRes.json();
     allTabs = data.tabs || [];
+    showIncompleteResultsBanner('parse-warnings-host', data.warnings);
 
     const projectName = wsInfo.name || WORKSPACE_ID;
     document.getElementById('project-name').textContent = projectName;

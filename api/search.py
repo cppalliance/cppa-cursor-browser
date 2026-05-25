@@ -19,7 +19,7 @@ from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.path_helpers import to_epoch_ms, warn_workspace_json_read
 from utils.text_extract import extract_text_from_bubble
 from utils.cli_chat_reader import list_cli_projects, traverse_blobs, messages_to_bubbles
-from models import Bubble, Composer, SchemaError
+from models import Bubble, Composer, ParseWarningCollector, SchemaError
 
 bp = Blueprint("search", __name__)
 _logger = logging.getLogger(__name__)
@@ -79,6 +79,7 @@ def search():
 
         workspace_path = resolve_workspace_path()
         results = []
+        parse_warnings = ParseWarningCollector()
         query_lower = query.lower()
 
         global_db_path = os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
@@ -170,8 +171,9 @@ def search():
                                 e,
                                 type(e).__name__,
                             )
+                            parse_warnings.record_bubble_skipped()
                         except (json.JSONDecodeError, ValueError):
-                            pass
+                            parse_warnings.record_bubble_skipped()
 
                 # Search through composerData
                 composer_rows = conn.execute(
@@ -189,8 +191,10 @@ def search():
                             e,
                             type(e).__name__,
                         )
+                        parse_warnings.record_composer_skipped()
                         continue
                     except (json.JSONDecodeError, TypeError, ValueError):
+                        parse_warnings.record_composer_skipped()
                         continue
                     try:
                         cd = composer.raw
@@ -285,6 +289,7 @@ def search():
                             composer_id,
                             e,
                         )
+                        parse_warnings.record_composer_skipped()
 
             except Exception:
                 _logger.exception("Error searching global storage")
@@ -498,7 +503,8 @@ def search():
             return t
         results.sort(key=_ts, reverse=True)
 
-        return jsonify({"results": results})
+        payload: dict = {"results": results}
+        return jsonify(parse_warnings.attach_to(payload))
 
     except Exception:
         _logger.exception("Search failed")
