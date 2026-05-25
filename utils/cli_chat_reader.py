@@ -33,7 +33,10 @@ for a project.
 from __future__ import annotations
 
 import json
+import logging
 from models import CliSessionMeta, SchemaError
+
+_logger = logging.getLogger(__name__)
 import os
 import re
 import sqlite3
@@ -100,7 +103,11 @@ def traverse_blobs(db_path: str) -> list[dict]:
                 json.loads(bytes.fromhex(meta_row[0]).decode("utf-8"))
             )
         except (SchemaError, ValueError, UnicodeDecodeError, TypeError) as e:
-            print(f"Schema drift in CLI session meta at {db_path}: {e}")
+            _logger.warning(
+                "Schema drift in CLI session meta at %s: %s",
+                db_path,
+                e,
+            )
             return []
         root_id: str = meta.latest_root_blob_id
 

@@ -38,13 +38,21 @@ from services.workspace_resolver import (
 
 
 
-def _try_loads_kv_value(raw: str | None) -> Any | None:
-    """Parse a cursorDiskKV ``value`` column; ``None`` on missing or unparseable input (no raise)."""
+def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
+    """Parse a cursorDiskKV ``value``; log and return ``None`` on decode failure."""
     if raw is None:
         return None
     try:
         return json.loads(raw)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        payload_len, payload_fp = _kv_payload_log_meta(raw)
+        _logger.warning(
+            "Failed to decode cursorDiskKV value for %s: %s (payload_len=%d, payload_sha256=%s)",
+            key,
+            e,
+            payload_len,
+            payload_fp,
+        )
         return None
 
 
@@ -127,7 +135,7 @@ def assemble_workspace_tabs(
                     continue
                 try:
                     parsed = json.loads(row["value"])
-                    
+
                 except (json.JSONDecodeError, TypeError, ValueError) as e:
                     payload_len, payload_fp = _kv_payload_log_meta(row["value"])
                     _logger.warning(
@@ -162,7 +170,7 @@ def assemble_workspace_tabs(
             if len(parts) < 2:
                 continue
             chat_id = parts[1]
-            ctx = _try_loads_kv_value(row["value"])
+            ctx = _loads_kv_value_logged(row["key"], row["value"])
             if not isinstance(ctx, dict):
                 continue
 
@@ -180,7 +188,10 @@ def assemble_workspace_tabs(
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
                     if isinstance(layout, str):
-                        layout = _try_loads_kv_value(layout)
+                        layout = _loads_kv_value_logged(
+                            f"{row['key']}:projectLayout",
+                            layout,
+                        )
                         if not isinstance(layout, dict):
                             continue
                     if isinstance(layout, dict) and layout.get("rootPath"):
