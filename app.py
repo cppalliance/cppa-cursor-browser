@@ -4,6 +4,7 @@ A Flask web application for browsing and managing chat histories
 from the Cursor editor's AI chat feature.
 """
 
+import logging
 import os
 import sys
 from datetime import datetime
@@ -35,6 +36,11 @@ def _get_base_path():
 
 
 def create_app(exclusion_rules_path=None):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s",
+    )
+
     base = _get_base_path()
     app = Flask(
         __name__,

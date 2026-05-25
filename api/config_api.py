@@ -6,6 +6,7 @@ API routes for configuration — mirrors:
   src/app/api/get-username/route.ts        GET /api/get-username
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from utils.path_validation import WorkspacePathError, validate_workspace_path
 from utils.workspace_path import set_workspace_path_override
 
 bp = Blueprint("config_api", __name__)
+_logger = logging.getLogger(__name__)
 
 
 @bp.route("/api/detect-environment")
@@ -44,7 +46,12 @@ def detect_environment():
         })
 
     except Exception as e:
-        print(f"Failed to detect environment: {e}")
+        _logger.warning(
+            "Failed to detect environment: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"os": "unknown", "isWSL": False, "isRemote": False})
 
 
@@ -80,7 +87,12 @@ def validate_path():
         )
 
     except Exception as e:
-        print(f"Validation error: {e}")
+        _logger.error(
+            "Validation error: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"valid": False, "error": "Failed to validate path"}), 500
 
 
@@ -135,5 +147,10 @@ def get_username():
         return jsonify({"username": username})
 
     except Exception as e:
-        print(f"Failed to get username: {e}")
+        _logger.warning(
+            "Failed to get username: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"username": "YOUR_USERNAME"})

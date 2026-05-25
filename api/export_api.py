@@ -6,6 +6,7 @@ GET  /api/export/state — returns last export time
 
 import io
 import json
+import logging
 import os
 import sqlite3
 import zipfile
@@ -32,6 +33,7 @@ from services.workspace_resolver import (
 )
 
 bp = Blueprint("export_api", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _get_state_dir() -> str:
@@ -181,7 +183,13 @@ def export_chats():
                     exported.append({"path": rel_path, "content": md, "updatedAt": updated_at_ms})
 
                 except Exception as e:
-                    print(f"Error processing composer {composer_id} for export: {e}")
+                    _logger.error(
+                        "Error processing composer %s for export: %s (%s)",
+                        composer_id,
+                        e,
+                        type(e).__name__,
+                        exc_info=True,
+                    )
 
         count = len(exported)
         if count == 0:
@@ -208,7 +216,10 @@ def export_chats():
         )
 
     except Exception as e:
-        print(f"Export error: {e}")
-        import traceback
-        traceback.print_exc()
+        _logger.error(
+            "Export failed: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"error": f"Export failed: {str(e)}"}), 500

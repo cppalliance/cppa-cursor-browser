@@ -164,7 +164,12 @@ def search():
                             # Drift logged so the operator can see why a chat dropped
                             # out of search results; bad row still skipped so search
                             # keeps returning results from the well-formed ones.
-                            print(f"Schema drift in bubble {bid}: {e}")
+                            _logger.warning(
+                                "Schema drift in bubble %s: %s (%s)",
+                                bid,
+                                e,
+                                type(e).__name__,
+                            )
                         except (json.JSONDecodeError, ValueError):
                             pass
 
@@ -178,7 +183,12 @@ def search():
                     try:
                         composer = Composer.from_dict(json.loads(row["value"]), composer_id=composer_id)
                     except SchemaError as e:
-                        print(f"Schema drift in composer {composer_id}: {e}")
+                        _logger.warning(
+                            "Schema drift in composer %s: %s (%s)",
+                            composer_id,
+                            e,
+                            type(e).__name__,
+                        )
                         continue
                     except (json.JSONDecodeError, TypeError, ValueError):
                         continue
