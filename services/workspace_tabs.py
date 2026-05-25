@@ -145,7 +145,7 @@ def assemble_workspace_tabs(
                     continue
                 try:
                     parsed = json.loads(row["value"])
-
+                    
                 except (json.JSONDecodeError, TypeError, ValueError) as e:
                     payload_len, payload_fp = _kv_payload_log_meta(row["value"])
                     _logger.warning(
