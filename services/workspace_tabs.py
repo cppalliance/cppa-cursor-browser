@@ -115,6 +115,10 @@ def assemble_workspace_tabs(
             if len(parts) >= 3:
                 bid = parts[2]
                 if row["value"] is None:
+                    _logger.warning(
+                        "Skipping Bubble cursorDiskKV row with NULL value: key=%r",
+                        row["key"],
+                    )
                     continue
                 try:
                     parsed = json.loads(row["value"])
@@ -195,6 +199,10 @@ def assemble_workspace_tabs(
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
             if row["value"] is None:
+                _logger.warning(
+                    "Skipping Composer cursorDiskKV row with NULL value: key=%r",
+                    row["key"],
+                )
                 continue
             try:
                 parsed = json.loads(row["value"])
