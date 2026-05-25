@@ -116,7 +116,7 @@ jobs:
         # new endpoint file because `pytest tests/` would also re-collect the
         # 178 unittest.TestCase subclasses already run in the step above —
         # ~2× the CI minutes for zero extra signal.
-        run: python -m pytest tests/test_api_endpoints.py tests/test_parse_failure_logging.py -v --tb=short
+        run: python -m pytest tests/test_api_endpoints.py -v --tb=short
 
       # ── PyInstaller desktop build (Windows only, once per workflow) ────────
       # Closes #44. Builds the onedir bundle and smoke-tests --help so the
