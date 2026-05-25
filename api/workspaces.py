@@ -15,7 +15,11 @@ from flask import Blueprint, current_app, jsonify
 
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.cli_chat_reader import list_cli_projects
-from utils.path_helpers import get_workspace_folder_paths, get_workspace_display_name
+from utils.path_helpers import (
+    get_workspace_folder_paths,
+    get_workspace_display_name,
+    warn_workspace_json_read,
+)
 from utils.workspace_descriptor import read_json_file
 from services.workspace_resolver import (
     _infer_workspace_name_from_context,
@@ -118,11 +122,7 @@ def get_workspace(workspace_id):
                 if inferred:
                     workspace_name = inferred
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                workspace_id,
-                e,
-            )
+            warn_workspace_json_read(_logger, workspace_id, e)
             inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
             if inferred:
                 workspace_name = inferred

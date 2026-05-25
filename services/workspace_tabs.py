@@ -13,6 +13,7 @@ from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
     to_epoch_ms,
+    warn_workspace_json_read,
 )
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
@@ -46,6 +47,19 @@ def _try_loads_kv_value(raw: str | None) -> Any | None:
         return None
 
 
+_KV_VALUE_LOG_LIMIT = 200
+
+
+def _kv_value_log_preview(value: object | None, limit: int = _KV_VALUE_LOG_LIMIT) -> str:
+    """Truncated KV payload for warning logs (avoids multi-MB log lines on bad rows)."""
+    if value is None:
+        return "None"
+    text = value if isinstance(value, str) else str(value)
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
 def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
@@ -73,11 +87,7 @@ def assemble_workspace_tabs(
             if first_folder:
                 target_folder = normalize_file_path(first_folder)
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                workspace_id,
-                e,
-            )
+            warn_workspace_json_read(_logger, workspace_id, e)
         if target_folder:
             for entry in workspace_entries:
                 try:
@@ -87,11 +97,7 @@ def assemble_workspace_tabs(
                     if f2 and normalize_file_path(f2) == target_folder:
                         matching_ws_ids.add(entry["name"])
                 except Exception as e:
-                    _logger.warning(
-                        "Failed to read workspace.json for %s: %s",
-                        entry["name"],
-                        e,
-                    )
+                    warn_workspace_json_read(_logger, entry["name"], e)
 
     bubble_map: dict[str, dict] = {}
     code_block_diff_map: dict[str, list] = {}
@@ -122,12 +128,12 @@ def assemble_workspace_tabs(
                     continue
                 try:
                     parsed = json.loads(row["value"])
-                except json.JSONDecodeError as e:
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     _logger.warning(
-                        "Failed to decode Bubble from %s: %s (value: %r)",
+                        "Failed to decode Bubble from %s: %s (value_preview=%r)",
                         row["key"],
                         e,
-                        row["value"],
+                        _kv_value_log_preview(row["value"]),
                     )
                     continue
                 try:
@@ -206,12 +212,13 @@ def assemble_workspace_tabs(
                 continue
             try:
                 parsed = json.loads(row["value"])
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
                 _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s (value: %r)",
+                    "Failed to decode Composer from composerData:%s: %s (key=%s, value_preview=%r)",
                     composer_id,
                     e,
-                    row["value"],
+                    row["key"],
+                    _kv_value_log_preview(row["value"]),
                 )
                 continue
             try:

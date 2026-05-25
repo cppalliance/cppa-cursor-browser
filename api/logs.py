@@ -14,7 +14,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify
 
 from utils.workspace_path import resolve_workspace_path
-from utils.path_helpers import to_epoch_ms
+from utils.path_helpers import to_epoch_ms, warn_workspace_json_read
 
 bp = Blueprint("logs", __name__)
 _logger = logging.getLogger(__name__)
@@ -95,11 +95,7 @@ def get_logs():
                         wd = json.load(f)
                     workspace_folder = wd.get("folder")
                 except Exception as e:
-                    _logger.warning(
-                        "Failed to read workspace.json for %s: %s",
-                        name,
-                        e,
-                    )
+                    warn_workspace_json_read(_logger, name, e)
 
                 try:
                     # closing() guarantees .close() on scope exit (issue #17).

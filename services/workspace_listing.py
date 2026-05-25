@@ -14,6 +14,7 @@ from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
     to_epoch_ms,
+    warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
 from utils.workspace_path import get_cli_chats_path
@@ -133,8 +134,8 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             e,
                         )
-            except Exception as e:
-                _logger.error("Failed to load composer rows from global storage: %s", e)
+            except Exception:
+                _logger.exception("Failed to load composer rows from global storage")
 
     # Group workspace entries by normalized folder path
     folder_to_entries: dict[str, list] = {}
@@ -148,11 +149,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
             if first_folder:
                 norm_folder = normalize_file_path(first_folder)
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                entry["name"],
-                e,
-            )
+            warn_workspace_json_read(_logger, entry["name"], e)
         if not norm_folder:
             norm_folder = entry["name"]  # fallback to workspace ID
         entry_folder_map[entry["name"]] = norm_folder

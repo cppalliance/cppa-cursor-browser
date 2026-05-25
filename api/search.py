@@ -16,7 +16,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
-from utils.path_helpers import to_epoch_ms
+from utils.path_helpers import to_epoch_ms, warn_workspace_json_read
 from utils.text_extract import extract_text_from_bubble
 from utils.cli_chat_reader import list_cli_projects, traverse_blobs, messages_to_bubbles
 from models import Bubble, Composer, SchemaError
@@ -115,11 +115,7 @@ def search():
                                     if fn:
                                         ws_id_to_name[name] = _url_unquote(fn)
                             except Exception as e:
-                                _logger.warning(
-                                    "Failed to read workspace.json for %s: %s",
-                                    name,
-                                    e,
-                                )
+                                warn_workspace_json_read(_logger, name, e)
                 except Exception as e:
                     _logger.warning(
                         "Failed to list workspace entries under %s: %s",
@@ -305,11 +301,7 @@ def search():
                         wd = json.load(f)
                     workspace_folder = wd.get("folder")
                 except Exception as e:
-                    _logger.warning(
-                        "Failed to read workspace.json for %s: %s",
-                        name,
-                        e,
-                    )
+                    warn_workspace_json_read(_logger, name, e)
                 workspace_name = _workspace_display_name_from_folder(workspace_folder, fallback=name)
 
                 # try/finally guarantees .close() on every exit path (issue #17).

@@ -1,5 +1,6 @@
 """Path utility functions mirroring src/utils/path.ts"""
 
+import logging
 import os
 import sys
 from datetime import datetime
@@ -142,3 +143,16 @@ def get_workspace_display_name(workspace_data: dict, fallback: str | None = None
             if decoded:
                 return decoded
     return fallback or ""
+
+
+def warn_workspace_json_read(
+    logger: logging.Logger,
+    workspace_id: str,
+    err: BaseException,
+) -> None:
+    """Log a standard warning when workspace.json cannot be read (shared across services/api)."""
+    logger.warning(
+        "Failed to read workspace.json for %s: %s",
+        workspace_id,
+        err,
+    )

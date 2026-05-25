@@ -15,6 +15,7 @@ from utils.path_helpers import (
     get_workspace_display_name,
     get_workspace_folder_paths,
     normalize_file_path,
+    warn_workspace_json_read,
 )
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
 from services.workspace_db import _open_global_db
@@ -139,11 +140,7 @@ def _get_project_from_file_path(
                     best_len = len(wp)
                     best_match = entry["name"]
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                entry["name"],
-                e,
-            )
+            warn_workspace_json_read(_logger, entry["name"], e)
     return best_match
 
 
@@ -159,11 +156,7 @@ def _create_project_name_to_workspace_id_map(workspace_entries):
                 if folder_name:
                     mapping[folder_name] = entry["name"]
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                entry["name"],
-                e,
-            )
+            warn_workspace_json_read(_logger, entry["name"], e)
     return mapping
 
 
@@ -176,11 +169,7 @@ def _create_workspace_path_to_id_map(workspace_entries):
                 normalized = normalize_file_path(folder)
                 out[normalized] = entry["name"]
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                entry["name"],
-                e,
-            )
+            warn_workspace_json_read(_logger, entry["name"], e)
     return out
 
 
@@ -294,11 +283,7 @@ def _determine_project_for_conversation(
                 if name:
                     folder_name_to_ws.append({"name": name, "id": entry["name"]})
         except Exception as e:
-            _logger.warning(
-                "Failed to read workspace.json for %s: %s",
-                entry["name"],
-                e,
-            )
+            warn_workspace_json_read(_logger, entry["name"], e)
 
     best_id = None
     best_len = 0
