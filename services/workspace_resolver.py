@@ -342,6 +342,13 @@ def _infer_invalid_workspace_aliases(
                 e,
             )
             continue
+        if not isinstance(cd, dict):
+            _logger.warning(
+                "Failed to parse Composer from composerData:%s: expected object, got %s",
+                cid,
+                type(cd).__name__,
+            )
+            continue
         inferred = _determine_project_for_conversation(
             cd,
             cid,

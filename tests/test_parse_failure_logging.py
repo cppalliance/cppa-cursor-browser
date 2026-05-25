@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 
 import pytest
 
@@ -113,6 +114,68 @@ def test_listing_logs_composer_schema_drift(caplog_at_warning: pytest.LogCapture
     messages = [r.getMessage() for r in caplog_at_warning.records]
     assert any("Composer" in m and "cmp-drift" in m for m in messages), (
         f"expected Composer parse warning for cmp-drift, got: {messages}"
+    )
+
+
+def test_workspace_tabs_logs_bubble_json_decode_failure(
+    caplog_at_warning: pytest.LogCaptureFixture,
+) -> None:
+    from flask import Flask
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _seed_tabs_with_drifted_bubble(tmp)
+        global_db = os.path.join(tmp, "globalStorage", "state.vscdb")
+        with closing(sqlite3.connect(global_db)) as conn:
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                ("bubbleId:cmp-ok:b-json", "{not valid json"),
+            )
+            conn.commit()
+        with caplog_at_warning.at_level(logging.WARNING, logger="services.workspace_tabs"):
+            with app.test_request_context("/api/workspaces/global/tabs"):
+                payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+
+    assert status == 200
+    messages = [r.getMessage() for r in caplog_at_warning.records]
+    assert any("decode Bubble" in m and "b-json" in m for m in messages), (
+        f"expected JSON decode warning for b-json, got: {messages}"
+    )
+
+
+def test_workspace_tabs_logs_composer_json_decode_failure(
+    caplog_at_warning: pytest.LogCaptureFixture,
+) -> None:
+    from flask import Flask
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _seed_tabs_with_drifted_bubble(tmp)
+        global_db = os.path.join(tmp, "globalStorage", "state.vscdb")
+        # Value must match composer_rows LIKE '%fullConversationHeadersOnly%' to reach parse.
+        bad_composer_value = (
+            '{"fullConversationHeadersOnly": [{"bubbleId": "b1"}], "createdAt":'
+        )
+        with closing(sqlite3.connect(global_db)) as conn:
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                ("composerData:cmp-json", bad_composer_value),
+            )
+            conn.commit()
+        with caplog_at_warning.at_level(logging.WARNING, logger="services.workspace_tabs"):
+            with app.test_request_context("/api/workspaces/global/tabs"):
+                payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+
+    assert status == 200
+    messages = [r.getMessage() for r in caplog_at_warning.records]
+    assert any("decode Composer" in m and "cmp-json" in m for m in messages), (
+        f"expected JSON decode warning for cmp-json, got: {messages}"
     )
 
 

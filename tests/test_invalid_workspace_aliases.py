@@ -87,6 +87,36 @@ class TestInvalidWorkspaceAliases(unittest.TestCase):
         # cid-3 is dropped (drift), so boost-ws wins 2-0 (not 2-1)
         self.assertEqual(aliases.get("invalid-ws"), "boost-ws")
 
+    def test_non_dict_composer_json_skipped_without_crash(self) -> None:
+        composer_rows = [
+            {"key": "composerData:cid-1", "value": json.dumps({"createdAt": 1_715_000_000_000, "fullConversationHeadersOnly": []})},
+            {"key": "composerData:cid-2", "value": json.dumps({"createdAt": 1_715_000_000_000, "fullConversationHeadersOnly": []})},
+            {"key": "composerData:cid-bad", "value": json.dumps("not-a-dict")},
+        ]
+        composer_id_to_ws = {"cid-1": "invalid-ws", "cid-2": "invalid-ws", "cid-bad": "invalid-ws"}
+        project_layouts_map = {
+            "cid-1": [normalize_file_path(r"d:\_Cpp_Digest\boostbacklog")],
+            "cid-2": [normalize_file_path(r"d:\_Cpp_Digest\boostbacklog")],
+            "cid-bad": [normalize_file_path(r"d:\_Cpp_Digest\team-brain")],
+        }
+        workspace_path_map = {
+            normalize_file_path(r"d:\_cpp_digest\boostbacklog"): "boost-ws",
+            normalize_file_path(r"d:\_cpp_digest\team-brain"): "team-ws",
+        }
+
+        aliases = _infer_invalid_workspace_aliases(
+            composer_rows=composer_rows,
+            project_layouts_map=project_layouts_map,
+            project_name_map={},
+            workspace_path_map=workspace_path_map,
+            workspace_entries=[],
+            bubble_map={},
+            composer_id_to_ws=composer_id_to_ws,
+            invalid_workspace_ids={"invalid-ws"},
+        )
+
+        self.assertEqual(aliases.get("invalid-ws"), "boost-ws")
+
 
 if __name__ == "__main__":
     unittest.main()

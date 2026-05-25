@@ -114,8 +114,15 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
-                parsed = _try_loads_kv_value(row["value"])
-                if parsed is None:
+                try:
+                    parsed = json.loads(row["value"])
+                except json.JSONDecodeError as e:
+                    _logger.warning(
+                        "Failed to decode Bubble from %s: %s (value: %r)",
+                        row["key"],
+                        e,
+                        row["value"],
+                    )
                     continue
                 try:
                     bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
@@ -185,8 +192,15 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            parsed = _try_loads_kv_value(row["value"])
-            if parsed is None:
+            try:
+                parsed = json.loads(row["value"])
+            except json.JSONDecodeError as e:
+                _logger.warning(
+                    "Failed to decode Composer from composerData:%s: %s (value: %r)",
+                    composer_id,
+                    e,
+                    row["value"],
+                )
                 continue
             try:
                 composer = Composer.from_dict(parsed, composer_id=composer_id)
