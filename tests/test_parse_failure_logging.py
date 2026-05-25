@@ -34,7 +34,6 @@ def _seed_listing_with_drifted_composer(parent: str) -> str:
 
     conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
     conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
-    # Missing createdAt — Composer.from_dict raises SchemaError.
     conn.execute(
         "INSERT INTO cursorDiskKV VALUES (?, ?)",
         (
@@ -85,7 +84,6 @@ def _seed_tabs_with_drifted_bubble(parent: str) -> str:
             }),
         ),
     )
-    # Non-dict bubble value trips Bubble.from_dict schema gate.
     conn.execute(
         "INSERT INTO cursorDiskKV VALUES (?, ?)",
         ("bubbleId:cmp-ok:b-bad", json.dumps("not-a-dict")),
