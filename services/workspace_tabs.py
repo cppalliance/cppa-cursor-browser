@@ -114,6 +114,8 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
+                if row["value"] is None:
+                    continue
                 try:
                     parsed = json.loads(row["value"])
                 except json.JSONDecodeError as e:
@@ -192,6 +194,8 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
+            if row["value"] is None:
+                continue
             try:
                 parsed = json.loads(row["value"])
             except json.JSONDecodeError as e:
