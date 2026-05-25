@@ -117,7 +117,12 @@ def get_workspace(workspace_id):
                 inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
                 if inferred:
                     workspace_name = inferred
-        except Exception:
+        except Exception as e:
+            _logger.warning(
+                "Failed to read workspace.json for %s: %s",
+                workspace_id,
+                e,
+            )
             inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
             if inferred:
                 workspace_name = inferred

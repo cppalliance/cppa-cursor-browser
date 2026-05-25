@@ -1,0 +1,137 @@
+"""pytest caplog tests for structured logging at model parse sites (issue #66)."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sqlite3
+import sys
+import tempfile
+
+import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from services.workspace_listing import list_workspace_projects
+from services.workspace_tabs import assemble_workspace_tabs
+
+
+def _seed_listing_with_drifted_composer(parent: str) -> str:
+    ws_root = os.path.join(parent, "workspaceStorage")
+    global_root = os.path.join(parent, "globalStorage")
+    os.makedirs(ws_root, exist_ok=True)
+    os.makedirs(global_root, exist_ok=True)
+
+    ws_dir = os.path.join(ws_root, "ws-a")
+    os.makedirs(ws_dir, exist_ok=True)
+    target_folder = os.path.join(parent, "real-project")
+    os.makedirs(target_folder, exist_ok=True)
+    with open(os.path.join(ws_dir, "workspace.json"), "w", encoding="utf-8") as f:
+        json.dump({"folder": f"file://{target_folder}"}, f)
+    sqlite3.connect(os.path.join(ws_dir, "state.vscdb")).close()
+
+    conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
+    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+    # Missing createdAt — Composer.from_dict raises SchemaError.
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "composerData:cmp-drift",
+            json.dumps({
+                "name": "Drifted composer",
+                "fullConversationHeadersOnly": [{"bubbleId": "b-1"}],
+            }),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        ("bubbleId:cmp-drift:b-1", json.dumps({"type": "user", "text": "hello"})),
+    )
+    conn.commit()
+    conn.close()
+    return ws_root
+
+
+def _seed_tabs_with_drifted_bubble(parent: str) -> str:
+    ws_root = os.path.join(parent, "workspaceStorage")
+    global_root = os.path.join(parent, "globalStorage")
+    os.makedirs(ws_root, exist_ok=True)
+    os.makedirs(global_root, exist_ok=True)
+
+    ws_dir = os.path.join(ws_root, "ws-a")
+    os.makedirs(ws_dir, exist_ok=True)
+    with open(os.path.join(ws_dir, "workspace.json"), "w", encoding="utf-8") as f:
+        json.dump({"folder": "/tmp/proj"}, f)
+    sqlite3.connect(os.path.join(ws_dir, "state.vscdb")).close()
+
+    conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
+    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "composerData:cmp-ok",
+            json.dumps({
+                "name": "Good tab",
+                "createdAt": 1_715_000_000_000,
+                "lastUpdatedAt": 1_715_000_500_000,
+                "fullConversationHeadersOnly": [
+                    {"bubbleId": "b-bad", "type": 1},
+                    {"bubbleId": "b-good", "type": 1},
+                ],
+            }),
+        ),
+    )
+    # Non-dict bubble value trips Bubble.from_dict schema gate.
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        ("bubbleId:cmp-ok:b-bad", json.dumps("not-a-dict")),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        ("bubbleId:cmp-ok:b-good", json.dumps({"text": "hello"})),
+    )
+    conn.commit()
+    conn.close()
+    return ws_root
+
+
+@pytest.fixture
+def caplog_at_warning(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
+    caplog.set_level(logging.WARNING)
+    return caplog
+
+
+def test_listing_logs_composer_schema_drift(caplog_at_warning: pytest.LogCaptureFixture) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _seed_listing_with_drifted_composer(tmp)
+        with caplog_at_warning.at_level(logging.WARNING, logger="services.workspace_listing"):
+            list_workspace_projects(ws_root, rules=[])
+
+    messages = [r.getMessage() for r in caplog_at_warning.records]
+    assert any("Composer" in m and "cmp-drift" in m for m in messages), (
+        f"expected Composer parse warning for cmp-drift, got: {messages}"
+    )
+
+
+def test_workspace_tabs_logs_bubble_schema_drift(caplog_at_warning: pytest.LogCaptureFixture) -> None:
+    from flask import Flask
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _seed_tabs_with_drifted_bubble(tmp)
+        with caplog_at_warning.at_level(logging.WARNING, logger="services.workspace_tabs"):
+            with app.test_request_context("/api/workspaces/global/tabs"):
+                payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+
+    assert status == 200
+    assert "cmp-ok" in [t["id"] for t in payload.get("tabs", [])]
+    messages = [r.getMessage() for r in caplog_at_warning.records]
+    assert any("Bubble" in m and "b-bad" in m for m in messages), (
+        f"expected Bubble parse warning for b-bad, got: {messages}"
+    )

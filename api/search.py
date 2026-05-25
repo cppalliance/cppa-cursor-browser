@@ -114,10 +114,18 @@ def search():
                                     fn = parts[-1] if parts else None
                                     if fn:
                                         ws_id_to_name[name] = _url_unquote(fn)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                _logger.warning(
+                                    "Failed to read workspace.json for %s: %s",
+                                    name,
+                                    e,
+                                )
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to list workspace entries under %s: %s",
+                        workspace_path,
+                        e,
+                    )
 
                 # Build composer → workspace mapping
                 composer_id_to_ws = {}
@@ -139,8 +147,12 @@ def search():
                                     cid = c.get("composerId") if isinstance(c, dict) else None
                                     if cid:
                                         composer_id_to_ws[cid] = entry["name"]
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _logger.warning(
+                            "Failed to load composer mapping from workspace %s: %s",
+                            entry["name"],
+                            e,
+                        )
 
                 # Load bubble text for searching
                 bubble_map = {}
@@ -261,8 +273,12 @@ def search():
                                 "matchingText": matching_text,
                                 "type": "composer",
                             })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _logger.warning(
+                            "Failed to process Composer from composerData:%s during search: %s",
+                            composer_id,
+                            e,
+                        )
 
             except Exception:
                 _logger.exception("Error searching global storage")
@@ -288,8 +304,12 @@ def search():
                     with open(wj_path, "r", encoding="utf-8") as f:
                         wd = json.load(f)
                     workspace_folder = wd.get("folder")
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to read workspace.json for %s: %s",
+                        name,
+                        e,
+                    )
                 workspace_name = _workspace_display_name_from_folder(workspace_folder, fallback=name)
 
                 # try/finally guarantees .close() on every exit path (issue #17).
@@ -362,13 +382,21 @@ def search():
                                         "type": "chat",
                                     })
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to search legacy workspace %s: %s",
+                        name,
+                        e,
+                    )
                 finally:
                     if conn is not None:
                         conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning(
+                "Failed to iterate legacy workspaces under %s: %s",
+                workspace_path,
+                e,
+            )
 
         # ---------------------------------------------------------------
         # Search Cursor CLI sessions (only for type=all)
@@ -386,7 +414,12 @@ def search():
 
                         try:
                             messages = traverse_blobs(session["db_path"])
-                        except Exception:
+                        except Exception as e:
+                            _logger.warning(
+                                "Failed to traverse CLI session blobs for %s: %s",
+                                session_id,
+                                e,
+                            )
                             continue
 
                         bubbles = messages_to_bubbles(messages, created_ms)

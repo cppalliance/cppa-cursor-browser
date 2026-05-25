@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
+
+_logger = logging.getLogger(__name__)
 
 from utils.cli_chat_reader import list_cli_projects
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
@@ -14,6 +17,7 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from utils.workspace_path import get_cli_chats_path
+from models import Composer, SchemaError
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
@@ -72,7 +76,32 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                 for row in composer_rows:
                     cid = row["key"].split(":")[1]
                     try:
-                        cd = json.loads(row["value"])
+                        parsed = json.loads(row["value"])
+                    except (json.JSONDecodeError, TypeError, ValueError) as e:
+                        _logger.warning(
+                            "Failed to decode Composer from composerData:%s: %s",
+                            cid,
+                            e,
+                        )
+                        continue
+                    if not isinstance(parsed, dict):
+                        _logger.warning(
+                            "Failed to parse Composer from composerData:%s: expected object, got %s",
+                            cid,
+                            type(parsed).__name__,
+                        )
+                        continue
+                    try:
+                        composer = Composer.from_dict(parsed, composer_id=cid)
+                    except SchemaError as e:
+                        _logger.warning(
+                            "Failed to parse Composer from composerData:%s: %s",
+                            cid,
+                            e,
+                        )
+                        continue
+                    cd = composer.raw
+                    try:
                         pid = _determine_project_for_conversation(
                             cd, cid, project_layouts_map,
                             project_name_map, workspace_path_map,
@@ -98,10 +127,14 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
                             "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
                         })
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        _logger.warning(
+                            "Failed to process Composer from composerData:%s: %s",
+                            cid,
+                            e,
+                        )
+            except Exception as e:
+                _logger.error("Failed to load composer rows from global storage: %s", e)
 
     # Group workspace entries by normalized folder path
     folder_to_entries: dict[str, list] = {}
@@ -114,8 +147,12 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
             first_folder = folders[0] if folders else None
             if first_folder:
                 norm_folder = normalize_file_path(first_folder)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning(
+                "Failed to read workspace.json for %s: %s",
+                entry["name"],
+                e,
+            )
         if not norm_folder:
             norm_folder = entry["name"]  # fallback to workspace ID
         entry_folder_map[entry["name"]] = norm_folder
@@ -139,7 +176,12 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                 for e in group
                 if os.path.isfile(os.path.join(workspace_path, e["name"], "state.vscdb"))
             )
-        except Exception:
+        except Exception as e:
+            _logger.warning(
+                "Failed to resolve mtime for workspace folder %s: %s",
+                norm_folder,
+                e,
+            )
             mtime = 0
 
         workspace_name = _get_workspace_display_name(workspace_path, primary["name"])
@@ -238,7 +280,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                 "source": "cli",
             })
     except Exception as e:
-        print(f"Failed to load CLI projects: {e}")
+        _logger.warning("Failed to load CLI projects: %s", e)
 
     projects.sort(key=lambda p: p["lastModified"], reverse=True)
     return projects

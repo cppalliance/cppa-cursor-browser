@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 from utils.path_helpers import (
     get_workspace_folder_paths,
@@ -69,8 +72,12 @@ def assemble_workspace_tabs(
             first_folder = folders[0] if folders else None
             if first_folder:
                 target_folder = normalize_file_path(first_folder)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning(
+                "Failed to read workspace.json for %s: %s",
+                workspace_id,
+                e,
+            )
         if target_folder:
             for entry in workspace_entries:
                 try:
@@ -79,8 +86,12 @@ def assemble_workspace_tabs(
                     f2 = folders2[0] if folders2 else None
                     if f2 and normalize_file_path(f2) == target_folder:
                         matching_ws_ids.add(entry["name"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to read workspace.json for %s: %s",
+                        entry["name"],
+                        e,
+                    )
 
     bubble_map: dict[str, dict] = {}
     code_block_diff_map: dict[str, list] = {}
@@ -113,7 +124,11 @@ def assemble_workspace_tabs(
                     # Drift logged so the operator can chase disappearing
                     # bubbles instead of guessing. Bad row still skipped so the
                     # tabs endpoint can't 500 on one malformed bubble.
-                    print(f"Schema drift in bubble {bid}: {e}")
+                    _logger.warning(
+                        "Failed to parse Bubble from bubbleId:%s: %s",
+                        bid,
+                        e,
+                    )
 
         # Load codeBlockDiffs
         code_block_diff_map = load_code_block_diff_map(global_db)
@@ -179,7 +194,11 @@ def assemble_workspace_tabs(
                 # Drift skipped + logged so the two primary conversation
                 # paths (list_workspaces + get_workspace_tabs) agree on what
                 # counts as a valid composer.
-                print(f"Schema drift in composer {composer_id}: {e}")
+                _logger.warning(
+                    "Failed to parse Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
                 continue
             try:
                 cd = composer.raw
@@ -497,7 +516,11 @@ def assemble_workspace_tabs(
                 response["tabs"].append(tab)
 
             except Exception as e:
-                print(f"Error parsing composer data for {composer_id}: {e}")
+                _logger.warning(
+                    "Failed to process Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
 
         # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)

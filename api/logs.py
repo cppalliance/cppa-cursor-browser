@@ -48,8 +48,12 @@ def get_logs():
                     try:
                         bubble = json.loads(row["value"])
                         chat_map.setdefault(chat_id, []).append(bubble)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _logger.warning(
+                            "Failed to decode bubble row %s: %s",
+                            row["key"],
+                            e,
+                        )
 
                 for chat_id, bubbles in chat_map.items():
                     bubbles = [b for b in bubbles if isinstance(b, dict)]
@@ -90,8 +94,12 @@ def get_logs():
                     with open(wj_path, "r", encoding="utf-8") as f:
                         wd = json.load(f)
                     workspace_folder = wd.get("folder")
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to read workspace.json for %s: %s",
+                        name,
+                        e,
+                    )
 
                 try:
                     # closing() guarantees .close() on scope exit (issue #17).
@@ -130,10 +138,18 @@ def get_logs():
                                     "type": "composer",
                                     "messageCount": len(c.get("conversation") or []),
                                 })
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    _logger.warning(
+                        "Failed to read logs from workspace %s: %s",
+                        name,
+                        e,
+                    )
+        except Exception as e:
+            _logger.warning(
+                "Failed to iterate workspaces under %s: %s",
+                workspace_path,
+                e,
+            )
 
         logs.sort(key=lambda log: log.get("timestamp") or 0, reverse=True)
         return jsonify({"logs": logs})
