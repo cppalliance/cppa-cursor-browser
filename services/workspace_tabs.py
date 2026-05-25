@@ -42,6 +42,16 @@ def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
     """Parse a cursorDiskKV ``value``; log and return ``None`` on decode failure."""
     if raw is None:
         return None
+    if not isinstance(raw, (str, bytes, bytearray)):
+        payload_len, payload_fp = _kv_payload_log_meta(raw)
+        _logger.warning(
+            "Failed to decode cursorDiskKV value for %s: unsupported type %s (payload_len=%d, payload_sha256=%s)",
+            key,
+            type(raw).__name__,
+            payload_len,
+            payload_fp,
+        )
+        return None
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError, ValueError) as e:
