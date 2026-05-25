@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -47,17 +48,15 @@ def _try_loads_kv_value(raw: str | None) -> Any | None:
         return None
 
 
-_KV_VALUE_LOG_LIMIT = 200
-
-
-def _kv_value_log_preview(value: object | None, limit: int = _KV_VALUE_LOG_LIMIT) -> str:
-    """Truncated KV payload for warning logs (avoids multi-MB log lines on bad rows)."""
+def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
+    """Byte length and short SHA-256 prefix for logs without emitting raw KV payloads."""
     if value is None:
-        return "None"
-    text = value if isinstance(value, str) else str(value)
-    if len(text) > limit:
-        return text[:limit] + "..."
-    return text
+        return 0, None
+    if isinstance(value, bytes):
+        payload = value
+    else:
+        payload = str(value).encode("utf-8", errors="replace")
+    return len(payload), hashlib.sha256(payload).hexdigest()[:12]
 
 
 def assemble_workspace_tabs(
@@ -128,12 +127,15 @@ def assemble_workspace_tabs(
                     continue
                 try:
                     parsed = json.loads(row["value"])
+
                 except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    payload_len, payload_fp = _kv_payload_log_meta(row["value"])
                     _logger.warning(
-                        "Failed to decode Bubble from %s: %s (value_preview=%r)",
+                        "Failed to decode Bubble from %s: %s (payload_len=%d, payload_sha256=%s)",
                         row["key"],
                         e,
-                        _kv_value_log_preview(row["value"]),
+                        payload_len,
+                        payload_fp,
                     )
                     continue
                 try:
@@ -213,12 +215,14 @@ def assemble_workspace_tabs(
             try:
                 parsed = json.loads(row["value"])
             except (json.JSONDecodeError, TypeError, ValueError) as e:
+                payload_len, payload_fp = _kv_payload_log_meta(row["value"])
                 _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s (key=%s, value_preview=%r)",
+                    "Failed to decode Composer from composerData:%s: %s (key=%s, payload_len=%d, payload_sha256=%s)",
                     composer_id,
                     e,
                     row["key"],
-                    _kv_value_log_preview(row["value"]),
+                    payload_len,
+                    payload_fp,
                 )
                 continue
             try:
