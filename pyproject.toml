@@ -88,7 +88,6 @@ include = [
 # and CI produce identical results.
 [tool.mypy]
 ignore_missing_imports = true
-no_strict_optional = true
 pretty = true
 # Exclude virtual-env and build artefact directories so that `mypy .` from the
 # repo root matches CI behaviour (CI runs in a clean runner without a local venv).
