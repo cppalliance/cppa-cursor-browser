@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from flask import current_app, jsonify
+
+_logger = logging.getLogger(__name__)
 
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
@@ -44,13 +47,25 @@ def _get_cli_workspace_tabs(workspace_id: str):
             try:
                 messages = traverse_blobs(session["db_path"])
             except Exception as e:
-                print(f"CLI: could not read session {session_id}: {e}")
+                _logger.warning(
+                    "Could not read CLI session %s: %s (%s)",
+                    session_id,
+                    e,
+                    type(e).__name__,
+                    exc_info=True,
+                )
                 continue
 
             try:
                 bubbles = messages_to_bubbles(messages, created_ms)
             except Exception as e:
-                print(f"CLI: could not convert session {session_id} to bubbles: {e}")
+                _logger.warning(
+                    "Could not convert CLI session %s to bubbles: %s (%s)",
+                    session_id,
+                    e,
+                    type(e).__name__,
+                    exc_info=True,
+                )
                 continue
             if not bubbles:
                 continue
@@ -113,5 +128,11 @@ def _get_cli_workspace_tabs(workspace_id: str):
         return jsonify({"tabs": tabs})
 
     except Exception as e:
-        print(f"Failed to get CLI workspace tabs: {e}")
+        _logger.error(
+            "Failed to get CLI workspace tabs for %s: %s (%s)",
+            workspace_id,
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to get CLI workspace tabs"}), 500

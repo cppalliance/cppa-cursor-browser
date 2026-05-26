@@ -74,6 +74,18 @@ from services.workspace_resolver import (  # noqa: E402
 _logger = logging.getLogger(__name__)
 
 
+def _configure_cli_logging() -> None:
+    """Route log records to stderr so stdout stays for export progress lines."""
+    root = logging.getLogger()
+    if root.handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
+
+
 def _json_dump_safe(value) -> str:
     """Best-effort JSON serialization for exclusion matching."""
     try:
@@ -165,6 +177,7 @@ def parse_args():
 
 
 def main():
+    _configure_cli_logging()
     opts = parse_args()
     since = opts["since"]
     out_dir = os.path.abspath(opts["out_dir"])
@@ -215,10 +228,9 @@ def main():
 
     with _open_global_db(workspace_path) as (global_db, global_db_path):
         if global_db is None:
-            print(
-                f"Note: Cursor IDE global storage not found at {global_db_path}"
-                " — skipping IDE chats.",
-                file=sys.stderr,
+            _logger.info(
+                "Cursor IDE global storage not found at %s — skipping IDE chats.",
+                global_db_path,
             )
         else:
             project_layouts_map = load_project_layouts_map(global_db)
@@ -347,7 +359,12 @@ def main():
     try:
         cli_projects = list_cli_projects(get_cli_chats_path())
     except Exception as e:
-        print(f"Warning: Could not enumerate CLI chats ({e}) — skipping.", file=sys.stderr)
+        _logger.warning(
+            "Could not enumerate CLI chats: %s (%s) — skipping",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         cli_projects = []
 
     for cp in cli_projects:
@@ -378,7 +395,13 @@ def main():
                 messages = traverse_blobs(session["db_path"])
                 bubbles = messages_to_bubbles(messages, created_ms)
             except Exception as e:
-                print(f"Warning: Could not read CLI session {session_id}: {e}", file=sys.stderr)
+                _logger.warning(
+                    "Could not read CLI session %s: %s (%s)",
+                    session_id,
+                    e,
+                    type(e).__name__,
+                    exc_info=True,
+                )
                 continue
 
             if not bubbles:

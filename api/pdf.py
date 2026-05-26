@@ -4,11 +4,13 @@ POST /api/generate-pdf
 """
 
 import io
+import logging
 import re
 
 from flask import Blueprint, Response, jsonify, request
 
 bp = Blueprint("pdf", __name__)
+_logger = logging.getLogger(__name__)
 
 
 def _safe_text(text: str) -> str:
@@ -168,9 +170,12 @@ def generate_pdf():
         )
 
     except Exception as e:
-        print(f"Failed to generate PDF: {e}")
-        import traceback
-        traceback.print_exc()
+        _logger.error(
+            "Failed to generate PDF: %s (%s)",
+            e,
+            type(e).__name__,
+            exc_info=True,
+        )
         return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
 
 

@@ -130,9 +130,11 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
 
     def test_bubble_schema_drift_is_logged_not_swallowed_silently(self):
         # CodeRabbit: SchemaError used to be lumped in with JSONDecodeError /
-        # ValueError and skipped silently. Schema drift must now print a
+        # ValueError and skipped silently. Schema drift must now log a
         # `Schema drift in bubble <bid>` line so disappearing bubbles can be
         # traced. The well-formed row still loads alongside.
+        import logging
+
         from app import create_app
         # Seed a deliberately-malformed bubble row that will trip
         # Bubble.from_dict's "expected non-empty str" gate on the bubble_id by
@@ -147,17 +149,14 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        import io
-        from contextlib import redirect_stdout
-        captured = io.StringIO()
-        with redirect_stdout(captured):
+        with self.assertLogs("api.search", level="WARNING") as logs:
             client = app.test_client()
             response = client.get("/api/search?q=sentinel-wired")
             self.assertEqual(response.status_code, 200)
-        out = captured.getvalue()
-        self.assertIn("Schema drift in bubble", out,
-            msg=f"expected drift log line, got stdout:\n{out!r}")
-        self.assertIn("bub-bad", out,
+        messages = "\n".join(logs.output)
+        self.assertIn("Schema drift in bubble", messages,
+            msg=f"expected drift log line, got logs:\n{messages!r}")
+        self.assertIn("bub-bad", messages,
             msg="drift log must include the offending bubble id")
 
     def test_workspace_tabs_endpoint_calls_composer_from_dict(self):

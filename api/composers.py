@@ -78,7 +78,12 @@ def list_composers():
                         try:
                             local = WorkspaceLocalComposer.from_dict(c)
                         except SchemaError as e:
-                            print(f"Schema drift in {db_path}: {e}")
+                            _logger.warning(
+                                "Schema drift in %s: %s (%s)",
+                                db_path,
+                                e,
+                                type(e).__name__,
+                            )
                             continue
                         # Use the typed view downstream so the dataclass is
                         # load-bearing, not just a filter (Brad's review): the
@@ -91,9 +96,20 @@ def list_composers():
                         c["workspaceFolder"] = workspace_folder
                         composers.append((local, c))
             except SchemaError as e:
-                print(f"Schema drift in {db_path}: {e}")
+                _logger.warning(
+                    "Schema drift in %s: %s (%s)",
+                    db_path,
+                    e,
+                    type(e).__name__,
+                )
             except Exception as e:
-                print(f"Failed reading composers from {db_path}: {e}")
+                _logger.error(
+                    "Failed reading composers from %s: %s (%s)",
+                    db_path,
+                    e,
+                    type(e).__name__,
+                    exc_info=True,
+                )
 
         composers.sort(key=lambda pair: to_epoch_ms(pair[0].last_updated_at), reverse=True)
         return jsonify([c for _, c in composers])
@@ -152,7 +168,12 @@ def get_composer(composer_id):
                                 # Same drift list_composers() logs and skips at line ~78,
                                 # so a single-composer fetch can't silently return malformed
                                 # JSON the list endpoint hid.
-                                print(f"Schema drift in workspace-local composer {composer_id}: {e}")
+                                _logger.warning(
+                                    "Schema drift in workspace-local composer %s: %s (%s)",
+                                    composer_id,
+                                    e,
+                                    type(e).__name__,
+                                )
                                 continue
                             # Match list_composers() at line 89 and the global
                             # fallback below: `conversation` is normalised to []
@@ -163,7 +184,12 @@ def get_composer(composer_id):
                             payload["conversation"] = payload.get("conversation") or []
                             return jsonify(payload)
             except SchemaError as e:
-                print(f"Schema drift in {db_path}: {e}")
+                _logger.warning(
+                    "Schema drift in %s: %s (%s)",
+                    db_path,
+                    e,
+                    type(e).__name__,
+                )
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 
@@ -186,7 +212,12 @@ def get_composer(composer_id):
                         # Don't return malformed JSON to the client — surface the drift
                         # as a 404 + log, matching the silent-skip behaviour of the
                         # list endpoints for the same row.
-                        print(f"Schema drift in composer {composer_id}: {e}")
+                        _logger.warning(
+                            "Schema drift in composer %s: %s (%s)",
+                            composer_id,
+                            e,
+                            type(e).__name__,
+                        )
                         return jsonify({"error": "Composer schema drift"}), 404
                     payload = dict(composer.raw)
                     payload["conversation"] = payload.get("conversation") or []

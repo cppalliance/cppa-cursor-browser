@@ -134,8 +134,12 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             e,
                         )
-            except Exception:
-                _logger.exception("Failed to load composer rows from global storage")
+            except Exception as e:
+                _logger.error(
+                    "Failed to load composer rows from global storage: %s",
+                    e,
+                    exc_info=True,
+                )
 
     # Group workspace entries by normalized folder path
     folder_to_entries: dict[str, list] = {}
