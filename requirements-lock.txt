@@ -6,7 +6,7 @@
 # Lock is generated on Linux (CI / update-lock.yml). Windows-only transitives (e.g.
 # colorama via click) are omitted — pip still installs them on Windows when needed.
 blinker==1.9.0            # via flask
-click==8.4.0              # via flask
+click==8.4.1              # via flask
 defusedxml==0.7.1         # via fpdf2
 flask==3.1.3              # via -r requirements.txt
 fonttools==4.63.0         # via fpdf2

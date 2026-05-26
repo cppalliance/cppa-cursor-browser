@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
 from typing import Any
 
+_logger = logging.getLogger(__name__)
+
 from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
     to_epoch_ms,
+    warn_workspace_json_read,
 )
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
@@ -43,6 +47,19 @@ def _try_loads_kv_value(raw: str | None) -> Any | None:
         return None
 
 
+_KV_VALUE_LOG_LIMIT = 200
+
+
+def _kv_value_log_preview(value: object | None, limit: int = _KV_VALUE_LOG_LIMIT) -> str:
+    """Truncated KV payload for warning logs (avoids multi-MB log lines on bad rows)."""
+    if value is None:
+        return "None"
+    text = value if isinstance(value, str) else str(value)
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
 def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
@@ -69,8 +86,8 @@ def assemble_workspace_tabs(
             first_folder = folders[0] if folders else None
             if first_folder:
                 target_folder = normalize_file_path(first_folder)
-        except Exception:
-            pass
+        except Exception as e:
+            warn_workspace_json_read(_logger, workspace_id, e)
         if target_folder:
             for entry in workspace_entries:
                 try:
@@ -79,8 +96,8 @@ def assemble_workspace_tabs(
                     f2 = folders2[0] if folders2 else None
                     if f2 and normalize_file_path(f2) == target_folder:
                         matching_ws_ids.add(entry["name"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    warn_workspace_json_read(_logger, entry["name"], e)
 
     bubble_map: dict[str, dict] = {}
     code_block_diff_map: dict[str, list] = {}
@@ -103,8 +120,21 @@ def assemble_workspace_tabs(
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
-                parsed = _try_loads_kv_value(row["value"])
-                if parsed is None:
+                if row["value"] is None:
+                    _logger.warning(
+                        "Skipping Bubble cursorDiskKV row with NULL value: key=%r",
+                        row["key"],
+                    )
+                    continue
+                try:
+                    parsed = json.loads(row["value"])
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    _logger.warning(
+                        "Failed to decode Bubble from %s: %s (value_preview=%r)",
+                        row["key"],
+                        e,
+                        _kv_value_log_preview(row["value"]),
+                    )
                     continue
                 try:
                     bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
@@ -113,7 +143,11 @@ def assemble_workspace_tabs(
                     # Drift logged so the operator can chase disappearing
                     # bubbles instead of guessing. Bad row still skipped so the
                     # tabs endpoint can't 500 on one malformed bubble.
-                    print(f"Schema drift in bubble {bid}: {e}")
+                    _logger.warning(
+                        "Failed to parse Bubble from bubbleId:%s: %s",
+                        bid,
+                        e,
+                    )
 
         # Load codeBlockDiffs
         code_block_diff_map = load_code_block_diff_map(global_db)
@@ -170,8 +204,22 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            parsed = _try_loads_kv_value(row["value"])
-            if parsed is None:
+            if row["value"] is None:
+                _logger.warning(
+                    "Skipping Composer cursorDiskKV row with NULL value: key=%r",
+                    row["key"],
+                )
+                continue
+            try:
+                parsed = json.loads(row["value"])
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                _logger.warning(
+                    "Failed to decode Composer from composerData:%s: %s (key=%s, value_preview=%r)",
+                    composer_id,
+                    e,
+                    row["key"],
+                    _kv_value_log_preview(row["value"]),
+                )
                 continue
             try:
                 composer = Composer.from_dict(parsed, composer_id=composer_id)
@@ -179,7 +227,11 @@ def assemble_workspace_tabs(
                 # Drift skipped + logged so the two primary conversation
                 # paths (list_workspaces + get_workspace_tabs) agree on what
                 # counts as a valid composer.
-                print(f"Schema drift in composer {composer_id}: {e}")
+                _logger.warning(
+                    "Failed to parse Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
                 continue
             try:
                 cd = composer.raw
@@ -497,7 +549,11 @@ def assemble_workspace_tabs(
                 response["tabs"].append(tab)
 
             except Exception as e:
-                print(f"Error parsing composer data for {composer_id}: {e}")
+                _logger.warning(
+                    "Failed to process Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
 
         # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)

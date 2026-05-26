@@ -2,8 +2,8 @@
 
 A cursorDiskKV row with a NULL value column previously caused
 json.loads(None) -> TypeError, which propagated as a 500 response.
-The fix uses ``_try_loads_kv_value`` in ``services/workspace_tabs.py`` so
-NULL / unparseable cursorDiskKV values are skipped without raising.
+Bubble rows with NULL or invalid JSON values are skipped in
+``services/workspace_tabs.py`` without raising.
 """
 
 import json
@@ -72,15 +72,21 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
     def test_null_bubble_row_is_skipped_without_exception(self):
         """assemble_workspace_tabs must not raise when a bubble row has NULL value."""
         try:
-            _payload, status = assemble_workspace_tabs(
-                workspace_id="global",
-                workspace_path=self.workspace_path,
-                rules=[],
-            )
+            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+                _payload, status = assemble_workspace_tabs(
+                    workspace_id="global",
+                    workspace_path=self.workspace_path,
+                    rules=[],
+                )
         except TypeError as exc:
             self.fail(f"NULL bubble row raised TypeError: {exc}")
 
         self.assertEqual(status, 200, "NULL bubble row must not turn tabs load into an error response")
+        messages = [r.getMessage() for r in cm.records]
+        self.assertTrue(
+            any("NULL value" in m and "bubble-null" in m for m in messages),
+            f"expected NULL-value warning for bubble-null row, got: {messages}",
+        )
 
     def test_healthy_bubbles_still_load_when_null_row_present(self):
         """The healthy bubble surfaces in a tab even when a NULL row is present."""

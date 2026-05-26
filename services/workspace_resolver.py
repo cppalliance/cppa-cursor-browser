@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -8,10 +9,13 @@ import sys
 from contextlib import closing
 from pathlib import Path
 
+_logger = logging.getLogger(__name__)
+
 from utils.path_helpers import (
     get_workspace_display_name,
     get_workspace_folder_paths,
     normalize_file_path,
+    warn_workspace_json_read,
 )
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
 from services.workspace_db import _open_global_db
@@ -28,8 +32,12 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
         name = get_workspace_display_name(workspace.raw)
         if name:
             return name
-    except (SchemaError, OSError, ValueError):
-        pass
+    except (SchemaError, OSError, ValueError) as e:
+        _logger.warning(
+            "Failed to parse Workspace from %s: %s",
+            workspace_id,
+            e,
+        )
     return workspace_id
 
 
@@ -131,8 +139,8 @@ def _get_project_from_file_path(
                 if is_within_workspace and len(wp) > best_len:
                     best_len = len(wp)
                     best_match = entry["name"]
-        except Exception:
-            pass
+        except Exception as e:
+            warn_workspace_json_read(_logger, entry["name"], e)
     return best_match
 
 
@@ -147,8 +155,8 @@ def _create_project_name_to_workspace_id_map(workspace_entries):
                 folder_name = parts[-1] if parts else None
                 if folder_name:
                     mapping[folder_name] = entry["name"]
-        except Exception:
-            pass
+        except Exception as e:
+            warn_workspace_json_read(_logger, entry["name"], e)
     return mapping
 
 
@@ -160,8 +168,8 @@ def _create_workspace_path_to_id_map(workspace_entries):
             for folder in get_workspace_folder_paths(wd):
                 normalized = normalize_file_path(folder)
                 out[normalized] = entry["name"]
-        except Exception:
-            pass
+        except Exception as e:
+            warn_workspace_json_read(_logger, entry["name"], e)
     return out
 
 
@@ -274,8 +282,8 @@ def _determine_project_for_conversation(
                 name = re.sub(r"^file://", "", folder).replace("\\", "/").split("/")[-1]
                 if name:
                     folder_name_to_ws.append({"name": name, "id": entry["name"]})
-        except Exception:
-            pass
+        except Exception as e:
+            warn_workspace_json_read(_logger, entry["name"], e)
 
     best_id = None
     best_len = 0
@@ -312,7 +320,19 @@ def _infer_invalid_workspace_aliases(
             continue
         try:
             cd = json.loads(row["value"])
-        except Exception:
+        except Exception as e:
+            _logger.warning(
+                "Failed to decode Composer from composerData:%s: %s",
+                cid,
+                e,
+            )
+            continue
+        if not isinstance(cd, dict):
+            _logger.warning(
+                "Failed to parse Composer from composerData:%s: expected object, got %s",
+                cid,
+                type(cd).__name__,
+            )
             continue
         inferred = _determine_project_for_conversation(
             cd,
