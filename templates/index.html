@@ -37,6 +37,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetch('/api/workspaces'),
       fetch('/api/export/state')
     ]);
+    if (!projRes.ok) {
+      document.getElementById('loading').innerHTML =
+        '<p class="text-danger">Failed to load projects.</p>';
+      return;
+    }
     const body = await projRes.json();
     const { projects, warnings } = normalizeWorkspacesResponse(body);
     showIncompleteResultsBanner('parse-warnings-host', warnings);

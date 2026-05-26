@@ -138,7 +138,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                             cid,
                             e,
                         )
-                        parse_warnings.record_composer_skipped()
+                        parse_warnings.record_composer_processing_failure()
             except Exception as e:
                 _logger.error(
                     "Failed to load composer rows from global storage: %s",

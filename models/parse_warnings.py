@@ -9,6 +9,7 @@ class ParseWarningCollector:
 
     composers_skipped: int = 0
     bubbles_skipped: int = 0
+    composers_processing_failed: int = 0
 
     def record_composer_skipped(self, count: int = 1) -> None:
         if count > 0:
@@ -18,9 +19,18 @@ class ParseWarningCollector:
         if count > 0:
             self.bubbles_skipped += count
 
+    def record_composer_processing_failure(self, count: int = 1) -> None:
+        """Post-parse assembly failed; not a JSON/schema parse skip."""
+        if count > 0:
+            self.composers_processing_failed += count
+
     @property
     def has_warnings(self) -> bool:
-        return self.composers_skipped > 0 or self.bubbles_skipped > 0
+        return (
+            self.composers_skipped > 0
+            or self.bubbles_skipped > 0
+            or self.composers_processing_failed > 0
+        )
 
     def to_api_list(self) -> list[dict]:
         """Structured warnings for JSON API responses (issue #67)."""
@@ -43,6 +53,16 @@ class ParseWarningCollector:
                 "count": n,
                 "detail": (
                     f"{n} {noun} could not be loaded due to schema or JSON parse errors"
+                ),
+            })
+        if self.composers_processing_failed:
+            n = self.composers_processing_failed
+            noun = "conversation" if n == 1 else "conversations"
+            warnings.append({
+                "type": "processing_error",
+                "count": n,
+                "detail": (
+                    f"{n} {noun} could not be fully assembled after parsing"
                 ),
             })
         return warnings

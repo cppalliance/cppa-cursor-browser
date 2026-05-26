@@ -586,7 +586,7 @@ def assemble_workspace_tabs(
                     composer_id,
                     e,
                 )
-                parse_warnings.record_composer_skipped()
+                parse_warnings.record_composer_processing_failure()
 
         # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)

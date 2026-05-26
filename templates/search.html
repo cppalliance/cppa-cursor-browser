@@ -80,6 +80,12 @@ async function performSearch(query, type) {
 
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${type}`);
+    if (!res.ok) {
+      showIncompleteResultsBanner('parse-warnings-host', []);
+      loading.style.display = 'none';
+      container.innerHTML = '<p class="text-danger">Search failed.</p>';
+      return;
+    }
     const data = await res.json();
     const results = data.results || [];
     showIncompleteResultsBanner('parse-warnings-host', data.warnings);
@@ -110,6 +116,7 @@ async function performSearch(query, type) {
     }
     container.innerHTML = html;
   } catch (e) {
+    showIncompleteResultsBanner('parse-warnings-host', []);
     loading.style.display = 'none';
     container.innerHTML = '<p class="text-danger">Search failed.</p>';
   }

@@ -172,7 +172,12 @@ def search():
                                 type(e).__name__,
                             )
                             parse_warnings.record_bubble_skipped()
-                        except (json.JSONDecodeError, ValueError):
+                        except (json.JSONDecodeError, TypeError, ValueError) as e:
+                            _logger.warning(
+                                "Failed to decode Bubble from bubbleId:%s: %s",
+                                bid,
+                                e,
+                            )
                             parse_warnings.record_bubble_skipped()
 
                 # Search through composerData
@@ -193,7 +198,12 @@ def search():
                         )
                         parse_warnings.record_composer_skipped()
                         continue
-                    except (json.JSONDecodeError, TypeError, ValueError):
+                    except (json.JSONDecodeError, TypeError, ValueError) as e:
+                        _logger.warning(
+                            "Failed to decode Composer from composerData:%s: %s",
+                            composer_id,
+                            e,
+                        )
                         parse_warnings.record_composer_skipped()
                         continue
                     try:
@@ -289,7 +299,7 @@ def search():
                             composer_id,
                             e,
                         )
-                        parse_warnings.record_composer_skipped()
+                        parse_warnings.record_composer_processing_failure()
 
             except Exception:
                 _logger.exception("Error searching global storage")
