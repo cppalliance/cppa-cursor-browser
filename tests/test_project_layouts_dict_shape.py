@@ -67,7 +67,7 @@ def _make_workspace_storage(parent: str, *, layout_as_dict: bool) -> str:
 
 class TestProjectLayoutsDictShape(unittest.TestCase):
     def _assert_assigned_to_workspace(self, ws_root: str) -> None:
-        projects = list_workspace_projects(ws_root, rules=[])
+        projects, _warnings = list_workspace_projects(ws_root, rules=[])
         ids = [p["id"] for p in projects]
         self.assertIn("ws-a", ids, msg=f"expected composer routed to ws-a, got {ids}")
 

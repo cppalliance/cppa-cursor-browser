@@ -222,4 +222,4 @@ def export_chats():
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": f"Export failed: {str(e)}"}), 500
+        return jsonify({"error": "Export failed"}), 500

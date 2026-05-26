@@ -109,7 +109,8 @@ probe "/api/search (no q -> 400)" "/api/search"             400
 if WS_ID=$(curl "${CURL_FLAGS[@]}" "$BASE/api/workspaces" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-for w in data:
+projects = data if isinstance(data, list) else data.get("projects", [])
+for w in projects:
     if w.get('id') and w['id'] != 'global':
         print(w['id'])
         break

@@ -86,3 +86,49 @@ function formatDate(timestamp) {
 function sanitizeFilename(name) {
   return (name || '').replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').slice(0, 120);
 }
+
+/**
+ * Normalize GET /api/workspaces body: { projects, warnings? } (issue #67).
+ * Accepts a legacy plain array for backward compatibility.
+ */
+function normalizeWorkspacesResponse(body) {
+  if (Array.isArray(body)) {
+    return { projects: body, warnings: [] };
+  }
+  if (body && typeof body === 'object') {
+    return {
+      projects: Array.isArray(body.projects) ? body.projects : [],
+      warnings: Array.isArray(body.warnings) ? body.warnings : [],
+    };
+  }
+  return { projects: [], warnings: [] };
+}
+
+/** Human-readable text from API ``warnings`` entries. */
+function formatParseWarnings(warnings) {
+  if (!warnings || !warnings.length) return '';
+  return warnings.map(w => w.detail || `${w.count || 0} items could not be loaded`).join(' ');
+}
+
+/**
+ * Show or replace an incomplete-results banner (issue #67).
+ * @param {string} containerId - element to prepend into
+ * @param {Array} warnings - API warnings array
+ */
+function showIncompleteResultsBanner(containerId, warnings) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const existing = container.querySelector('.incomplete-results-banner');
+  if (existing) existing.remove();
+  if (!Array.isArray(warnings) || !warnings.length) return;
+
+  const text = formatParseWarnings(warnings);
+  const banner = document.createElement('div');
+  banner.className = 'alert alert-warning incomplete-results-banner';
+  banner.setAttribute('role', 'status');
+  banner.textContent = text
+    ? `Some results may be incomplete: ${text}`
+    : 'Some results may be incomplete due to parse errors.';
+  container.insertBefore(banner, container.firstChild);
+}

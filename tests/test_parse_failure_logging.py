@@ -61,8 +61,10 @@ def _seed_tabs_with_drifted_bubble(parent: str) -> str:
 
     ws_dir = os.path.join(ws_root, "ws-a")
     os.makedirs(ws_dir, exist_ok=True)
+    proj_dir = os.path.join(ws_dir, "proj")
+    os.makedirs(proj_dir, exist_ok=True)
     with open(os.path.join(ws_dir, "workspace.json"), "w", encoding="utf-8") as f:
-        json.dump({"folder": "/tmp/proj"}, f)
+        json.dump({"folder": f"file://{proj_dir}"}, f)
     sqlite3.connect(os.path.join(ws_dir, "state.vscdb")).close()
 
     conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
@@ -126,9 +128,9 @@ class TestParseFailureLogging(unittest.TestCase):
                 conn.commit()
             with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
-                    payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+                    _payload, _status = assemble_workspace_tabs("global", ws_root, rules=[])
 
-        self.assertEqual(status, 200)
+        self.assertEqual(_status, 200)
         messages = [r.getMessage() for r in cm.records]
         self.assertTrue(
             any("decode Bubble" in m and "b-json" in m for m in messages),
@@ -156,9 +158,9 @@ class TestParseFailureLogging(unittest.TestCase):
                 conn.commit()
             with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
-                    payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+                    _payload, _status = assemble_workspace_tabs("global", ws_root, rules=[])
 
-        self.assertEqual(status, 200)
+        self.assertEqual(_status, 200)
         messages = [r.getMessage() for r in cm.records]
         self.assertTrue(
             any("decode Composer" in m and "cmp-json" in m for m in messages),

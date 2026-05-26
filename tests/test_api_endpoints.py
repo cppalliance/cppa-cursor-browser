@@ -14,12 +14,14 @@ class TestListWorkspaces:
         response = client.get("/api/workspaces")
         assert response.status_code == 200
         body = response.get_json()
-        assert isinstance(body, list)
+        assert isinstance(body, dict)
+        projects = body["projects"]
+        assert isinstance(projects, list)
 
-        ids = [p["id"] for p in body]
+        ids = [p["id"] for p in projects]
         assert HAPPY_WORKSPACE_ID in ids, f"expected {HAPPY_WORKSPACE_ID} in {ids}"
 
-        ws = next(p for p in body if p["id"] == HAPPY_WORKSPACE_ID)
+        ws = next(p for p in projects if p["id"] == HAPPY_WORKSPACE_ID)
         assert "name" in ws
         assert "conversationCount" in ws and isinstance(ws["conversationCount"], int)
         assert "lastModified" in ws and "T" in ws["lastModified"]
@@ -27,7 +29,7 @@ class TestListWorkspaces:
     def test_empty_storage_returns_empty_list(self, empty_workspace_client):
         response = empty_workspace_client.get("/api/workspaces")
         assert response.status_code == 200
-        assert response.get_json() == []
+        assert response.get_json() == {"projects": []}
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +171,7 @@ class TestExclusionRules:
         response = excluded_client.get("/api/workspaces")
         assert response.status_code == 200
         body = response.get_json()
-        ids = [w["id"] for w in body]
+        ids = [w["id"] for w in body["projects"]]
         assert HAPPY_WORKSPACE_ID not in ids, (
             f"exclusion rule did not filter {HAPPY_WORKSPACE_ID}; got {ids}"
         )
@@ -182,7 +184,7 @@ class TestExclusionRules:
         response = kept_client.get("/api/workspaces")
         assert response.status_code == 200
         body = response.get_json()
-        ids = [w["id"] for w in body]
+        ids = [w["id"] for w in body["projects"]]
         assert HAPPY_WORKSPACE_ID in ids, (
             f"non-matching rule filtered the workspace; got {ids}"
         )

@@ -18,7 +18,7 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from utils.workspace_path import get_cli_chats_path
-from models import Composer, SchemaError
+from models import Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
@@ -37,8 +37,9 @@ from services.workspace_resolver import (
 )
 
 
-def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
-    """Return the sorted project list that GET /api/workspaces renders."""
+def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict], list[dict]]:
+    """Return (projects, warnings) for GET /api/workspaces."""
+    parse_warnings = ParseWarningCollector()
     workspace_entries = _collect_workspace_entries(workspace_path)
     invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
 
@@ -84,6 +85,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             e,
                         )
+                        parse_warnings.record_composer_skipped()
                         continue
                     if not isinstance(parsed, dict):
                         _logger.warning(
@@ -91,6 +93,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             type(parsed).__name__,
                         )
+                        parse_warnings.record_composer_skipped()
                         continue
                     try:
                         composer = Composer.from_dict(parsed, composer_id=cid)
@@ -100,6 +103,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             e,
                         )
+                        parse_warnings.record_composer_skipped()
                         continue
                     cd = composer.raw
                     try:
@@ -134,6 +138,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
                             cid,
                             e,
                         )
+                        parse_warnings.record_composer_processing_failure()
             except Exception as e:
                 _logger.error(
                     "Failed to load composer rows from global storage: %s",
@@ -284,4 +289,4 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
         _logger.warning("Failed to load CLI projects: %s", e)
 
     projects.sort(key=lambda p: p["lastModified"], reverse=True)
-    return projects
+    return projects, parse_warnings.to_api_list()

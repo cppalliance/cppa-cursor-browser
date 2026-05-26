@@ -20,7 +20,7 @@ from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.workspace_descriptor import read_json_file
-from models import Bubble, Composer, SchemaError
+from models import Bubble, Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
     _build_composer_id_to_workspace_id,
     _collect_invalid_workspace_ids,
@@ -83,6 +83,7 @@ def assemble_workspace_tabs(
     rules: list,
 ) -> tuple[dict, int]:
     """Build (payload, status) for GET /api/workspaces/<id>/tabs; status=404 if global storage is missing."""
+    parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
     workspace_entries = _collect_workspace_entries(workspace_path)
@@ -133,16 +134,13 @@ def assemble_workspace_tabs(
                 return []
 
         # Load bubbles
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
+        for row in _safe_fetchall(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            " AND value IS NOT NULL"
+        ):
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
-                if row["value"] is None:
-                    _logger.warning(
-                        "Skipping Bubble cursorDiskKV row with NULL value: key=%r",
-                        row["key"],
-                    )
-                    continue
                 try:
                     parsed = json.loads(row["value"])
 
@@ -155,6 +153,7 @@ def assemble_workspace_tabs(
                         payload_len,
                         payload_fp,
                     )
+                    parse_warnings.record_bubble_skipped()
                     continue
                 try:
                     bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
@@ -168,6 +167,7 @@ def assemble_workspace_tabs(
                         bid,
                         e,
                     )
+                    parse_warnings.record_bubble_skipped()
 
         # Load codeBlockDiffs
         code_block_diff_map = load_code_block_diff_map(global_db)
@@ -210,6 +210,7 @@ def assemble_workspace_tabs(
         # Get composer data entries with conversations
         composer_rows = _safe_fetchall(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+            " AND value IS NOT NULL"
             " AND value LIKE '%fullConversationHeadersOnly%'"
             " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
         )
@@ -227,12 +228,6 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            if row["value"] is None:
-                _logger.warning(
-                    "Skipping Composer cursorDiskKV row with NULL value: key=%r",
-                    row["key"],
-                )
-                continue
             try:
                 parsed = json.loads(row["value"])
             except (json.JSONDecodeError, TypeError, ValueError) as e:
@@ -245,6 +240,7 @@ def assemble_workspace_tabs(
                     payload_len,
                     payload_fp,
                 )
+                parse_warnings.record_composer_skipped()
                 continue
             try:
                 composer = Composer.from_dict(parsed, composer_id=composer_id)
@@ -257,6 +253,7 @@ def assemble_workspace_tabs(
                     composer_id,
                     e,
                 )
+                parse_warnings.record_composer_skipped()
                 continue
             try:
                 cd = composer.raw
@@ -579,8 +576,9 @@ def assemble_workspace_tabs(
                     composer_id,
                     e,
                 )
+                parse_warnings.record_composer_processing_failure()
 
         # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
 
-        return response, 200
+        return parse_warnings.attach_to(response), 200

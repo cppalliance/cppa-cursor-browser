@@ -26,6 +26,7 @@
   <p>Loading projects...</p>
 </div>
 
+<div id="parse-warnings-host"></div>
 <div id="projects-container" style="display:none"></div>
 
 <script>
@@ -36,7 +37,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetch('/api/workspaces'),
       fetch('/api/export/state')
     ]);
-    const projects = await projRes.json();
+    if (!projRes.ok) {
+      document.getElementById('loading').innerHTML =
+        '<p class="text-danger">Failed to load projects.</p>';
+      return;
+    }
+    const body = await projRes.json();
+    const { projects, warnings } = normalizeWorkspacesResponse(body);
+    showIncompleteResultsBanner('parse-warnings-host', warnings);
     renderProjects(projects);
 
     // Show last export time
