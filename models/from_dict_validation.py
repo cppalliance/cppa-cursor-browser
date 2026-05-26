@@ -35,7 +35,9 @@ def require_non_empty_str(value: Any, *, model: str, field: str) -> str:
 
 def require_non_empty_str_field(raw: dict[str, Any], key: str, *, model: str) -> str:
     """Validate a non-empty string field read from raw."""
-    value = raw.get(key)
+    if key not in raw:
+        raise SchemaError(model, key)
+    value = raw[key]
     if not isinstance(value, str) or not value:
         raise SchemaError(
             model,
@@ -53,7 +55,9 @@ def require_non_empty_str_fields(
 ) -> None:
     """Validate multiple non-empty string fields in raw (ExportEntry pattern)."""
     for key in keys:
-        value = raw.get(key)
+        if key not in raw:
+            raise SchemaError(model, key)
+        value = raw[key]
         if not isinstance(value, str) or value == "":
             raise SchemaError(
                 model,
