@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from models.errors import SchemaError
+from models.from_dict_validation import require_dict, require_non_empty_str_fields
 
 
 @dataclass(frozen=True)
@@ -19,20 +19,12 @@ class ExportEntry:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ExportEntry":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "ExportEntry",
-                "entry",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        for required in ("log_id", "title", "workspace"):
-            value = raw.get(required)
-            if not isinstance(value, str) or value == "":
-                raise SchemaError(
-                    "ExportEntry",
-                    required,
-                    hint=f"expected non-empty str, got {type(value).__name__}",
-                )
+        raw = require_dict(raw, model="ExportEntry", field="entry")
+        require_non_empty_str_fields(
+            raw,
+            ("log_id", "title", "workspace"),
+            model="ExportEntry",
+        )
         return cls(
             log_id=raw["log_id"],
             title=raw["title"],
