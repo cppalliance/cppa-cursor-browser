@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from models.errors import SchemaError
+from models.from_dict_validation import require_dict, require_truthy
 
 
 @dataclass(frozen=True)
@@ -16,15 +17,12 @@ class CliSessionMeta:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "CliSessionMeta":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "CliSessionMeta",
-                "meta",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        latest = raw.get("latestRootBlobId")
-        if not latest:
-            raise SchemaError("CliSessionMeta", "latestRootBlobId")
+        raw = require_dict(raw, model="CliSessionMeta", field="meta")
+        latest = require_truthy(
+            raw.get("latestRootBlobId"),
+            model="CliSessionMeta",
+            field="latestRootBlobId",
+        )
         if not isinstance(latest, str):
             raise SchemaError(
                 "CliSessionMeta",

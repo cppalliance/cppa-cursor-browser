@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from models.errors import SchemaError
+from models.from_dict_validation import require_dict, require_non_empty_str, require_optional_str
 
 
 @dataclass(frozen=True)
@@ -16,23 +16,7 @@ class Workspace:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, workspace_id: str) -> "Workspace":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "Workspace",
-                "workspace.json",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        if not isinstance(workspace_id, str) or not workspace_id:
-            raise SchemaError(
-                "Workspace",
-                "workspaceId",
-                hint=f"expected non-empty str, got {type(workspace_id).__name__}",
-            )
-        folder = raw.get("folder")
-        if folder is not None and not isinstance(folder, str):
-            raise SchemaError(
-                "Workspace",
-                "folder",
-                hint=f"expected str or None, got {type(folder).__name__}",
-            )
+        raw = require_dict(raw, model="Workspace", field="workspace.json")
+        require_non_empty_str(workspace_id, model="Workspace", field="workspaceId")
+        folder = require_optional_str(raw.get("folder"), model="Workspace", field="folder")
         return cls(workspace_id=workspace_id, folder=folder, raw=raw)

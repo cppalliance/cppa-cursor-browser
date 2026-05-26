@@ -4,6 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from models.errors import SchemaError
+from models.from_dict_validation import (
+    require_dict,
+    require_key,
+    require_non_empty_str,
+    require_non_empty_str_field,
+    require_type,
+)
 
 
 @dataclass(frozen=True)
@@ -20,22 +27,10 @@ class Composer:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, composer_id: str) -> "Composer":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "Composer",
-                "composerData",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        if not isinstance(composer_id, str) or not composer_id:
-            raise SchemaError(
-                "Composer",
-                "composerId",
-                hint=f"expected non-empty str, got {type(composer_id).__name__}",
-            )
-        if "fullConversationHeadersOnly" not in raw:
-            raise SchemaError("Composer", "fullConversationHeadersOnly")
-        if "createdAt" not in raw:
-            raise SchemaError("Composer", "createdAt")
+        raw = require_dict(raw, model="Composer", field="composerData")
+        require_non_empty_str(composer_id, model="Composer", field="composerId")
+        require_key(raw, "fullConversationHeadersOnly", model="Composer")
+        require_key(raw, "createdAt", model="Composer")
 
         created_at = raw.get("createdAt")
         # Numeric-only on purpose: a 2026-05 scan of 17/17 live composers on
@@ -49,13 +44,14 @@ class Composer:
                 hint=f"expected timestamp number, got {type(created_at).__name__}",
             )
 
-        headers = raw.get("fullConversationHeadersOnly")
-        if not isinstance(headers, list):
-            raise SchemaError(
-                "Composer",
-                "fullConversationHeadersOnly",
-                hint=f"expected list, got {type(headers).__name__}",
-            )
+        headers_value = raw.get("fullConversationHeadersOnly")
+        headers = require_type(
+            headers_value,
+            list,
+            model="Composer",
+            field="fullConversationHeadersOnly",
+            hint=f"expected list, got {type(headers_value).__name__}",
+        )
 
         model_config = raw.get("modelConfig") or {}
         if not isinstance(model_config, dict):
@@ -82,19 +78,10 @@ class WorkspaceLocalComposer:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "WorkspaceLocalComposer":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "WorkspaceLocalComposer",
-                "composer",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        composer_id = raw.get("composerId")
-        if not isinstance(composer_id, str) or not composer_id:
-            raise SchemaError(
-                "WorkspaceLocalComposer",
-                "composerId",
-                hint=f"expected non-empty str, got {type(composer_id).__name__}",
-            )
+        raw = require_dict(raw, model="WorkspaceLocalComposer", field="composer")
+        composer_id = require_non_empty_str_field(
+            raw, "composerId", model="WorkspaceLocalComposer"
+        )
         return cls(
             composer_id=composer_id,
             last_updated_at=raw.get("lastUpdatedAt"),
@@ -111,16 +98,6 @@ class Bubble:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, bubble_id: str) -> "Bubble":
-        if not isinstance(raw, dict):
-            raise SchemaError(
-                "Bubble",
-                "bubble",
-                hint=f"expected object, got {type(raw).__name__}",
-            )
-        if not isinstance(bubble_id, str) or not bubble_id:
-            raise SchemaError(
-                "Bubble",
-                "bubbleId",
-                hint=f"expected non-empty str, got {type(bubble_id).__name__}",
-            )
+        raw = require_dict(raw, model="Bubble", field="bubble")
+        require_non_empty_str(bubble_id, model="Bubble", field="bubbleId")
         return cls(bubble_id=bubble_id, raw=raw)
