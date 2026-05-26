@@ -246,7 +246,7 @@ class TestApiParseWarnings(unittest.TestCase):
         self.app.config["TESTING"] = True
         self.client = self.app.test_client()
 
-    def test_workspaces_api_array_when_clean(self) -> None:
+    def test_workspaces_api_object_when_clean(self) -> None:
         tmp = tempfile.mkdtemp()
         try:
             ws_root = _seed_clean_workspace(tmp)
@@ -258,7 +258,9 @@ class TestApiParseWarnings(unittest.TestCase):
 
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
-        self.assertIsInstance(data, list)
+        self.assertIsInstance(data, dict)
+        self.assertIn("projects", data)
+        self.assertNotIn("warnings", data)
 
     def test_workspaces_api_object_when_warnings(self) -> None:
         tmp = tempfile.mkdtemp()

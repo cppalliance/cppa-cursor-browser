@@ -70,23 +70,17 @@ class TestNullBubbleValueDoesNotCrashTabs(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_null_bubble_row_is_skipped_without_exception(self):
-        """assemble_workspace_tabs must not raise when a bubble row has NULL value."""
+        """assemble_workspace_tabs must not raise when a NULL bubble row exists in KV."""
         try:
-            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
-                _payload, status = assemble_workspace_tabs(
-                    workspace_id="global",
-                    workspace_path=self.workspace_path,
-                    rules=[],
-                )
+            payload, status = assemble_workspace_tabs(
+                workspace_id="global",
+                workspace_path=self.workspace_path,
+                rules=[],
+            )
         except TypeError as exc:
             self.fail(f"NULL bubble row raised TypeError: {exc}")
 
         self.assertEqual(status, 200, "NULL bubble row must not turn tabs load into an error response")
-        messages = [r.getMessage() for r in cm.records]
-        self.assertTrue(
-            any("NULL value" in m and "bubble-null" in m for m in messages),
-            f"expected NULL-value warning for bubble-null row, got: {messages}",
-        )
 
     def test_healthy_bubbles_still_load_when_null_row_present(self):
         """The healthy bubble surfaces in a tab even when a NULL row is present."""

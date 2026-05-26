@@ -88,8 +88,8 @@ function sanitizeFilename(name) {
 }
 
 /**
- * Normalize GET /api/workspaces body: plain array (no warnings) or
- * { projects, warnings } when parse failures occurred (issue #67).
+ * Normalize GET /api/workspaces body: { projects, warnings? } (issue #67).
+ * Accepts a legacy plain array for backward compatibility.
  */
 function normalizeWorkspacesResponse(body) {
   if (Array.isArray(body)) {

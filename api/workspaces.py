@@ -56,9 +56,10 @@ def list_workspaces():
         workspace_path = resolve_workspace_path()
         rules = current_app.config.get("EXCLUSION_RULES") or []
         projects, warnings = list_workspace_projects(workspace_path, rules)
+        payload: dict = {"projects": projects}
         if warnings:
-            return jsonify({"projects": projects, "warnings": warnings})
-        return jsonify(projects)
+            payload["warnings"] = warnings
+        return jsonify(payload)
     except Exception:
         _logger.exception("Failed to get workspaces")
         return jsonify({"error": "Failed to get workspaces"}), 500

@@ -134,17 +134,13 @@ def assemble_workspace_tabs(
                 return []
 
         # Load bubbles
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"):
+        for row in _safe_fetchall(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            " AND value IS NOT NULL"
+        ):
             parts = row["key"].split(":")
             if len(parts) >= 3:
                 bid = parts[2]
-                if row["value"] is None:
-                    _logger.warning(
-                        "Skipping Bubble cursorDiskKV row with NULL value: key=%r",
-                        row["key"],
-                    )
-                    parse_warnings.record_bubble_skipped()
-                    continue
                 try:
                     parsed = json.loads(row["value"])
 
@@ -214,6 +210,7 @@ def assemble_workspace_tabs(
         # Get composer data entries with conversations
         composer_rows = _safe_fetchall(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+            " AND value IS NOT NULL"
             " AND value LIKE '%fullConversationHeadersOnly%'"
             " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
         )
@@ -231,13 +228,6 @@ def assemble_workspace_tabs(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            if row["value"] is None:
-                _logger.warning(
-                    "Skipping Composer cursorDiskKV row with NULL value: key=%r",
-                    row["key"],
-                )
-                parse_warnings.record_composer_skipped()
-                continue
             try:
                 parsed = json.loads(row["value"])
             except (json.JSONDecodeError, TypeError, ValueError) as e:

@@ -72,10 +72,3 @@ class ParseWarningCollector:
         if self.has_warnings:
             payload = {**payload, "warnings": self.to_api_list()}
         return payload
-
-
-def attach_warnings(payload: dict, warnings: list[dict]) -> dict:
-    """Merge pre-built warnings into a response dict."""
-    if warnings:
-        return {**payload, "warnings": warnings}
-    return payload
