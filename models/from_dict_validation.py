@@ -67,7 +67,11 @@ def require_non_empty_str_fields(
 
 
 def require_truthy(value: Any, *, model: str, field: str) -> Any:
-    """Raise missing-field SchemaError when value is falsy (absent or empty)."""
+    """Raise missing-field SchemaError when value is falsy.
+
+    Treats None, empty string, 0, and other falsy values as missing (no hint),
+    matching prior CliSessionMeta ``latestRootBlobId`` behavior via ``raw.get``.
+    """
     if not value:
         raise SchemaError(model, field)
     return value
