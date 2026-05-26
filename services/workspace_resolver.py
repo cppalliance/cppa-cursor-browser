@@ -89,12 +89,10 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
             except sqlite3.Error:
                 continue
             for row in rows:
+                if not row or row[0] is None:
+                    continue
                 try:
-                    # sqlite3.Row supports string-key access at runtime when
-                    # row_factory = sqlite3.Row is set on the connection (see
-                    # _open_global_db); mypy's stub types Row as tuple[Any, ...]
-                    # which only accepts SupportsIndex, hence the ignore.
-                    ctx = json.loads(row["value"])  # type: ignore[call-overload]
+                    ctx = json.loads(row[0])
                 except Exception:
                     continue
                 layouts = ctx.get("projectLayouts")
