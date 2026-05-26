@@ -176,7 +176,7 @@ def generate_pdf():
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+        return jsonify({"error": "Failed to generate PDF"}), 500
 
 
 def _render_code_block(pdf, code_text: str):

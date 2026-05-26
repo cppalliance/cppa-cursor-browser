@@ -97,8 +97,8 @@ function normalizeWorkspacesResponse(body) {
   }
   if (body && typeof body === 'object') {
     return {
-      projects: body.projects || [],
-      warnings: body.warnings || [],
+      projects: Array.isArray(body.projects) ? body.projects : [],
+      warnings: Array.isArray(body.warnings) ? body.warnings : [],
     };
   }
   return { projects: [], warnings: [] };
@@ -117,10 +117,11 @@ function formatParseWarnings(warnings) {
  */
 function showIncompleteResultsBanner(containerId, warnings) {
   const container = document.getElementById(containerId);
-  if (!container || !warnings || !warnings.length) return;
+  if (!container) return;
 
   const existing = container.querySelector('.incomplete-results-banner');
   if (existing) existing.remove();
+  if (!Array.isArray(warnings) || !warnings.length) return;
 
   const text = formatParseWarnings(warnings);
   const banner = document.createElement('div');
