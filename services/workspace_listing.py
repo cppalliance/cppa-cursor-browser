@@ -115,9 +115,11 @@ def list_workspace_projects(workspace_path: str, rules: list) -> list[dict]:
 
                         headers = cd.get("fullConversationHeadersOnly") or []
                         has_bubbles = any(
-                            bubble_map.get(h.get("bubbleId"))
+                            bubble_map.get(bubble_id)
                             for h in headers
                             if isinstance(h, dict)
+                            for bubble_id in [h.get("bubbleId")]
+                            if isinstance(bubble_id, str)
                         )
                         if not has_bubbles:
                             continue

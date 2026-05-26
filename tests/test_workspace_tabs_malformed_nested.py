@@ -131,6 +131,7 @@ class TestDiffsEmittedOnlyAsCodeBlockDiffs(unittest.TestCase):
 
         tab = next((t for t in payload["tabs"] if t["id"] == "cmp-d"), None)
         self.assertIsNotNone(tab)
+        assert tab is not None
         self.assertTrue(tab["codeBlockDiffs"], "expected diffs on tab.codeBlockDiffs")
 
     def test_diffs_do_not_appear_as_synthetic_bubbles(self) -> None:

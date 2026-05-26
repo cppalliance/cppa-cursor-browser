@@ -260,6 +260,8 @@ def assemble_workspace_tabs(
                     if not isinstance(header, dict):
                         continue
                     bubble_id = header.get("bubbleId")
+                    if not isinstance(bubble_id, str):
+                        continue
                     bubble = bubble_map.get(bubble_id)
                     if not bubble:
                         continue
@@ -526,10 +528,11 @@ def assemble_workspace_tabs(
                 if model_name_from_config and model_name_from_config != "default":
                     if not tab_meta:
                         tab_meta = {}
-                    if not tab_meta.get("modelsUsed"):
+                    models_used = tab_meta.get("modelsUsed")
+                    if not isinstance(models_used, list):
                         tab_meta["modelsUsed"] = [model_name_from_config]
-                    elif model_name_from_config not in tab_meta["modelsUsed"]:
-                        tab_meta["modelsUsed"].insert(0, model_name_from_config)
+                    elif model_name_from_config not in models_used:
+                        models_used.insert(0, model_name_from_config)
 
                 tab = {
                     "id": composer_id,
