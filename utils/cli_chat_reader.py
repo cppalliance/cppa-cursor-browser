@@ -91,7 +91,7 @@ def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
         msg = json.loads(data.decode("utf-8"))
         if isinstance(msg, dict) and "role" in msg:
             return msg, []
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+    except (UnicodeDecodeError, json.JSONDecodeError):
         pass
     return None, _extract_blob_refs(data)
 
