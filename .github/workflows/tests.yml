@@ -98,14 +98,14 @@ jobs:
 
       - name: Install runtime + test dependencies
         # Install from the pinned lock file for deterministic dependency
-        # resolution (closes #47). pytest is added on top — it is not in
-        # requirements-lock.txt because it is a dev-only dep. pywebview is
+        # resolution (closes #47). pytest and hypothesis are added on top — not in
+        # requirements-lock.txt (dev-only). pywebview is
         # the desktop-launcher dep and pulls GTK / Qt system libraries on
         # Linux — intentionally excluded from the CI unittest matrix.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-lock.txt
-          python -m pip install 'pytest>=8,<9'
+          python -m pip install 'pytest>=8,<9' 'hypothesis>=6.100,<7'
 
       - name: Run unittest suite
         run: python -m unittest discover tests -v

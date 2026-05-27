@@ -20,7 +20,7 @@ if str(_root) not in sys.path:
 
 from utils.cli_chat_reader import (
     _content_to_text,
-    _extract_blob_refs,
+    extract_blob_refs,
     _extract_tool_calls,
     _strip_user_info,
     aggregate_session_stats,
@@ -75,34 +75,34 @@ def _build_store_db(path: str, meta: dict, json_blobs: dict[str, dict], chain: d
 
 
 # ---------------------------------------------------------------------------
-# _extract_blob_refs
+# extract_blob_refs
 # ---------------------------------------------------------------------------
 
 class TestExtractBlobRefs(unittest.TestCase):
     def test_empty_bytes_returns_empty(self):
-        self.assertEqual(_extract_blob_refs(b""), [])
+        self.assertEqual(extract_blob_refs(b""), [])
 
     def test_single_ref(self):
         ref = "a" * 64  # 32 bytes as hex
         raw = b"\x0a\x20" + bytes.fromhex(ref)
-        self.assertEqual(_extract_blob_refs(raw), [ref])
+        self.assertEqual(extract_blob_refs(raw), [ref])
 
     def test_two_refs(self):
         ref1 = "a" * 64
         ref2 = "b" * 64
         raw = b"\x0a\x20" + bytes.fromhex(ref1) + b"\x0a\x20" + bytes.fromhex(ref2)
-        self.assertEqual(_extract_blob_refs(raw), [ref1, ref2])
+        self.assertEqual(extract_blob_refs(raw), [ref1, ref2])
 
     def test_noise_bytes_ignored(self):
         ref = "c" * 64
         noise = b"\x00\xff\x01\x02\x03\x04"
         raw = noise + b"\x0a\x20" + bytes.fromhex(ref) + b"\xde\xad"
-        self.assertIn(ref, _extract_blob_refs(raw))
+        self.assertIn(ref, extract_blob_refs(raw))
 
     def test_partial_tag_at_end_ignored(self):
         # Only 0x0a without 0x20 immediately following should not produce a ref.
         raw = b"\x0a" + b"\x00" * 32
-        self.assertEqual(_extract_blob_refs(raw), [])
+        self.assertEqual(extract_blob_refs(raw), [])
 
 
 # ---------------------------------------------------------------------------

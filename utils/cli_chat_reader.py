@@ -62,7 +62,7 @@ def _read_meta(db_path: str) -> dict:
     return {}
 
 
-def _extract_blob_refs(data: bytes) -> list[str]:
+def extract_blob_refs(data: bytes) -> list[str]:
     """Extract all 32-byte (SHA-256) blob references from a binary chain node.
 
     The encoding is: tag ``0x0a`` (field 1, length-delimited) followed by
@@ -77,6 +77,23 @@ def _extract_blob_refs(data: bytes) -> list[str]:
         else:
             i += 1
     return refs
+
+
+def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
+    """Classify a blob payload as a JSON message or a binary chain node.
+
+    Returns ``(message_dict, [])`` when *data* decodes to a dict with a
+    ``role`` field; otherwise ``(None, refs)`` where *refs* are SHA-256 hex
+    ids from :func:`extract_blob_refs`.  Used by :func:`traverse_blobs` and
+    property tests — keep in sync when the load loop changes.
+    """
+    try:
+        msg = json.loads(data.decode("utf-8"))
+        if isinstance(msg, dict) and "role" in msg:
+            return msg, []
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    return None, extract_blob_refs(data)
 
 
 def traverse_blobs(db_path: str) -> list[dict]:
@@ -118,15 +135,11 @@ def traverse_blobs(db_path: str) -> list[dict]:
         for blob_id, data in conn.execute("SELECT id, data FROM blobs"):
             if not isinstance(data, bytes):
                 continue
-            try:
-                msg = json.loads(data.decode("utf-8"))
-                if isinstance(msg, dict) and "role" in msg:
-                    json_blobs[blob_id] = msg
-                    continue
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                pass
-            refs = _extract_blob_refs(data)
-            chain_blobs[blob_id] = refs
+            msg, refs = classify_blob_data(data)
+            if msg is not None:
+                json_blobs[blob_id] = msg
+            else:
+                chain_blobs[blob_id] = refs
 
     # BFS from root (newest-first by nature of the linked-list structure);
     # reverse at the end to restore chronological (oldest→newest) order.

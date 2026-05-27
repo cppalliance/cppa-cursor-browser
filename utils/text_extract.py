@@ -28,9 +28,9 @@ def extract_text_from_bubble(bubble: dict) -> str:
 
     text = ""
 
-    # Try text field first
+    # Try text field first (coerce non-str values — Cursor payloads can drift)
     if bubble.get("text") and str(bubble["text"]).strip():
-        text = bubble["text"]
+        text = str(bubble["text"])
 
     # Fall back to richText
     if not text and bubble.get("richText"):
@@ -49,7 +49,7 @@ def extract_text_from_bubble(bubble: dict) -> str:
                 lang = cb.get("language", "")
                 text += f"\n\n```{lang}\n{cb['content']}\n```"
 
-    return text
+    return text if isinstance(text, str) else ""
 
 
 def slug(s: str) -> str:

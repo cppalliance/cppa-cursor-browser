@@ -61,6 +61,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+For development (pytest, mypy, Hypothesis property tests):
+
+```bash
+pip install -e ".[dev]"
+```
+
 For reproducible installs (same versions as CI), use the pinned lock file:
 
 ```bash
