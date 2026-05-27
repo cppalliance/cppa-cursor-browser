@@ -14,7 +14,7 @@ import sys
 import tempfile
 import unittest
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +26,7 @@ from utils.cli_chat_reader import (
     classify_blob_data,
     messages_to_bubbles,
     traverse_blobs,
-    _extract_blob_refs,
+    _extract_blob_refs,  # internal helper; covered directly alongside classify_blob_data
 )
 from utils.text_extract import extract_text_from_bubble
 
@@ -76,7 +76,7 @@ _BLOB_ID_HEX = st.text(
 
 
 @st.composite
-def _cli_message(draw) -> dict:
+def _cli_message(draw):
     # Empty role is intentional adversarial input (unknown / missing role).
     role = draw(st.sampled_from(["user", "assistant", "system", "tool", ""]))
     content = draw(
@@ -142,7 +142,12 @@ def _build_store_db_raw(path: str, meta: dict, blobs: dict[str, bytes]) -> None:
 
 
 def _assemble_workspace_bubble(bubble_id: object, value: object) -> dict | None:
-    """Mirror workspace_tabs KV bubble load (json.loads → Bubble.from_dict)."""
+    """Mirror workspace_tabs KV bubble load (json.loads → Bubble.from_dict).
+
+    Intentionally re-implements the conversion instead of importing
+    ``_loads_kv_value_logged`` (logging / payload hashing side effects).
+    Keep in sync with the bubbleId load loop in ``services/workspace_tabs.py``.
+    """
     try:
         if value is None:
             return None
@@ -246,10 +251,15 @@ class TestBlobChainParsingFuzz(unittest.TestCase):
         extra_ids=st.lists(_BLOB_ID_HEX, max_size=6, unique=True),
         payloads=st.lists(st.binary(max_size=1024), min_size=1, max_size=8),
     )
-    @settings(max_examples=40, deadline=None)
+    @settings(
+        max_examples=40,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
     def test_traverse_blobs_never_raises(
         self, root_id: str, extra_ids: list[str], payloads: list[bytes]
     ) -> None:
+        # CliSessionMeta only requires latestRootBlobId (str); BFS runs after meta parse.
         meta = {"latestRootBlobId": root_id, "createdAt": 1_700_000_000_000}
         blobs: dict[str, bytes] = {root_id: payloads[0]}
         for i, bid in enumerate(extra_ids):
