@@ -102,6 +102,8 @@ _BUBBLE_LIKE = st.dictionaries(
     st.sampled_from(["text", "richText", "codeBlocks", "type", "metadata"]),
     st.one_of(
         st.text(max_size=300),
+        st.integers(),
+        st.booleans(),
         st.none(),
         st.lists(
             st.dictionaries(
