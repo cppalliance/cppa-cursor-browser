@@ -144,20 +144,17 @@ def _build_store_db_raw(path: str, meta: dict, blobs: dict[str, bytes]) -> None:
 def _assemble_workspace_bubble(bubble_id: object, value: object) -> dict | None:
     """Mirror workspace_tabs KV bubble load (json.loads → Bubble.from_dict).
 
-    Intentionally re-implements the conversion instead of importing
-    ``_loads_kv_value_logged`` (logging / payload hashing side effects).
-    Keep in sync with the bubbleId load loop in ``services/workspace_tabs.py``.
+    Matches ``services/workspace_tabs.py`` (bubbleId loop): ``json.loads(row["value"])``
+    with no type branching — same exceptions as production. Rows with ``value IS NULL``
+    are not selected in production; ``None`` here returns ``None`` for fuzz only.
+
+    Intentionally omits ``_loads_kv_value_logged`` (logging / payload hashing).
     """
+    if value is None:
+        return None
     try:
-        if value is None:
-            return None
-        if isinstance(value, (bytes, bytearray)):
-            parsed = json.loads(bytes(value).decode("utf-8"))
-        elif isinstance(value, str):
-            parsed = json.loads(value)
-        else:
-            parsed = value
-    except (json.JSONDecodeError, TypeError, ValueError, UnicodeDecodeError):
+        parsed = json.loads(value)  # type: ignore[arg-type]
+    except (json.JSONDecodeError, TypeError, ValueError):
         return None
     try:
         return Bubble.from_dict(parsed, bubble_id=bubble_id).raw  # type: ignore[arg-type]
