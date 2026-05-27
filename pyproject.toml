@@ -26,7 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 # Desktop launcher (pywebview pulls in heavy system libs — GTK/Qt on Linux —
 # so it is intentionally excluded from the web-server and CI installs).
-desktop = ["pywebview>=5.0,<6"]
+desktop = ["pywebview>=5.0,<7"]
 
 # Development tooling: testing + type checking.
 dev = [
