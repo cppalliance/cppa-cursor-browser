@@ -124,6 +124,15 @@ def workspace_storage() -> Generator[str, None, None]:
 
 
 @pytest.fixture
+def pdf_client():
+    """Flask test client for routes that do not read workspace storage (e.g. PDF export)."""
+    app = create_app()
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = []
+    return app.test_client()
+
+
+@pytest.fixture
 def client(workspace_storage: str):
     """Flask test client bound to the temp workspace_storage fixture."""
     app = create_app()
