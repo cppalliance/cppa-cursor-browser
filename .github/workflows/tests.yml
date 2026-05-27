@@ -111,12 +111,10 @@ jobs:
         run: python -m unittest discover tests -v
 
       - name: Run pytest integration suite
-        # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage
-        # and exercise the Flask routes via app.test_client(). Scoped to the
-        # new endpoint file because `pytest tests/` would also re-collect the
-        # 178 unittest.TestCase subclasses already run in the step above —
-        # ~2× the CI minutes for zero extra signal.
-        run: python -m pytest tests/test_api_endpoints.py -v --tb=short
+        # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage and
+        # exercise Flask routes via app.test_client(). Only listed files — not
+        # `pytest tests/` — to avoid re-collecting unittest.TestCase classes above.
+        run: python -m pytest tests/test_api_endpoints.py tests/test_pdf_export.py -v --tb=short
 
       # ── PyInstaller desktop build (Windows only, once per workflow) ────────
       # Closes #44. Builds the onedir bundle and smoke-tests --help so the
