@@ -24,9 +24,9 @@ if REPO_ROOT not in sys.path:
 from models import Bubble, SchemaError
 from utils.cli_chat_reader import (
     classify_blob_data,
+    extract_blob_refs,
     messages_to_bubbles,
     traverse_blobs,
-    _extract_blob_refs,  # internal helper; covered directly alongside classify_blob_data
 )
 from utils.text_extract import extract_text_from_bubble
 
@@ -132,15 +132,37 @@ def _make_meta_value(meta: dict) -> str:
 
 
 def _build_store_db_raw(path: str, meta: dict, blobs: dict[str, bytes]) -> None:
-    """Minimal store.db with arbitrary blob payloads (for traverse_blobs fuzz)."""
+    """Minimal store.db with well-formed meta dict and arbitrary blob payloads."""
+    _build_store_db_meta_row(path, _make_meta_value(meta), blobs)
+
+
+def _build_store_db_meta_row(
+    path: str, meta_row: str | None, blobs: dict[str, bytes]
+) -> None:
+    """Minimal store.db; *meta_row* is the raw ``meta.value`` (hex JSON or adversarial)."""
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
     conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
-    conn.execute("INSERT INTO meta VALUES ('0', ?)", (_make_meta_value(meta),))
+    if meta_row is not None:
+        conn.execute("INSERT INTO meta VALUES ('0', ?)", (meta_row,))
     for blob_id, data in blobs.items():
         conn.execute("INSERT INTO blobs VALUES (?, ?)", (blob_id, data))
     conn.commit()
     conn.close()
+
+
+_FUZZ_META_ROW = st.one_of(
+    st.none(),
+    st.just(""),
+    st.text(min_size=0, max_size=200),
+    st.dictionaries(st.text(max_size=20), _JSON_VALUES, max_size=6).map(
+        lambda d: json.dumps(d).encode("utf-8").hex()
+    ),
+    st.builds(
+        lambda root: _make_meta_value({"latestRootBlobId": root, "createdAt": 1}),
+        _BLOB_ID_HEX,
+    ),
+)
 
 
 def _assemble_workspace_bubble(bubble_id: object, value: object) -> dict | None:
@@ -219,7 +241,7 @@ class TestBlobChainParsingFuzz(unittest.TestCase):
     @settings(max_examples=120, deadline=None)
     def test_extract_blob_refs_never_raises(self, data: bytes) -> None:
         try:
-            refs = _extract_blob_refs(data)
+            refs = extract_blob_refs(data)
         except Exception as exc:
             self.fail(f"unexpected {type(exc).__name__}: {exc}")
         self.assertIsInstance(refs, list)
@@ -230,7 +252,7 @@ class TestBlobChainParsingFuzz(unittest.TestCase):
     @given(data=st.binary(max_size=4096))
     @settings(max_examples=80, deadline=None)
     def test_extract_blob_refs_is_idempotent(self, data: bytes) -> None:
-        self.assertEqual(_extract_blob_refs(data), _extract_blob_refs(data))
+        self.assertEqual(extract_blob_refs(data), extract_blob_refs(data))
 
     @given(data=st.binary(max_size=4096))
     @settings(max_examples=80, deadline=None)
@@ -267,6 +289,23 @@ class TestBlobChainParsingFuzz(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             db_path = os.path.join(td, "store.db")
             _build_store_db_raw(db_path, meta, blobs)
+            try:
+                messages = traverse_blobs(db_path)
+            except Exception as exc:
+                self.fail(f"traverse_blobs raised {type(exc).__name__}: {exc}")
+            self.assertIsInstance(messages, list)
+
+    @given(meta_row=_FUZZ_META_ROW)
+    @settings(
+        max_examples=30,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_traverse_blobs_meta_parse_never_raises(self, meta_row: str | None) -> None:
+        """Covers meta decode / CliSessionMeta.from_dict failure → return [] (no crash)."""
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "store.db")
+            _build_store_db_meta_row(db_path, meta_row, {})
             try:
                 messages = traverse_blobs(db_path)
             except Exception as exc:

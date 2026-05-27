@@ -17,7 +17,7 @@ from models import (
     Workspace,
     WorkspaceLocalComposer,
 )
-from utils.cli_chat_reader import _extract_blob_refs
+from utils.cli_chat_reader import extract_blob_refs
 
 
 GOOD_COMPOSER_RAW: dict = {
@@ -252,7 +252,7 @@ class CliSessionMetaAndBlobChain(unittest.TestCase):
         self.assertEqual(meta.latest_root_blob_id, ref1)
 
         chain_blob = _make_blob_chain(ref1, ref2, ref3)
-        refs = _extract_blob_refs(chain_blob)
+        refs = extract_blob_refs(chain_blob)
         self.assertEqual(refs, [ref1, ref2, ref3])
 
     def test_blob_chain_skips_non_marker_bytes(self) -> None:
@@ -261,10 +261,10 @@ class CliSessionMetaAndBlobChain(unittest.TestCase):
         garbage_after = b"\xff\xfe"
         raw = garbage_before + bytes([0x0A, 0x20]) + bytes.fromhex(ref) + garbage_after
 
-        self.assertEqual(_extract_blob_refs(raw), [ref])
+        self.assertEqual(extract_blob_refs(raw), [ref])
 
     def test_blob_chain_empty_returns_empty_list(self) -> None:
-        self.assertEqual(_extract_blob_refs(b""), [])
+        self.assertEqual(extract_blob_refs(b""), [])
 
 
 if __name__ == "__main__":

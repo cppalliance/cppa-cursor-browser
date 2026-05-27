@@ -62,7 +62,7 @@ def _read_meta(db_path: str) -> dict:
     return {}
 
 
-def _extract_blob_refs(data: bytes) -> list[str]:
+def extract_blob_refs(data: bytes) -> list[str]:
     """Extract all 32-byte (SHA-256) blob references from a binary chain node.
 
     The encoding is: tag ``0x0a`` (field 1, length-delimited) followed by
@@ -84,7 +84,7 @@ def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
 
     Returns ``(message_dict, [])`` when *data* decodes to a dict with a
     ``role`` field; otherwise ``(None, refs)`` where *refs* are SHA-256 hex
-    ids from :func:`_extract_blob_refs`.  Used by :func:`traverse_blobs` and
+    ids from :func:`extract_blob_refs`.  Used by :func:`traverse_blobs` and
     property tests — keep in sync when the load loop changes.
     """
     try:
@@ -93,7 +93,7 @@ def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
             return msg, []
     except (UnicodeDecodeError, json.JSONDecodeError):
         pass
-    return None, _extract_blob_refs(data)
+    return None, extract_blob_refs(data)
 
 
 def traverse_blobs(db_path: str) -> list[dict]:
