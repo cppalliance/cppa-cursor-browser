@@ -22,18 +22,18 @@ from utils.tool_parser import parse_tool_call as _parse_tool_call
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
-    _build_composer_id_to_workspace_id,
-    _collect_invalid_workspace_ids,
-    _collect_workspace_entries,
+    build_composer_id_to_workspace_id,
+    collect_invalid_workspace_ids,
+    collect_workspace_entries,
     load_code_block_diff_map,
-    _open_global_db,
+    open_global_db,
 )
 from services.workspace_resolver import (
-    _create_project_name_to_workspace_id_map,
-    _create_workspace_path_to_id_map,
-    _determine_project_for_conversation,
-    _get_workspace_display_name,
-    _infer_invalid_workspace_aliases,
+    create_project_name_to_workspace_id_map,
+    create_workspace_path_to_id_map,
+    determine_project_for_conversation,
+    infer_invalid_workspace_aliases,
+    lookup_workspace_display_name,
 )
 
 
@@ -86,11 +86,11 @@ def assemble_workspace_tabs(
     parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
-    workspace_entries = _collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    workspace_entries = collect_workspace_entries(workspace_path)
+    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
+    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
+    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
 
     # Build set of all workspace IDs that share the same folder as workspace_id
     # (handles Cursor creating multiple workspace entries for the same project)
@@ -121,11 +121,11 @@ def assemble_workspace_tabs(
     code_block_diff_map: dict[str, list] = {}
     message_request_context_map: dict[str, list] = {}
 
-    with _open_global_db(workspace_path) as (global_db, _):
+    with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
             return {"error": "Global storage not found"}, 404
 
-        workspace_display_name = _get_workspace_display_name(workspace_path, workspace_id)
+        workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
         def _safe_fetchall(query: str, params: tuple = ()) -> list:
             try:
@@ -215,7 +215,7 @@ def assemble_workspace_tabs(
             " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
         )
 
-        invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+        invalid_workspace_aliases = infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
             project_layouts_map=project_layouts_map,
             project_name_map=project_name_map,
@@ -259,7 +259,7 @@ def assemble_workspace_tabs(
                 cd = composer.raw
 
                 # Determine project
-                pid = _determine_project_for_conversation(
+                pid = determine_project_for_conversation(
                     cd, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
                     workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,

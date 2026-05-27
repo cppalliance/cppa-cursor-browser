@@ -12,8 +12,16 @@ from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import get_cli_chats_path
 
 
-def _get_cli_workspace_tabs(workspace_id: str):
-    """Return tabs for a Cursor CLI project (workspace_id starts with "cli:")."""
+def get_cli_workspace_tabs(workspace_id: str):
+    """Return Flask JSON response with tabs for a Cursor CLI project.
+
+    Args:
+        workspace_id: Workspace id with ``cli:`` prefix (e.g. ``cli:proj-1``).
+
+    Returns:
+        ``(jsonify({...}), status)`` tuple suitable for a Flask route handler.
+        Status is 404 when the project is missing, 500 on unexpected errors.
+    """
     try:
         project_id = workspace_id[4:]
         cli_projects = list_cli_projects(get_cli_chats_path())
@@ -136,3 +144,7 @@ def _get_cli_workspace_tabs(workspace_id: str):
             exc_info=True,
         )
         return jsonify({"error": "Failed to get CLI workspace tabs"}), 500
+
+
+# Backward-compatible alias for tests and legacy imports.
+_get_cli_workspace_tabs = get_cli_workspace_tabs

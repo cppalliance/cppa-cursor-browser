@@ -22,18 +22,20 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from services.workspace_resolver import (
-    _infer_workspace_name_from_context,
-    # Re-exported for back-compat with existing tests that import from api.workspaces
-    # directly (test_invalid_workspace_aliases, test_workspace_assignment_fallback,
-    # test_workspace_name_inference, test_models_wired_at_read_sites).
-    # Production callers should import from services.workspace_resolver instead.
-    _determine_project_for_conversation,  # noqa: F401
-    _infer_invalid_workspace_aliases,  # noqa: F401
-    _get_workspace_display_name,  # noqa: F401
+    determine_project_for_conversation,
+    infer_invalid_workspace_aliases,
+    infer_workspace_name_from_context,
+    lookup_workspace_display_name,
 )
-from services.cli_tabs import _get_cli_workspace_tabs
+from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import assemble_workspace_tabs
+
+# Re-exported for back-compat with tests that import from api.workspaces directly.
+_determine_project_for_conversation = determine_project_for_conversation  # noqa: F401
+_infer_invalid_workspace_aliases = infer_invalid_workspace_aliases  # noqa: F401
+_get_workspace_display_name = lookup_workspace_display_name  # noqa: F401
+_infer_workspace_name_from_context = infer_workspace_name_from_context  # noqa: F401
 
 # Re-exported for tests/test_models_wired_at_read_sites.py — the typed-model
 # spy harness patches `workspaces_mod.Bubble` / `.Composer` / `.Workspace` to
@@ -121,12 +123,12 @@ def get_workspace(workspace_id):
             if derived_name:
                 workspace_name = derived_name
             elif workspace_name == workspace_id:
-                inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+                inferred = infer_workspace_name_from_context(workspace_path, workspace_id)
                 if inferred:
                     workspace_name = inferred
         except Exception as e:
             warn_workspace_json_read(_logger, workspace_id, e)
-            inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+            inferred = infer_workspace_name_from_context(workspace_path, workspace_id)
             if inferred:
                 workspace_name = inferred
 
@@ -150,7 +152,7 @@ def get_workspace(workspace_id):
 @bp.route("/api/workspaces/<workspace_id>/tabs")
 def get_workspace_tabs(workspace_id):
     if workspace_id.startswith("cli:"):
-        return _get_cli_workspace_tabs(workspace_id)
+        return get_cli_workspace_tabs(workspace_id)
     try:
         workspace_path = resolve_workspace_path()
         rules = current_app.config.get("EXCLUSION_RULES") or []

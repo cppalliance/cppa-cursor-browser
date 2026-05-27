@@ -21,15 +21,15 @@ from utils.text_extract import extract_text_from_bubble, slug
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.cursor_md_exporter import cursor_ide_chat_to_markdown
 from services.workspace_db import (
-    _build_composer_id_to_workspace_id,
-    _collect_workspace_entries,
+    build_composer_id_to_workspace_id,
+    collect_workspace_entries,
     load_bubble_map,
     load_code_block_diff_map,
-    _open_global_db,
+    open_global_db,
 )
 from services.workspace_resolver import (
-    _get_workspace_display_name,
-    _create_project_name_to_workspace_id_map,
+    create_project_name_to_workspace_id_map,
+    lookup_workspace_display_name,
 )
 
 bp = Blueprint("export_api", __name__)
@@ -96,15 +96,15 @@ def export_chats():
                 last_export_ms = to_epoch_ms(ts_str)
 
         # ── Workspace scanning via service layer ──────────────────────────────
-        workspace_entries = _collect_workspace_entries(workspace_path)
-        composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
-        project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
+        workspace_entries = collect_workspace_entries(workspace_path)
+        composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+        project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
 
         # Build display-name and slug maps
         ws_id_to_slug: dict[str, str] = {}
         ws_id_to_display_name: dict[str, str] = {}
         for e in workspace_entries:
-            display = _get_workspace_display_name(workspace_path, e["name"])
+            display = lookup_workspace_display_name(workspace_path, e["name"])
             if display != e["name"]:
                 ws_id_to_display_name[e["name"]] = display
                 ws_id_to_slug[e["name"]] = slug(display)
@@ -114,7 +114,7 @@ def export_chats():
         rules = current_app.config.get("EXCLUSION_RULES") or []
 
         # ── Database reading via service layer ────────────────────────────────
-        with _open_global_db(workspace_path) as (global_db, global_db_path):
+        with open_global_db(workspace_path) as (global_db, global_db_path):
             if global_db is None:
                 return jsonify({"error": "Cursor global storage not found"}), 404
 

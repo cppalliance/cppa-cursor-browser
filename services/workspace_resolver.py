@@ -18,12 +18,21 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
-from services.workspace_db import _open_global_db
+from services.workspace_db import open_global_db
 from models import SchemaError, Workspace
 
 
-def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
-    """Return human-readable workspace name; "Other chats" for global, workspace_id if unreadable."""
+def lookup_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
+    """Resolve a display name for a workspace folder from storage.
+
+    Args:
+        workspace_path: Cursor workspace storage root.
+        workspace_id: Workspace folder name, or ``"global"`` for unassigned chats.
+
+    Returns:
+        Human-readable name from ``workspace.json`` when parseable; ``"Other chats"``
+        for ``global``; otherwise ``workspace_id``.
+    """
     if workspace_id == "global":
         return "Other chats"
     wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
@@ -41,8 +50,17 @@ def _get_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
     return workspace_id
 
 
-def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -> str | None:
-    """Infer workspace name from projectLayouts when workspace.json is opaque."""
+def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -> str | None:
+    """Infer workspace name from ``projectLayouts`` when ``workspace.json`` is opaque.
+
+    Args:
+        workspace_path: Cursor workspace storage root.
+        workspace_id: Workspace folder name (not ``"global"``).
+
+    Returns:
+        Most common folder basename from global ``messageRequestContext`` rows,
+        or ``None`` when inference fails.
+    """
     if workspace_id == "global":
         return "Other chats"
 
@@ -77,7 +95,7 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
 
     # Gather folder-name hints from global messageRequestContext.projectLayouts
     counts: dict[str, int] = {}
-    with _open_global_db(workspace_path) as (gconn, _):
+    with open_global_db(workspace_path) as (gconn, _):
         if not gconn:
             return None
         for cid in composer_ids:
@@ -118,10 +136,19 @@ def _infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -
     return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
-def _get_project_from_file_path(
+def get_project_from_file_path(
     file_path: str,
     workspace_entries: list[dict],
 ) -> str | None:
+    """Map a file path to the workspace folder that contains it.
+
+    Args:
+        file_path: Absolute or URI-style file path.
+        workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
+
+    Returns:
+        Workspace folder name with the longest matching root path, or ``None``.
+    """
     normalized_path = normalize_file_path(file_path)
     best_match = None
     best_len = 0
@@ -142,7 +169,15 @@ def _get_project_from_file_path(
     return best_match
 
 
-def _create_project_name_to_workspace_id_map(workspace_entries):
+def create_project_name_to_workspace_id_map(workspace_entries):
+    """Map workspace folder basenames to workspace folder names.
+
+    Args:
+        workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
+
+    Returns:
+        Dict mapping last path segment (folder name) to workspace id.
+    """
     mapping = {}
     for entry in workspace_entries:
         try:
@@ -158,7 +193,15 @@ def _create_project_name_to_workspace_id_map(workspace_entries):
     return mapping
 
 
-def _create_workspace_path_to_id_map(workspace_entries):
+def create_workspace_path_to_id_map(workspace_entries):
+    """Map normalized workspace root paths to workspace folder names.
+
+    Args:
+        workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
+
+    Returns:
+        Dict mapping normalized folder paths to workspace ids.
+    """
     out = {}
     for entry in workspace_entries:
         try:
@@ -171,7 +214,7 @@ def _create_workspace_path_to_id_map(workspace_entries):
     return out
 
 
-def _determine_project_for_conversation(
+def determine_project_for_conversation(
     composer_data: dict,
     composer_id: str,
     project_layouts_map: dict,
@@ -182,6 +225,14 @@ def _determine_project_for_conversation(
     composer_id_to_workspace_id: dict | None = None,
     invalid_workspace_ids: set[str] | None = None,
 ) -> str | None:
+    """Resolve which workspace folder owns a composer conversation.
+
+    Uses per-workspace composer maps, project layouts, file paths in bubbles,
+    and path-segment heuristics in priority order.
+
+    Returns:
+        Workspace folder name, or ``None`` when no project can be determined.
+    """
     # Primary: definitive per-workspace mapping
     if composer_id_to_workspace_id and composer_id in composer_id_to_workspace_id:
         mapped = composer_id_to_workspace_id[composer_id]
@@ -205,7 +256,7 @@ def _determine_project_for_conversation(
     for file_entry in newly:
         uri = file_entry.get("uri") if isinstance(file_entry, dict) else None
         if isinstance(uri, dict) and uri.get("path"):
-            pid = _get_project_from_file_path(uri["path"], workspace_entries)
+            pid = get_project_from_file_path(uri["path"], workspace_entries)
             if pid:
                 return pid
 
@@ -213,7 +264,7 @@ def _determine_project_for_conversation(
     cbd = composer_data.get("codeBlockData")
     if isinstance(cbd, dict):
         for fp in cbd.keys():
-            pid = _get_project_from_file_path(re.sub(r"^file://", "", fp), workspace_entries)
+            pid = get_project_from_file_path(re.sub(r"^file://", "", fp), workspace_entries)
             if pid:
                 return pid
 
@@ -227,19 +278,19 @@ def _determine_project_for_conversation(
             continue
         for fp in (bubble.get("relevantFiles") or []):
             if fp:
-                pid = _get_project_from_file_path(fp, workspace_entries)
+                pid = get_project_from_file_path(fp, workspace_entries)
                 if pid:
                     return pid
         for uri in (bubble.get("attachedFileCodeChunksUris") or []):
             if isinstance(uri, dict) and uri.get("path"):
-                pid = _get_project_from_file_path(uri["path"], workspace_entries)
+                pid = get_project_from_file_path(uri["path"], workspace_entries)
                 if pid:
                     return pid
         for fs_entry in (bubble.get("context", {}).get("fileSelections") or []):
             if isinstance(fs_entry, dict):
                 uri = fs_entry.get("uri")
                 if isinstance(uri, dict) and uri.get("path"):
-                    pid = _get_project_from_file_path(uri["path"], workspace_entries)
+                    pid = get_project_from_file_path(uri["path"], workspace_entries)
                     if pid:
                         return pid
 
@@ -299,7 +350,7 @@ def _determine_project_for_conversation(
     return None
 
 
-def _infer_invalid_workspace_aliases(
+def infer_invalid_workspace_aliases(
     composer_rows: list,
     project_layouts_map: dict,
     project_name_map: dict,
@@ -332,7 +383,7 @@ def _infer_invalid_workspace_aliases(
                 type(cd).__name__,
             )
             continue
-        inferred = _determine_project_for_conversation(
+        inferred = determine_project_for_conversation(
             cd,
             cid,
             project_layouts_map,
@@ -353,3 +404,13 @@ def _infer_invalid_workspace_aliases(
             continue
         aliases[invalid_id] = max(counts.items(), key=lambda kv: kv[1])[0]
     return aliases
+
+
+# Backward-compatible aliases for tests and legacy imports.
+_get_workspace_display_name = lookup_workspace_display_name
+_infer_workspace_name_from_context = infer_workspace_name_from_context
+_get_project_from_file_path = get_project_from_file_path
+_create_project_name_to_workspace_id_map = create_project_name_to_workspace_id_map
+_create_workspace_path_to_id_map = create_workspace_path_to_id_map
+_determine_project_for_conversation = determine_project_for_conversation
+_infer_invalid_workspace_aliases = infer_invalid_workspace_aliases
