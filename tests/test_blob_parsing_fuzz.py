@@ -155,10 +155,7 @@ def _assemble_workspace_bubble(bubble_id: object, value: object) -> dict | None:
     except (json.JSONDecodeError, TypeError, ValueError, UnicodeDecodeError):
         return None
     try:
-        if not isinstance(bubble_id, str):
-            Bubble.from_dict(parsed, bubble_id=bubble_id)  # type: ignore[arg-type]
-            return None
-        return Bubble.from_dict(parsed, bubble_id=bubble_id).raw
+        return Bubble.from_dict(parsed, bubble_id=bubble_id).raw  # type: ignore[arg-type]
     except SchemaError:
         return None
 
