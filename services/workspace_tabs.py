@@ -18,7 +18,7 @@ from utils.path_helpers import (
 )
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
-from utils.tool_parser import parse_tool_call as _parse_tool_call
+from utils.tool_parser import parse_tool_call
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
@@ -342,7 +342,7 @@ def assemble_workspace_tabs(
                     tool_calls = None
                     tfd = raw.get("toolFormerData")
                     if isinstance(tfd, dict):
-                        tool_call = _parse_tool_call(tfd)
+                        tool_call = parse_tool_call(tfd)
                         if isinstance(tool_call, dict):
                             tool_calls = [tool_call]
 

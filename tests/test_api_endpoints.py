@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app import create_app
 from tests._fixture_ids import HAPPY_BUBBLE_ID, HAPPY_COMPOSER_ID, HAPPY_WORKSPACE_ID
-from utils.exclusion_rules import _tokenize_rule
+from utils.exclusion_rules import tokenize_rule
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ def _client_with_rules(rule_lines):
     overrides the config with parsed rules — exercising the same code path
     a real `exclusion-rules.txt` file would.
     """
-    parsed = [_tokenize_rule(line) for line in rule_lines]
+    parsed = [tokenize_rule(line) for line in rule_lines]
     app = create_app()
     app.config["TESTING"] = True
     app.config["EXCLUSION_RULES"] = [r for r in parsed if r]

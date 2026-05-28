@@ -5,7 +5,7 @@ Tests for invalid-workspace alias inference.
 import json
 import unittest
 
-from api.workspaces import _infer_invalid_workspace_aliases
+from services.workspace_resolver import infer_invalid_workspace_aliases
 from utils.path_helpers import normalize_file_path
 
 
@@ -36,7 +36,7 @@ class TestInvalidWorkspaceAliases(unittest.TestCase):
             normalize_file_path(r"d:\_cpp_digest\team-brain"): "team-ws",
         }
 
-        aliases = _infer_invalid_workspace_aliases(
+        aliases = infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
             project_layouts_map=project_layouts_map,
             project_name_map={},
@@ -73,7 +73,7 @@ class TestInvalidWorkspaceAliases(unittest.TestCase):
             normalize_file_path(r"d:\_cpp_digest\team-brain"): "team-ws",
         }
 
-        aliases = _infer_invalid_workspace_aliases(
+        aliases = infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
             project_layouts_map=project_layouts_map,
             project_name_map={},
@@ -104,7 +104,7 @@ class TestInvalidWorkspaceAliases(unittest.TestCase):
             normalize_file_path(r"d:\_cpp_digest\team-brain"): "team-ws",
         }
 
-        aliases = _infer_invalid_workspace_aliases(
+        aliases = infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
             project_layouts_map=project_layouts_map,
             project_name_map={},

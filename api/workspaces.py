@@ -22,20 +22,12 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from services.workspace_resolver import (
-    determine_project_for_conversation,
-    infer_invalid_workspace_aliases,
     infer_workspace_name_from_context,
     lookup_workspace_display_name,
 )
 from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import assemble_workspace_tabs
-
-# Re-exported for back-compat with tests that import from api.workspaces directly.
-_determine_project_for_conversation = determine_project_for_conversation  # noqa: F401
-_infer_invalid_workspace_aliases = infer_invalid_workspace_aliases  # noqa: F401
-_get_workspace_display_name = lookup_workspace_display_name  # noqa: F401
-_infer_workspace_name_from_context = infer_workspace_name_from_context  # noqa: F401
 
 # Re-exported for tests/test_models_wired_at_read_sites.py — the typed-model
 # spy harness patches `workspaces_mod.Bubble` / `.Composer` / `.Workspace` to

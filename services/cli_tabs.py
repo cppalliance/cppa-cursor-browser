@@ -146,7 +146,3 @@ def get_cli_workspace_tabs(workspace_id: str):
             exc_info=True,
         )
         return jsonify({"error": "Failed to get CLI workspace tabs"}), 500
-
-
-# Backward-compatible alias for tests and legacy imports.
-_get_cli_workspace_tabs = get_cli_workspace_tabs

@@ -65,7 +65,7 @@ def resolve_exclusion_rules_path(cli_path: str | None) -> str | None:
     return None
 
 
-def _tokenize_rule(line: str) -> list:
+def tokenize_rule(line: str) -> list:
     """
     Tokenize a rule line into terms and operators.
 
@@ -172,7 +172,7 @@ def load_rules(path: str | None) -> list[list]:
     Load and parse the exclusion rule file at *path*.
 
     Returns a list of tokenized rules (each rule is a list of tokens as
-    produced by :func:`_tokenize_rule`).  Returns an empty list when *path*
+    produced by :func:`tokenize_rule`).  Returns an empty list when *path*
     is ``None``, the file doesn't exist, or the file cannot be read.
     """
     if not path or not os.path.isfile(path):
@@ -184,7 +184,7 @@ def load_rules(path: str | None) -> list[list]:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                tokens = _tokenize_rule(line)
+                tokens = tokenize_rule(line)
                 if tokens:
                     rules.append(tokens)
     except (OSError, UnicodeDecodeError) as e:

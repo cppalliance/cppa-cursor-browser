@@ -240,10 +240,3 @@ def open_global_db(workspace_path: str):
         yield conn, global_db_path
     finally:
         conn.close()
-
-
-# Backward-compatible aliases for tests and legacy imports.
-_collect_workspace_entries = collect_workspace_entries
-_collect_invalid_workspace_ids = collect_invalid_workspace_ids
-_build_composer_id_to_workspace_id = build_composer_id_to_workspace_id
-_open_global_db = open_global_db

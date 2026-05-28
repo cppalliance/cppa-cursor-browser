@@ -404,13 +404,3 @@ def infer_invalid_workspace_aliases(
             continue
         aliases[invalid_id] = max(counts.items(), key=lambda kv: kv[1])[0]
     return aliases
-
-
-# Backward-compatible aliases for tests and legacy imports.
-_get_workspace_display_name = lookup_workspace_display_name
-_infer_workspace_name_from_context = infer_workspace_name_from_context
-_get_project_from_file_path = get_project_from_file_path
-_create_project_name_to_workspace_id_map = create_project_name_to_workspace_id_map
-_create_workspace_path_to_id_map = create_workspace_path_to_id_map
-_determine_project_for_conversation = determine_project_for_conversation
-_infer_invalid_workspace_aliases = infer_invalid_workspace_aliases
