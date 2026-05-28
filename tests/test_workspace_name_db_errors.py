@@ -13,7 +13,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from services.workspace_resolver import _infer_workspace_name_from_context
+from services.workspace_resolver import infer_workspace_name_from_context
 
 
 def _seed_local_state(workspace_path: str, workspace_id: str) -> None:
@@ -37,7 +37,7 @@ def _seed_local_state(workspace_path: str, workspace_id: str) -> None:
 class TestGlobalQueryErrorSwallowed(unittest.TestCase):
     def test_corrupt_cursordiskkv_does_not_propagate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            # _open_global_db reads ``<workspace_path>/../globalStorage`` — so
+            # open_global_db reads ``<workspace_path>/../globalStorage`` — so
             # workspaceStorage must be a child of tmp, not tmp itself.
             ws_root = os.path.join(tmp, "workspaceStorage")
             os.makedirs(ws_root, exist_ok=True)
@@ -48,14 +48,14 @@ class TestGlobalQueryErrorSwallowed(unittest.TestCase):
             gdb = os.path.join(global_dir, "state.vscdb")
             conn = sqlite3.connect(gdb)
             # Schema deliberately missing cursorDiskKV so the LIKE query
-            # inside _infer_workspace_name_from_context raises
+            # inside infer_workspace_name_from_context raises
             # sqlite3.OperationalError("no such table").
             conn.execute("CREATE TABLE other (x INTEGER)")
             conn.commit()
             conn.close()
 
             try:
-                result = _infer_workspace_name_from_context(ws_root, "ws-corrupt")
+                result = infer_workspace_name_from_context(ws_root, "ws-corrupt")
             except sqlite3.Error:
                 self.fail("query error should be caught, not propagated")
             self.assertIsNone(result)
@@ -78,7 +78,7 @@ class TestLocalQueryErrorSwallowed(unittest.TestCase):
             sqlite3.connect(os.path.join(global_dir, "state.vscdb")).close()
 
             try:
-                result = _infer_workspace_name_from_context(ws_root, "ws-bad-local")
+                result = infer_workspace_name_from_context(ws_root, "ws-bad-local")
             except sqlite3.Error:
                 self.fail("local query error should be caught, not propagated")
             self.assertIsNone(result)

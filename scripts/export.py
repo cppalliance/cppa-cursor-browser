@@ -39,7 +39,6 @@ from utils.text_extract import (  # noqa: E402
     extract_text_from_bubble,
     slug,
 )
-from utils.tool_parser import parse_tool_call  # noqa: E402
 from utils.workspace_path import (  # noqa: E402
     get_cli_chats_path,
     resolve_workspace_path,
@@ -55,26 +54,26 @@ from utils.cursor_md_exporter import (  # noqa: E402
 )
 from models import ExportEntry, SchemaError  # noqa: E402
 from services.workspace_db import (  # noqa: E402
-    _build_composer_id_to_workspace_id,
-    _collect_invalid_workspace_ids,
-    _collect_workspace_entries,
+    build_composer_id_to_workspace_id,
+    collect_invalid_workspace_ids,
+    collect_workspace_entries,
     load_bubble_map,
     load_code_block_diff_map,
     load_project_layouts_map,
-    _open_global_db,
+    open_global_db,
 )
 from services.workspace_resolver import (  # noqa: E402
-    _determine_project_for_conversation,
-    _get_workspace_display_name,
-    _infer_invalid_workspace_aliases,
-    _create_project_name_to_workspace_id_map,
-    _create_workspace_path_to_id_map,
+    create_project_name_to_workspace_id_map,
+    create_workspace_path_to_id_map,
+    determine_project_for_conversation,
+    infer_invalid_workspace_aliases,
+    lookup_workspace_display_name,
 )
 
 _logger = logging.getLogger(__name__)
 
 
-def _configure_cli_logging() -> None:
+def configure_cli_logging() -> None:
     """Route log records to stderr so stdout stays for export progress lines."""
     root = logging.getLogger()
     if root.handlers:
@@ -86,7 +85,7 @@ def _configure_cli_logging() -> None:
     )
 
 
-def _json_dump_safe(value) -> str:
+def json_dump_safe(value) -> str:
     """Best-effort JSON serialization for exclusion matching."""
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -94,7 +93,7 @@ def _json_dump_safe(value) -> str:
         return str(value) if value is not None else ""
 
 
-def _load_manifest_entries(manifest_path: str) -> dict:
+def load_manifest_entries(manifest_path: str) -> dict:
     """Load manifest entries keyed by log_id from a JSONL file."""
     existing: dict = {}
     if not os.path.isfile(manifest_path):
@@ -117,7 +116,7 @@ def _load_manifest_entries(manifest_path: str) -> dict:
     return existing
 
 
-def _write_manifest_entries(manifest_path: str, entries_by_id: dict):
+def write_manifest_entries(manifest_path: str, entries_by_id: dict):
     """Write manifest entries to JSONL."""
     os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -177,7 +176,7 @@ def parse_args():
 
 
 def main():
-    _configure_cli_logging()
+    configure_cli_logging()
     opts = parse_args()
     since = opts["since"]
     out_dir = os.path.abspath(opts["out_dir"])
@@ -197,15 +196,18 @@ def main():
             ts = st.get("lastExportTime")
             if ts:
                 last_export = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            _logger.warning(
+                "Could not read last export timestamp; defaulting to full export: %s",
+                e,
+            )
 
     # ── Workspace scanning via service layer ──────────────────────────────────
-    workspace_entries = _collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    workspace_entries = collect_workspace_entries(workspace_path)
+    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
+    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
+    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
 
     # Build display-name and slug maps from workspace entries.
     # Entries whose workspace.json cannot be resolved are omitted so the
@@ -213,11 +215,11 @@ def main():
     # behaviour where unresolvable workspaces were skipped.
     workspace_id_to_display_name: dict[str, str] = {}
     workspace_id_to_slug: dict[str, str] = {}
-    for e in workspace_entries:
-        display = _get_workspace_display_name(workspace_path, e["name"])
-        if display != e["name"]:  # successfully resolved a human-readable name
-            workspace_id_to_display_name[e["name"]] = display
-            workspace_id_to_slug[e["name"]] = slug(display)
+    for entry in workspace_entries:
+        display = lookup_workspace_display_name(workspace_path, entry["name"])
+        if display != entry["name"]:  # successfully resolved a human-readable name
+            workspace_id_to_display_name[entry["name"]] = display
+            workspace_id_to_slug[entry["name"]] = slug(display)
 
     # ── Database reading via service layer ────────────────────────────────────
     project_layouts_map: dict = {}
@@ -226,7 +228,7 @@ def main():
     ide_composer_rows: list = []
     invalid_workspace_aliases: dict = {}
 
-    with _open_global_db(workspace_path) as (global_db, global_db_path):
+    with open_global_db(workspace_path) as (global_db, global_db_path):
         if global_db is None:
             _logger.info(
                 "Cursor IDE global storage not found at %s — skipping IDE chats.",
@@ -245,7 +247,7 @@ def main():
             except sqlite3.Error:
                 pass
 
-            invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+            invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=ide_composer_rows,
                 project_layouts_map=project_layouts_map,
                 project_name_map=project_name_map,
@@ -266,19 +268,28 @@ def main():
         composer_id = row["key"].split(":")[1]
         try:
             cd = json.loads(row["value"])
-        except Exception:
+        except (json.JSONDecodeError, ValueError) as parse_err:
+            _logger.debug(
+                "Skipping corrupt composerData row %s: %s",
+                composer_id,
+                parse_err,
+            )
             continue
 
         headers = cd.get("fullConversationHeadersOnly") or []
         if not headers:
             continue
 
-        updated_at = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0
+        updated_at = to_epoch_ms(cd.get("lastUpdatedAt"))
+        if updated_at is None:
+            updated_at = to_epoch_ms(cd.get("createdAt"))
+        if updated_at is None:
+            updated_at = 0
         if since == "last" and updated_at <= last_export:
             continue
 
         # Workspace assignment via service layer
-        pid = _determine_project_for_conversation(
+        pid = determine_project_for_conversation(
             cd, composer_id, project_layouts_map,
             project_name_map, workspace_path_map,
             workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
@@ -307,9 +318,9 @@ def main():
             text = extract_text_from_bubble(b)
             if text:
                 bubble_texts.append(text)
-            bubble_meta_parts.append(_json_dump_safe(b))
+            bubble_meta_parts.append(json_dump_safe(b))
 
-        code_diff_parts = [_json_dump_safe(d) for d in code_block_diff_map.get(composer_id, [])]
+        code_diff_parts = [json_dump_safe(d) for d in code_block_diff_map.get(composer_id, [])]
         searchable = build_searchable_text(
             project_name=ws_display_name,
             chat_title=title,
@@ -320,7 +331,7 @@ def main():
                     bubble_texts
                     + bubble_meta_parts
                     + code_diff_parts
-                    + [_json_dump_safe(model_config), _json_dump_safe(cd)]
+                    + [json_dump_safe(model_config), json_dump_safe(cd)]
                 )
                 if p
             ),
@@ -484,7 +495,7 @@ def main():
                 f.write(entry["content"])
 
         manifest_path = os.path.join(out_dir, "manifest.jsonl")
-        existing = _load_manifest_entries(manifest_path)
+        existing = load_manifest_entries(manifest_path)
         for entry in exported:
             existing[entry["id"]] = {
                 "log_id": entry["id"],
@@ -494,10 +505,10 @@ def main():
                 "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
         if existing:
-            _write_manifest_entries(manifest_path, existing)
+            write_manifest_entries(manifest_path, existing)
 
         global_manifest_path = os.path.join(state_dir, "manifest.jsonl")
-        global_existing = _load_manifest_entries(global_manifest_path)
+        global_existing = load_manifest_entries(global_manifest_path)
         for entry in exported:
             global_existing[entry["id"]] = {
                 "log_id": entry["id"],
@@ -507,7 +518,7 @@ def main():
                 "updated_at": datetime.fromtimestamp(entry["updatedAt"] / 1000).isoformat() if entry["updatedAt"] else datetime.now().isoformat(),
             }
         if global_existing:
-            _write_manifest_entries(global_manifest_path, global_existing)
+            write_manifest_entries(global_manifest_path, global_existing)
         print(f"Exported {count} chat(s) to {out_dir}")
 
     state = {

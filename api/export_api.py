@@ -13,7 +13,9 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, jsonify, request
+
+from api.flask_config import exclusion_rules
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -21,15 +23,15 @@ from utils.text_extract import extract_text_from_bubble, slug
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.cursor_md_exporter import cursor_ide_chat_to_markdown
 from services.workspace_db import (
-    _build_composer_id_to_workspace_id,
-    _collect_workspace_entries,
+    build_composer_id_to_workspace_id,
+    collect_workspace_entries,
     load_bubble_map,
     load_code_block_diff_map,
-    _open_global_db,
+    open_global_db,
 )
 from services.workspace_resolver import (
-    _get_workspace_display_name,
-    _create_project_name_to_workspace_id_map,
+    create_project_name_to_workspace_id_map,
+    lookup_workspace_display_name,
 )
 
 bp = Blueprint("export_api", __name__)
@@ -47,8 +49,12 @@ def _get_export_state() -> dict:
         try:
             with open(state_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            _logger.warning(
+                "Could not read export state from %s: %s",
+                state_path,
+                e,
+            )
     return {}
 
 
@@ -96,25 +102,25 @@ def export_chats():
                 last_export_ms = to_epoch_ms(ts_str)
 
         # ── Workspace scanning via service layer ──────────────────────────────
-        workspace_entries = _collect_workspace_entries(workspace_path)
-        composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
-        project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
+        workspace_entries = collect_workspace_entries(workspace_path)
+        composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+        project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
 
         # Build display-name and slug maps
         ws_id_to_slug: dict[str, str] = {}
         ws_id_to_display_name: dict[str, str] = {}
         for e in workspace_entries:
-            display = _get_workspace_display_name(workspace_path, e["name"])
+            display = lookup_workspace_display_name(workspace_path, e["name"])
             if display != e["name"]:
                 ws_id_to_display_name[e["name"]] = display
                 ws_id_to_slug[e["name"]] = slug(display)
 
         today = datetime.now().strftime("%Y-%m-%d")
         exported = []
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = exclusion_rules()
 
         # ── Database reading via service layer ────────────────────────────────
-        with _open_global_db(workspace_path) as (global_db, global_db_path):
+        with open_global_db(workspace_path) as (global_db, _):
             if global_db is None:
                 return jsonify({"error": "Cursor global storage not found"}), 404
 
@@ -138,7 +144,11 @@ def export_chats():
                     if not headers:
                         continue
 
-                    updated_at_ms = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0
+                    updated_at_ms = to_epoch_ms(cd.get("lastUpdatedAt"))
+                    if updated_at_ms is None:
+                        updated_at_ms = to_epoch_ms(cd.get("createdAt"))
+                    if updated_at_ms is None:
+                        updated_at_ms = 0
                     if since == "last" and updated_at_ms and updated_at_ms <= last_export_ms:
                         continue
 

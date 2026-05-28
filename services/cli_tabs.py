@@ -3,17 +3,28 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from flask import current_app, jsonify
-
-_logger = logging.getLogger(__name__)
+from flask import jsonify
 
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import get_cli_chats_path
 
+_logger = logging.getLogger(__name__)
 
-def _get_cli_workspace_tabs(workspace_id: str):
-    """Return tabs for a Cursor CLI project (workspace_id starts with "cli:")."""
+
+def get_cli_workspace_tabs(workspace_id: str, rules: list):
+    """Return Flask JSON response with tabs for a Cursor CLI project.
+
+    Args:
+        workspace_id: Workspace id with ``cli:`` prefix (e.g. ``cli:proj-1``).
+        rules: Exclusion rule token lists (same as :func:`services.workspace_tabs.assemble_workspace_tabs`).
+
+    Returns:
+        ``flask.Response | tuple[flask.Response, int]`` suitable for a Flask route
+        handler. Success returns ``jsonify({"tabs": ...})`` (plain ``Response``,
+        status 200). Errors return ``(jsonify({"error": ...}), status)`` with
+        404 when the project is missing or 500 on unexpected failure.
+    """
     try:
         project_id = workspace_id[4:]
         cli_projects = list_cli_projects(get_cli_chats_path())
@@ -27,7 +38,6 @@ def _get_cli_workspace_tabs(workspace_id: str):
         if project is None:
             return jsonify({"error": "CLI project not found"}), 404
 
-        rules = current_app.config.get("EXCLUSION_RULES") or []
         ws_name = project.get("workspace_name") or project_id[:12]
         sessions = project.get("sessions") or []
         if not isinstance(sessions, list):

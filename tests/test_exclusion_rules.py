@@ -111,8 +111,8 @@ class TestExclusionMatching(unittest.TestCase):
     def test_unclosed_quote_treated_as_word(self):
         """An unclosed double-quote falls back to a plain word/substring match."""
         # Tokenizer produces ("word", "unclosed phrase") for `"unclosed phrase`
-        from utils.exclusion_rules import _tokenize_rule
-        tokens = _tokenize_rule('"unclosed phrase')
+        from utils.exclusion_rules import tokenize_rule
+        tokens = tokenize_rule('"unclosed phrase')
         self.assertEqual(len(tokens), 1)
         self.assertEqual(tokens[0][0], "word")
         rules = [tokens]
@@ -121,14 +121,14 @@ class TestExclusionMatching(unittest.TestCase):
 
     def test_quoted_logical_operator_is_literal(self):
         """A quoted "AND" or "OR" is a literal term, not a boolean operator."""
-        from utils.exclusion_rules import _tokenize_rule
+        from utils.exclusion_rules import tokenize_rule
         # "AND" (quoted) should produce a phrase token, not the "AND" string
-        tokens_and = _tokenize_rule('"AND"')
+        tokens_and = tokenize_rule('"AND"')
         self.assertEqual(len(tokens_and), 1)
         self.assertIsInstance(tokens_and[0], tuple)
         self.assertEqual(tokens_and[0][1], "AND")
 
-        tokens_or = _tokenize_rule('"OR"')
+        tokens_or = tokenize_rule('"OR"')
         self.assertEqual(len(tokens_or), 1)
         self.assertIsInstance(tokens_or[0], tuple)
         self.assertEqual(tokens_or[0][1], "OR")

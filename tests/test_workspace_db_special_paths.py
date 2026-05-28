@@ -13,8 +13,8 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from services.workspace_db import (
-    _build_composer_id_to_workspace_id,
-    _open_global_db,
+    build_composer_id_to_workspace_id,
+    open_global_db,
 )
 
 
@@ -57,13 +57,13 @@ class TestSqliteUriEncoding(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = self._build_fixture(tmp)
             entries = [{"name": "ws-with spaces", "workspaceJsonPath": ""}]
-            mapping = _build_composer_id_to_workspace_id(ws_root, entries)
+            mapping = build_composer_id_to_workspace_id(ws_root, entries)
             self.assertEqual(mapping, {"cid-space": "ws-with spaces"})
 
     def test_open_global_db_handles_spaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = self._build_fixture(tmp)
-            with _open_global_db(ws_root) as (conn, path):
+            with open_global_db(ws_root) as (conn, _):
                 self.assertIsNotNone(conn)
                 row = conn.execute(
                     "SELECT key FROM cursorDiskKV WHERE key = 'composerData:probe'"
@@ -95,7 +95,7 @@ class TestMalformedAllComposersEntry(unittest.TestCase):
             conn.close()
 
             entries = [{"name": "ws-mixed", "workspaceJsonPath": ""}]
-            mapping = _build_composer_id_to_workspace_id(tmp, entries)
+            mapping = build_composer_id_to_workspace_id(tmp, entries)
             self.assertEqual(mapping, {"cid-real": "ws-mixed"})
 
 
@@ -112,7 +112,7 @@ class TestOpenGlobalDbConnectFailure(unittest.TestCase):
                 "services.workspace_db.sqlite3.connect",
                 side_effect=sqlite3.OperationalError("simulated open failure"),
             ):
-                with _open_global_db(ws_root) as (conn, path):
+                with open_global_db(ws_root) as (conn, path):
                     self.assertIsNone(conn)
                     self.assertTrue(path.endswith("state.vscdb"))
 
@@ -137,7 +137,7 @@ class TestBuildComposerMappingCorruptDb(unittest.TestCase):
                 {"name": "ws-ok", "workspaceJsonPath": ""},
                 {"name": "ws-bad", "workspaceJsonPath": ""},
             ]
-            mapping = _build_composer_id_to_workspace_id(tmp, entries)
+            mapping = build_composer_id_to_workspace_id(tmp, entries)
             self.assertEqual(mapping, {"cid-ok": "ws-ok"})
 
 

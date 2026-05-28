@@ -201,10 +201,10 @@ class TestParseToolCallNonDictReturn(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = _seed_workspace_with_tool_former(tmp)
-            # Force _parse_tool_call to return None — the previous code
+            # Force parse_tool_call to return None — the previous code
             # would have stored ``tool_calls = [None]`` and crashed in the
             # display-text fallback with ``NoneType.get``.
-            with patch("services.workspace_tabs._parse_tool_call", return_value=None):
+            with patch("services.workspace_tabs.parse_tool_call", return_value=None):
                 with app.test_request_context("/api/workspaces/global/tabs"):
                     payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
 

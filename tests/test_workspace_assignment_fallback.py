@@ -4,7 +4,7 @@ Tests for conversation-to-workspace assignment fallback behavior.
 
 import unittest
 
-from api.workspaces import _determine_project_for_conversation
+from services.workspace_resolver import determine_project_for_conversation
 from utils.path_helpers import normalize_file_path
 
 
@@ -24,7 +24,7 @@ class TestWorkspaceAssignmentFallback(unittest.TestCase):
         composer_id_to_workspace_id = {"cmp-123": "broken-ws"}
         invalid_workspace_ids = {"broken-ws"}
 
-        assigned = _determine_project_for_conversation(
+        assigned = determine_project_for_conversation(
             composer_data=composer_data,
             composer_id=composer_id,
             project_layouts_map=project_layouts_map,

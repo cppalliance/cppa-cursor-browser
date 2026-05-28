@@ -216,13 +216,14 @@ class TestWorkspaceWiredAtReadSite(unittest.TestCase):
             )
 
     def test_workspace_display_name_calls_workspace_from_dict(self):
+        from services.workspace_resolver import lookup_workspace_display_name
         import api.workspaces as workspaces_mod
         with patch.object(workspaces_mod.Workspace, "from_dict", wraps=workspaces_mod.Workspace.from_dict) as spy:
-            name = workspaces_mod._get_workspace_display_name(self.workspace_path, WORKSPACE_ID)
+            name = lookup_workspace_display_name(self.workspace_path, WORKSPACE_ID)
             self.assertIsInstance(name, str)
             self.assertGreaterEqual(
                 spy.call_count, 1,
-                msg="Workspace.from_dict was never called from _get_workspace_display_name",
+                msg="Workspace.from_dict was never called from lookup_workspace_display_name",
             )
 
     def test_list_composers_sort_reads_typed_last_updated_at_not_raw_dict(self):
@@ -412,12 +413,12 @@ class TestExportEntryWiredAtReadSite(unittest.TestCase):
                 export_mod.ExportEntry, "from_dict",
                 wraps=export_mod.ExportEntry.from_dict,
             ) as spy:
-                entries = export_mod._load_manifest_entries(manifest_path)
+                entries = export_mod.load_manifest_entries(manifest_path)
                 self.assertIn("log-wired", entries)
                 self.assertGreaterEqual(
                     spy.call_count, 1,
                     msg="ExportEntry.from_dict was never called from "
-                        "_load_manifest_entries — model is defined but not "
+                        "load_manifest_entries — model is defined but not "
                         "wired at the production read site",
                 )
 
@@ -444,7 +445,7 @@ class TestExportEntryWiredAtReadSite(unittest.TestCase):
                 }) + "\n")
 
             from scripts import export as export_mod
-            entries = export_mod._load_manifest_entries(manifest_path)
+            entries = export_mod.load_manifest_entries(manifest_path)
             self.assertNotIn("legacy", entries, msg="pre-PR-30 entries must be skipped")
             self.assertIn("modern", entries, msg="new-schema entries must still load")
 

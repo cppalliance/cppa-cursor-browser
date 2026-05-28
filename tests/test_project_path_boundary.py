@@ -10,7 +10,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from services.workspace_resolver import _get_project_from_file_path
+from services.workspace_resolver import get_project_from_file_path
 
 
 def _write_workspace_json(parent: str, name: str, folder: str) -> dict:
@@ -37,7 +37,7 @@ class TestPrefixCollision(unittest.TestCase):
 
             file_in_app2 = os.path.join(app2, "src", "main.py")
             self.assertEqual(
-                _get_project_from_file_path(file_in_app2, entries),
+                get_project_from_file_path(file_in_app2, entries),
                 "ws-app2",
             )
 
@@ -48,7 +48,7 @@ class TestPrefixCollision(unittest.TestCase):
             entries = [_write_workspace_json(tmp, "ws-app", app)]
 
             unrelated = os.path.join(tmp, "elsewhere", "file.py")
-            self.assertIsNone(_get_project_from_file_path(unrelated, entries))
+            self.assertIsNone(get_project_from_file_path(unrelated, entries))
 
     def test_file_inside_workspace_still_matches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -57,7 +57,7 @@ class TestPrefixCollision(unittest.TestCase):
             entries = [_write_workspace_json(tmp, "ws-app", app)]
 
             inside = os.path.join(app, "src", "main.py")
-            self.assertEqual(_get_project_from_file_path(inside, entries), "ws-app")
+            self.assertEqual(get_project_from_file_path(inside, entries), "ws-app")
 
 
 if __name__ == "__main__":

@@ -19,10 +19,10 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 from utils.cli_chat_reader import (
-    _content_to_text,
+    content_to_text,
     extract_blob_refs,
-    _extract_tool_calls,
-    _strip_user_info,
+    extract_tool_calls,
+    strip_user_info,
     aggregate_session_stats,
     extract_workspace_path,
     iter_sessions,
@@ -106,53 +106,53 @@ class TestExtractBlobRefs(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _content_to_text
+# content_to_text
 # ---------------------------------------------------------------------------
 
 class TestContentToText(unittest.TestCase):
     def test_string_passthrough(self):
-        self.assertEqual(_content_to_text("hello"), "hello")
+        self.assertEqual(content_to_text("hello"), "hello")
 
     def test_list_with_text_parts(self):
         content = [{"type": "text", "text": "foo"}, {"type": "text", "text": "bar"}]
-        result = _content_to_text(content)
+        result = content_to_text(content)
         self.assertIn("foo", result)
         self.assertIn("bar", result)
 
     def test_list_with_tool_result(self):
         content = [{"type": "tool-result", "result": "output here"}]
-        self.assertIn("output here", _content_to_text(content))
+        self.assertIn("output here", content_to_text(content))
 
     def test_empty_list(self):
-        self.assertEqual(_content_to_text([]), "")
+        self.assertEqual(content_to_text([]), "")
 
     def test_unknown_type_ignored(self):
         content = [{"type": "image", "url": "http://example.com/img.png"}]
-        self.assertEqual(_content_to_text(content), "")
+        self.assertEqual(content_to_text(content), "")
 
     def test_non_string_non_list(self):
-        self.assertEqual(_content_to_text(None), "")
-        self.assertEqual(_content_to_text(42), "")
+        self.assertEqual(content_to_text(None), "")
+        self.assertEqual(content_to_text(42), "")
 
 
 # ---------------------------------------------------------------------------
-# _extract_tool_calls
+# extract_tool_calls
 # ---------------------------------------------------------------------------
 
 class TestExtractToolCalls(unittest.TestCase):
     def test_non_list_returns_empty(self):
-        self.assertEqual(_extract_tool_calls("text"), [])
-        self.assertEqual(_extract_tool_calls(None), [])
+        self.assertEqual(extract_tool_calls("text"), [])
+        self.assertEqual(extract_tool_calls(None), [])
 
     def test_list_without_tool_call_type(self):
         content = [{"type": "text", "text": "hello"}]
-        self.assertEqual(_extract_tool_calls(content), [])
+        self.assertEqual(extract_tool_calls(content), [])
 
     def test_single_tool_call(self):
         content = [
             {"type": "tool-call", "toolName": "Shell", "args": {"command": "ls"}, "toolCallId": "tc-1"}
         ]
-        calls = _extract_tool_calls(content)
+        calls = extract_tool_calls(content)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["name"], "Shell")
         self.assertEqual(calls[0]["args"], {"command": "ls"})
@@ -163,7 +163,7 @@ class TestExtractToolCalls(unittest.TestCase):
             {"type": "text", "text": "I will run a command."},
             {"type": "tool-call", "toolName": "Grep", "args": {"pattern": "foo"}, "toolCallId": "tc-2"},
         ]
-        calls = _extract_tool_calls(content)
+        calls = extract_tool_calls(content)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["name"], "Grep")
 
@@ -203,22 +203,22 @@ class TestExtractWorkspacePath(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _strip_user_info
+# strip_user_info
 # ---------------------------------------------------------------------------
 
 class TestStripUserInfo(unittest.TestCase):
     def test_extracts_user_query_tag(self):
         text = "<user_info>some preamble</user_info>\n<user_query>my actual question</user_query>"
-        self.assertEqual(_strip_user_info(text), "my actual question")
+        self.assertEqual(strip_user_info(text), "my actual question")
 
     def test_strips_user_info_block_when_no_query_tag(self):
         text = "<user_info>preamble stuff</user_info>\nActual message here."
-        result = _strip_user_info(text)
+        result = strip_user_info(text)
         self.assertNotIn("<user_info>", result)
         self.assertIn("Actual message here.", result)
 
     def test_passthrough_when_no_user_info(self):
-        self.assertEqual(_strip_user_info("plain text"), "plain text")
+        self.assertEqual(strip_user_info("plain text"), "plain text")
 
 
 # ---------------------------------------------------------------------------

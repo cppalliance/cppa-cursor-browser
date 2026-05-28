@@ -15,7 +15,7 @@ from utils.workspace_descriptor import read_json_file
 
 # ── Global-DB KV loaders ────────────────────────────────────────────────────
 # Each function accepts an already-opened sqlite3.Connection (row_factory must
-# be set to sqlite3.Row by the caller, as _open_global_db does) and returns
+# be set to sqlite3.Row by the caller, as open_global_db does) and returns
 # a populated dict.  sqlite3.Error is caught internally so a missing or
 # corrupt table cannot propagate to callers.
 
@@ -113,8 +113,16 @@ def load_code_block_diff_map(global_db) -> dict[str, list]:
     return diff_map
 
 
-def _collect_workspace_entries(workspace_path: str) -> list[dict]:
-    """Scan workspace directory and return entries with workspace.json."""
+def collect_workspace_entries(workspace_path: str) -> list[dict]:
+    """Scan workspace directory and return entries with workspace.json.
+
+    Args:
+        workspace_path: Cursor workspace storage root (parent of per-workspace folders).
+
+    Returns:
+        List of dicts with keys ``name`` (folder id) and ``workspaceJsonPath``.
+        Returns an empty list if ``workspace_path`` is missing or unreadable.
+    """
     entries = []
     try:
         for name in os.listdir(workspace_path):
@@ -131,8 +139,15 @@ def _collect_workspace_entries(workspace_path: str) -> list[dict]:
     return entries
 
 
-def _collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
-    """Workspace IDs whose descriptors have no resolvable folder paths."""
+def collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
+    """Return workspace IDs whose descriptors have no resolvable folder paths.
+
+    Args:
+        workspace_entries: Output of :func:`collect_workspace_entries`.
+
+    Returns:
+        Set of workspace folder names that cannot be mapped to a folder path.
+    """
     invalid: set[str] = set()
     for entry in workspace_entries:
         try:
@@ -149,8 +164,19 @@ def _collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
     return invalid
 
 
-def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: list) -> dict:
-    """Build mapping: composerId -> workspaceId from per-workspace state.vscdb."""
+def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: list) -> dict:
+    """Build mapping from composer ID to workspace folder name.
+
+    Reads ``composer.composerData`` from each workspace's ``state.vscdb``.
+    Skips workspaces with missing databases or malformed JSON.
+
+    Args:
+        workspace_path: Cursor workspace storage root.
+        workspace_entries: Output of :func:`collect_workspace_entries`.
+
+    Returns:
+        Dict mapping ``composerId`` strings to workspace folder names.
+    """
     mapping: dict = {}
     for entry in workspace_entries:
         db_path = os.path.join(workspace_path, entry["name"], "state.vscdb")
@@ -187,8 +213,17 @@ def _build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: l
 
 
 @contextmanager
-def _open_global_db(workspace_path: str):
-    """Yield (conn, path) for the global-storage SQLite db (read-only); (None, path) if the file is missing."""
+def open_global_db(workspace_path: str):
+    """Open Cursor global storage SQLite database read-only.
+
+    Args:
+        workspace_path: Cursor workspace storage root.
+
+    Yields:
+        ``(conn, path)`` where ``conn`` is a :class:`sqlite3.Connection` with
+        ``row_factory=sqlite3.Row``, or ``None`` if the database file is missing
+        or cannot be opened. ``path`` is always the resolved global DB path.
+    """
     global_db_path = os.path.join(workspace_path, "..", "globalStorage", "state.vscdb")
     global_db_path = os.path.normpath(global_db_path)
     if not os.path.isfile(global_db_path):

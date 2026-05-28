@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from api.workspaces import _infer_workspace_name_from_context
+from services.workspace_resolver import infer_workspace_name_from_context
 
 
 class TestWorkspaceNameInference(unittest.TestCase):
@@ -77,7 +77,7 @@ class TestWorkspaceNameInference(unittest.TestCase):
             gconn.close()
 
             self.assertEqual(
-                _infer_workspace_name_from_context(workspace_path, ws_id),
+                infer_workspace_name_from_context(workspace_path, ws_id),
                 "boostbacklog",
             )
 

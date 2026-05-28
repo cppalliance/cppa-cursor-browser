@@ -11,7 +11,9 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, jsonify
+
+from api.flask_config import exclusion_rules
 
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.cli_chat_reader import list_cli_projects
@@ -22,16 +24,10 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from services.workspace_resolver import (
-    _infer_workspace_name_from_context,
-    # Re-exported for back-compat with existing tests that import from api.workspaces
-    # directly (test_invalid_workspace_aliases, test_workspace_assignment_fallback,
-    # test_workspace_name_inference, test_models_wired_at_read_sites).
-    # Production callers should import from services.workspace_resolver instead.
-    _determine_project_for_conversation,  # noqa: F401
-    _infer_invalid_workspace_aliases,  # noqa: F401
-    _get_workspace_display_name,  # noqa: F401
+    infer_workspace_name_from_context,
+    lookup_workspace_display_name,
 )
-from services.cli_tabs import _get_cli_workspace_tabs
+from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import assemble_workspace_tabs
 
@@ -54,7 +50,7 @@ _logger = logging.getLogger(__name__)
 def list_workspaces():
     try:
         workspace_path = resolve_workspace_path()
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = exclusion_rules()
         projects, warnings = list_workspace_projects(workspace_path, rules)
         payload: dict = {"projects": projects}
         if warnings:
@@ -121,12 +117,12 @@ def get_workspace(workspace_id):
             if derived_name:
                 workspace_name = derived_name
             elif workspace_name == workspace_id:
-                inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+                inferred = infer_workspace_name_from_context(workspace_path, workspace_id)
                 if inferred:
                     workspace_name = inferred
         except Exception as e:
             warn_workspace_json_read(_logger, workspace_id, e)
-            inferred = _infer_workspace_name_from_context(workspace_path, workspace_id)
+            inferred = infer_workspace_name_from_context(workspace_path, workspace_id)
             if inferred:
                 workspace_name = inferred
 
@@ -150,10 +146,14 @@ def get_workspace(workspace_id):
 @bp.route("/api/workspaces/<workspace_id>/tabs")
 def get_workspace_tabs(workspace_id):
     if workspace_id.startswith("cli:"):
-        return _get_cli_workspace_tabs(workspace_id)
+        try:
+            return get_cli_workspace_tabs(workspace_id, exclusion_rules())
+        except Exception:
+            _logger.exception("Failed to get CLI workspace tabs")
+            return jsonify({"error": "Failed to get workspace tabs"}), 500
     try:
         workspace_path = resolve_workspace_path()
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = exclusion_rules()
         payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
         return jsonify(payload), status
     except Exception:

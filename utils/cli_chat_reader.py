@@ -175,7 +175,7 @@ _USER_QUERY_RE = re.compile(r"<user_query>(.*?)</user_query>", re.DOTALL)
 _WORKSPACE_PATH_RE = re.compile(r"Workspace Path:\s*(.+?)(?:\n|$)")
 
 
-def _content_to_text(content) -> str:
+def content_to_text(content) -> str:
     """Flatten Vercel AI SDK content (string or typed-part array) to plain text."""
     if isinstance(content, str):
         return content
@@ -192,7 +192,7 @@ def _content_to_text(content) -> str:
     return ""
 
 
-def _extract_tool_calls(content) -> list[dict]:
+def extract_tool_calls(content) -> list[dict]:
     """Extract tool-call parts from assistant message content."""
     if not isinstance(content, list):
         return []
@@ -214,14 +214,14 @@ def extract_workspace_path(messages: list[dict]) -> str | None:
         if msg.get("role") != "user":
             continue
         content = msg.get("content", "")
-        text = content if isinstance(content, str) else _content_to_text(content)
+        text = content if isinstance(content, str) else content_to_text(content)
         m = _WORKSPACE_PATH_RE.search(text)
         if m:
             return m.group(1).strip()
     return None
 
 
-def _strip_user_info(text: str) -> str:
+def strip_user_info(text: str) -> str:
     """Remove the ``<user_info>`` preamble and return only the query text.
 
     If a ``<user_query>`` tag is present, its content is returned directly.
@@ -287,18 +287,18 @@ def messages_to_bubbles(messages: list[dict], created_at_ms: int) -> list[dict]:
         seq += 1
 
         if role == "user":
-            text = _content_to_text(content) if isinstance(content, list) else (content or "")
+            text = content_to_text(content) if isinstance(content, list) else (content or "")
             # Skip pure preamble messages (contain <user_info> but no <user_query>).
             if "<user_info>" in text and "<user_query>" not in text:
                 continue
-            text = _strip_user_info(text)
+            text = strip_user_info(text)
             if not text:
                 continue
             bubbles.append({"type": "user", "text": text, "timestamp": ts})
 
         elif role == "assistant":
-            text = _content_to_text(content) if isinstance(content, list) else (content or "")
-            tool_calls = _extract_tool_calls(content)
+            text = content_to_text(content) if isinstance(content, list) else (content or "")
+            tool_calls = extract_tool_calls(content)
 
             if not text.strip() and not tool_calls:
                 continue

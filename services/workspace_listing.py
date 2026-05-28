@@ -20,37 +20,50 @@ from utils.workspace_descriptor import read_json_file
 from utils.workspace_path import get_cli_chats_path
 from models import Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
-    _build_composer_id_to_workspace_id,
-    _collect_invalid_workspace_ids,
-    _collect_workspace_entries,
+    build_composer_id_to_workspace_id,
+    collect_invalid_workspace_ids,
+    collect_workspace_entries,
     load_bubble_map,
     load_project_layouts_map,
-    _open_global_db,
+    open_global_db,
 )
 from services.workspace_resolver import (
-    _create_project_name_to_workspace_id_map,
-    _create_workspace_path_to_id_map,
-    _determine_project_for_conversation,
-    _get_workspace_display_name,
-    _infer_invalid_workspace_aliases,
-    _infer_workspace_name_from_context,
+    create_project_name_to_workspace_id_map,
+    create_workspace_path_to_id_map,
+    determine_project_for_conversation,
+    infer_invalid_workspace_aliases,
+    infer_workspace_name_from_context,
+    lookup_workspace_display_name,
 )
 
 
 def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict], list[dict]]:
-    """Return (projects, warnings) for GET /api/workspaces."""
-    parse_warnings = ParseWarningCollector()
-    workspace_entries = _collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = _collect_invalid_workspace_ids(workspace_entries)
+    """List workspace projects for GET /api/workspaces.
 
-    project_name_map = _create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = _create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = _build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    Args:
+        workspace_path: Cursor ``workspaceStorage`` root.
+        rules: Exclusion rule token lists from :func:`utils.exclusion_rules.load_rules`.
+
+    Returns:
+        ``(projects, warnings)``. Each project dict has ``id``, ``name``,
+        ``path`` (``workspace.json`` path), ``conversationCount``,
+        ``lastModified`` (ISO 8601), and optional ``aliasIds`` / ``source``
+        (``"cli"`` for Cursor CLI projects). *warnings* is a list of structured
+        parse-error dicts (``type``, ``count``, ``detail``) from
+        :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
+    """
+    parse_warnings = ParseWarningCollector()
+    workspace_entries = collect_workspace_entries(workspace_path)
+    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
+
+    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
+    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
 
     conversation_map: dict[str, list] = {}
 
     # closing semantics now baked into the context manager (issue #17).
-    with _open_global_db(workspace_path) as (global_db, _):
+    with open_global_db(workspace_path) as (global_db, _):
         if global_db:
             def _safe_fetchall(query: str, params: tuple = ()) -> list:
                 try:
@@ -65,7 +78,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                 project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
                 bubble_map: dict[str, dict] = load_bubble_map(global_db)
 
-                invalid_workspace_aliases = _infer_invalid_workspace_aliases(
+                invalid_workspace_aliases = infer_invalid_workspace_aliases(
                     composer_rows=composer_rows,
                     project_layouts_map=project_layouts_map,
                     project_name_map=project_name_map,
@@ -107,7 +120,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                         continue
                     cd = composer.raw
                     try:
-                        pid = _determine_project_for_conversation(
+                        pid = determine_project_for_conversation(
                             cd, cid, project_layouts_map,
                             project_name_map, workspace_path_map,
                             workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
@@ -192,9 +205,9 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
             )
             mtime = 0
 
-        workspace_name = _get_workspace_display_name(workspace_path, primary["name"])
+        workspace_name = lookup_workspace_display_name(workspace_path, primary["name"])
         if workspace_name == primary["name"]:
-            inferred = _infer_workspace_name_from_context(workspace_path, primary["name"])
+            inferred = infer_workspace_name_from_context(workspace_path, primary["name"])
             workspace_name = inferred or f"Project {primary['name'][:8]}"
 
         if is_excluded_by_rules(rules, workspace_name):
