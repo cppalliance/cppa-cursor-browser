@@ -249,7 +249,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 **Pre-1.0 stability (current):** The project is at `0.x.y`. During this phase:
 
 - **Minor version bumps (`0.x` → `0.x+1`)** may include breaking changes to the HTTP API, CLI flags, or exported file formats. Consumers of the `/api/*` endpoints or the `cursor-chat-export` CLI should review the changelog before upgrading.
-- **Patch version bumps (`0.x.y` → `0.x.y+1`)** are backward-compatible bug fixes only.
+- **Patch version bumps (`0.x.y` → `0.x.y+1`)** are backward-compatible bug fixes only. Critical security fixes may break compatibility at any version with appropriate changelog notation.
 
 **What constitutes a breaking change:**
 
@@ -258,7 +258,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 | HTTP API | Removing or renaming an endpoint; changing the JSON schema of a response in a non-additive way |
 | CLI (`cursor-chat-export`) | Removing or renaming a flag; changing default output structure |
 | Export formats | Removing YAML frontmatter fields; changing the zip directory layout |
-| Python package | Removing a public symbol from an importable module |
+
+Internal Python modules are not a semver-governed library API for external importers.
 
 Adding new optional fields to JSON responses, adding new CLI flags with sensible defaults, or adding new export-format sections are *not* considered breaking.
 
