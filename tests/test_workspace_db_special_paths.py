@@ -63,7 +63,7 @@ class TestSqliteUriEncoding(unittest.TestCase):
     def test_open_global_db_handles_spaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = self._build_fixture(tmp)
-            with open_global_db(ws_root) as (conn, path):
+            with open_global_db(ws_root) as (conn, _):
                 self.assertIsNotNone(conn)
                 row = conn.execute(
                     "SELECT key FROM cursorDiskKV WHERE key = 'composerData:probe'"
