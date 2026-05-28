@@ -240,6 +240,30 @@ The desktop app uses [pywebview](https://pywebview.flowrl.com/) to render the Fl
 - **Frontend:** Vanilla HTML/CSS/JS (no npm, no build step)
 - **PDF:** fpdf2
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJOR.MINOR.PATCH`).
+
+**Pre-1.0 stability (current):** The project is at `0.x.y`. During this phase:
+
+- **Minor version bumps (`0.x` → `0.x+1`)** may include breaking changes to the HTTP API, CLI flags, or exported file formats. Consumers of the `/api/*` endpoints or the `cursor-chat-export` CLI should review the changelog before upgrading.
+- **Patch version bumps (`0.x.y` → `0.x.y+1`)** are backward-compatible bug fixes only.
+
+**What constitutes a breaking change:**
+
+| Surface | Breaking examples |
+|---|---|
+| HTTP API | Removing or renaming an endpoint; changing the JSON schema of a response in a non-additive way |
+| CLI (`cursor-chat-export`) | Removing or renaming a flag; changing default output structure |
+| Export formats | Removing YAML frontmatter fields; changing the zip directory layout |
+| Python package | Removing a public symbol from an importable module |
+
+Adding new optional fields to JSON responses, adding new CLI flags with sensible defaults, or adding new export-format sections are *not* considered breaking.
+
+A complete history of changes is maintained in **[CHANGELOG.md](CHANGELOG.md)** following the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+
+When an API surface is scheduled for removal, follow the process in **[docs/API_DEPRECATION.md](docs/API_DEPRECATION.md)** (response headers, changelog entries, minimum notice period).
+
 ## License
 
 This project is licensed under the [Boost Software License 1.0](https://www.boost.org/LICENSE_1_0.txt).
