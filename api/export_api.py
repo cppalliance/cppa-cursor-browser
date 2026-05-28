@@ -13,7 +13,9 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, jsonify, request
+
+from api.flask_config import exclusion_rules
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -115,7 +117,7 @@ def export_chats():
 
         today = datetime.now().strftime("%Y-%m-%d")
         exported = []
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = exclusion_rules()
 
         # ── Database reading via service layer ────────────────────────────────
         with open_global_db(workspace_path) as (global_db, _):
@@ -142,7 +144,11 @@ def export_chats():
                     if not headers:
                         continue
 
-                    updated_at_ms = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0
+                    updated_at_ms = to_epoch_ms(cd.get("lastUpdatedAt"))
+                    if updated_at_ms is None:
+                        updated_at_ms = to_epoch_ms(cd.get("createdAt"))
+                    if updated_at_ms is None:
+                        updated_at_ms = 0
                     if since == "last" and updated_at_ms and updated_at_ms <= last_export_ms:
                         continue
 

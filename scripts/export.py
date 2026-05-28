@@ -268,14 +268,23 @@ def main():
         composer_id = row["key"].split(":")[1]
         try:
             cd = json.loads(row["value"])
-        except Exception:
+        except (json.JSONDecodeError, ValueError) as parse_err:
+            _logger.debug(
+                "Skipping corrupt composerData row %s: %s",
+                composer_id,
+                parse_err,
+            )
             continue
 
         headers = cd.get("fullConversationHeadersOnly") or []
         if not headers:
             continue
 
-        updated_at = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0
+        updated_at = to_epoch_ms(cd.get("lastUpdatedAt"))
+        if updated_at is None:
+            updated_at = to_epoch_ms(cd.get("createdAt"))
+        if updated_at is None:
+            updated_at = 0
         if since == "last" and updated_at <= last_export:
             continue
 

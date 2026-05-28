@@ -59,7 +59,7 @@ class TestMessagesToBubblesFailureIsolation(unittest.TestCase):
              patch("services.cli_tabs.list_cli_projects", return_value=[project]), \
              patch("services.cli_tabs.traverse_blobs", side_effect=fake_traverse_blobs), \
              patch("services.cli_tabs.messages_to_bubbles", side_effect=fake_messages_to_bubbles):
-            response = get_cli_workspace_tabs("cli:proj-1")
+            response = get_cli_workspace_tabs("cli:proj-1", [])
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -86,7 +86,7 @@ class TestMalformedSessionRecordSkipped(unittest.TestCase):
              patch("services.cli_tabs.list_cli_projects", return_value=[project]), \
              patch("services.cli_tabs.traverse_blobs", side_effect=fake_traverse_blobs), \
              patch("services.cli_tabs.messages_to_bubbles", side_effect=fake_messages_to_bubbles):
-            response = get_cli_workspace_tabs("cli:proj-1")
+            response = get_cli_workspace_tabs("cli:proj-1", [])
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -113,7 +113,7 @@ class TestMalformedCliProjectsListLookup(unittest.TestCase):
              patch("services.cli_tabs.list_cli_projects", return_value=garbage_then_real), \
              patch("services.cli_tabs.traverse_blobs", side_effect=fake_traverse_blobs), \
              patch("services.cli_tabs.messages_to_bubbles", side_effect=fake_messages_to_bubbles):
-            response = get_cli_workspace_tabs("cli:proj-1")
+            response = get_cli_workspace_tabs("cli:proj-1", [])
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -131,7 +131,7 @@ class TestMalformedCliProjectsListLookup(unittest.TestCase):
              patch("services.cli_tabs.traverse_blobs", return_value=["ok"]), \
              patch("services.cli_tabs.messages_to_bubbles",
                    return_value=[{"type": "user", "text": "hi", "timestamp": 1}]):
-            response = get_cli_workspace_tabs("cli:proj-min")
+            response = get_cli_workspace_tabs("cli:proj-min", [])
 
         self.assertEqual(response.status_code, 200)
         # Tab still rendered — ws_name fallback (project_id[:12]) used for searchable text.
@@ -144,7 +144,7 @@ class TestMalformedCliProjectsListLookup(unittest.TestCase):
 
         with app.test_request_context("/api/workspaces/cli:proj-empty/tabs"), \
              patch("services.cli_tabs.list_cli_projects", return_value=[project]):
-            response = get_cli_workspace_tabs("cli:proj-empty")
+            response = get_cli_workspace_tabs("cli:proj-empty", [])
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"tabs": []})

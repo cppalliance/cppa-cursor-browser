@@ -111,7 +111,12 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
                     continue
                 try:
                     ctx = json.loads(row[0])
-                except Exception:
+                except (json.JSONDecodeError, ValueError) as e:
+                    _logger.debug(
+                        "Skipping malformed messageRequestContext for %s: %s",
+                        cid,
+                        e,
+                    )
                     continue
                 layouts = ctx.get("projectLayouts")
                 if not isinstance(layouts, list):
@@ -121,7 +126,12 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
                     if isinstance(layout, str):
                         try:
                             obj = json.loads(layout)
-                        except Exception:
+                        except (json.JSONDecodeError, ValueError) as e:
+                            _logger.debug(
+                                "Skipping malformed projectLayout for %s: %s",
+                                cid,
+                                e,
+                            )
                             obj = None
                     elif isinstance(layout, dict):
                         obj = layout
