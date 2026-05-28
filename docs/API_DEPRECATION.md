@@ -13,7 +13,7 @@ When an endpoint, parameter, response field, or CLI flag is scheduled for remova
 1. **CHANGELOG** — Add an entry under `### Deprecated` naming the surface, its replacement (if any), and the planned removal version.
 2. **Response headers** — Deprecated HTTP endpoints and parameters emit a `Deprecation` header on every affected response (see [Header format](#header-format)).
 3. **Server log** — Route handlers log `logging.warning()` with the deprecated symbol and recommended replacement.
-4. **Removal** — Remove no earlier than **one minor version** after the deprecation was announced (e.g. deprecated in `1.2.0`, removable from `1.4.0`). Document under `### Removed` in the changelog.
+4. **Removal** — Remove no earlier than **one minor version** after the deprecation was announced (e.g. deprecated in `1.2.0`, removable from `1.3.0`). Document under `### Removed` in the changelog.
 
 ## Header format
 
