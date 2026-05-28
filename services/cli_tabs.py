@@ -19,8 +19,10 @@ def get_cli_workspace_tabs(workspace_id: str):
         workspace_id: Workspace id with ``cli:`` prefix (e.g. ``cli:proj-1``).
 
     Returns:
-        ``(jsonify({...}), status)`` tuple suitable for a Flask route handler.
-        Status is 404 when the project is missing, 500 on unexpected errors.
+        ``flask.Response | tuple[flask.Response, int]`` suitable for a Flask route
+        handler. Success returns ``jsonify({"tabs": ...})`` (plain ``Response``,
+        status 200). Errors return ``(jsonify({"error": ...}), status)`` with
+        404 when the project is missing or 500 on unexpected failure.
     """
     try:
         project_id = workspace_id[4:]

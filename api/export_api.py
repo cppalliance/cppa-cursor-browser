@@ -114,7 +114,7 @@ def export_chats():
         rules = current_app.config.get("EXCLUSION_RULES") or []
 
         # ── Database reading via service layer ────────────────────────────────
-        with open_global_db(workspace_path) as (global_db, global_db_path):
+        with open_global_db(workspace_path) as (global_db, _):
             if global_db is None:
                 return jsonify({"error": "Cursor global storage not found"}), 404
 
