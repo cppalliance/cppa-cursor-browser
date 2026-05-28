@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional exclusion rules for sensitive projects and chats (#1, #2)
 - Full-text search with workspace and log-type filters (#63)
 - Hypothesis property-based tests for blob and bubble parsing (#71, #81)
-- PDF export endpoint coverage in CI (#72, #82)
+- PDF export endpoint coverage in CI (#72)
 
 ### Changed
 - Extract shared `from_dict` validation helpers for model classes, reducing duplication (#70, #80)
@@ -36,6 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add incomplete-result signaling on parse failure so callers can distinguish partial vs. complete data (#67, #78)
 - Replace `print()` error output with structured logging throughout (#68, #77)
 - Replace silent `except Exception: pass` with structured logging in workspace and bubble load paths (#66, #76)
-- Rename `_`-prefixed internal functions to public names to satisfy strict linters (#82)
+- Decouple API handlers from private `_`-prefixed service internals (#73)
 
 [Unreleased]: https://github.com/cppalliance/cppa-cursor-browser/commits/HEAD
