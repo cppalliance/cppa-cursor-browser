@@ -196,7 +196,7 @@ def main():
             ts = st.get("lastExportTime")
             if ts:
                 last_export = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, OSError) as e:
             _logger.warning(
                 "Could not read last export timestamp; defaulting to full export: %s",
                 e,
