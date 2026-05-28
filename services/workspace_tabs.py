@@ -82,7 +82,20 @@ def assemble_workspace_tabs(
     workspace_path: str,
     rules: list,
 ) -> tuple[dict, int]:
-    """Build (payload, status) for GET /api/workspaces/<id>/tabs; status=404 if global storage is missing."""
+    """Build tabs payload for GET /api/workspaces/<id>/tabs (IDE workspaces).
+
+    Args:
+        workspace_id: Workspace folder name, or ``"global"`` for unassigned chats.
+        workspace_path: Cursor ``workspaceStorage`` root.
+        rules: Exclusion rule token lists from :func:`utils.exclusion_rules.load_rules`.
+
+    Returns:
+        ``(payload, status)``. On success (``200``), *payload* contains ``tabs``
+        (list of tab dicts with ``id``, ``title``, ``timestamp``, ``bubbles``,
+        optional ``metadata`` / ``codeBlockDiffs``) and optional ``warnings``
+        when parse failures were skipped. On failure (``404``), *payload* is
+        ``{"error": "Global storage not found"}``.
+    """
     parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
@@ -359,7 +372,12 @@ def assemble_workspace_tabs(
 
                     # Context window
                     ctx_window = raw.get("contextWindowStatusAtCreation") or {}
-                    ctx_pct = ctx_window.get("percentageRemainingFloat") or ctx_window.get("percentageRemaining")
+                    ctx_pct = None
+                    if isinstance(ctx_window, dict):
+                        if ctx_window.get("percentageRemainingFloat") is not None:
+                            ctx_pct = ctx_window.get("percentageRemainingFloat")
+                        elif ctx_window.get("percentageRemaining") is not None:
+                            ctx_pct = ctx_window.get("percentageRemaining")
 
                     # Display text fallbacks
                     display_text = full_text.strip()

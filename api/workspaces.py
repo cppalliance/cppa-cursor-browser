@@ -40,6 +40,11 @@ bp = Blueprint("workspaces", __name__)
 _logger = logging.getLogger(__name__)
 
 
+def _exclusion_rules() -> list:
+    """Return loaded exclusion rules from app config (empty list when unset)."""
+    return current_app.config.get("EXCLUSION_RULES") or []
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces
 # ---------------------------------------------------------------------------
@@ -48,7 +53,7 @@ _logger = logging.getLogger(__name__)
 def list_workspaces():
     try:
         workspace_path = resolve_workspace_path()
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = _exclusion_rules()
         projects, warnings = list_workspace_projects(workspace_path, rules)
         payload: dict = {"projects": projects}
         if warnings:
@@ -144,10 +149,14 @@ def get_workspace(workspace_id):
 @bp.route("/api/workspaces/<workspace_id>/tabs")
 def get_workspace_tabs(workspace_id):
     if workspace_id.startswith("cli:"):
-        return get_cli_workspace_tabs(workspace_id)
+        try:
+            return get_cli_workspace_tabs(workspace_id)
+        except Exception:
+            _logger.exception("Failed to get CLI workspace tabs")
+            return jsonify({"error": "Failed to get workspace tabs"}), 500
     try:
         workspace_path = resolve_workspace_path()
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = _exclusion_rules()
         payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
         return jsonify(payload), status
     except Exception:

@@ -39,7 +39,6 @@ from utils.text_extract import (  # noqa: E402
     extract_text_from_bubble,
     slug,
 )
-from utils.tool_parser import parse_tool_call  # noqa: E402
 from utils.workspace_path import (  # noqa: E402
     get_cli_chats_path,
     resolve_workspace_path,
@@ -197,8 +196,11 @@ def main():
             ts = st.get("lastExportTime")
             if ts:
                 last_export = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning(
+                "Could not read last export timestamp; defaulting to full export: %s",
+                e,
+            )
 
     # ── Workspace scanning via service layer ──────────────────────────────────
     workspace_entries = collect_workspace_entries(workspace_path)

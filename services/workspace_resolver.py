@@ -227,8 +227,18 @@ def determine_project_for_conversation(
 ) -> str | None:
     """Resolve which workspace folder owns a composer conversation.
 
-    Uses per-workspace composer maps, project layouts, file paths in bubbles,
-    and path-segment heuristics in priority order.
+    Args:
+        composer_data: Parsed ``composerData`` JSON for *composer_id*.
+        composer_id: Composer UUID from the global DB key.
+        project_layouts_map: ``{composer_id: [root_path, ...]}`` from global KV.
+        project_name_to_workspace_id: Basename-to-workspace-folder map.
+        workspace_path_to_id: Normalized root path to workspace folder map.
+        workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
+        bubble_map: ``{bubble_id: bubble_dict}`` from global KV.
+        composer_id_to_workspace_id: Definitive per-workspace composer map; when
+            ``None``, layout and path heuristics are used without this shortcut.
+        invalid_workspace_ids: Workspace folders marked invalid; mapped IDs in
+            this set are ignored when using *composer_id_to_workspace_id*.
 
     Returns:
         Workspace folder name, or ``None`` when no project can be determined.
@@ -360,7 +370,27 @@ def infer_invalid_workspace_aliases(
     composer_id_to_ws: dict,
     invalid_workspace_ids: set[str],
 ) -> dict[str, str]:
-    """Majority-vote each invalid workspace ID to its most likely valid replacement."""
+    """Map invalid workspace IDs to valid replacements by majority vote.
+
+    For each composer assigned to an *invalid_workspace_ids* entry, calls
+    :func:`determine_project_for_conversation` without the definitive composer map
+    and counts votes for inferred valid workspace folders.
+
+    Args:
+        composer_rows: Global ``composerData:*`` SQLite rows.
+        project_layouts_map: Layout map passed to :func:`determine_project_for_conversation`.
+        project_name_map: Basename map for path resolution.
+        workspace_path_map: Normalized path map for path resolution.
+        workspace_entries: Workspace folder entries from storage scan.
+        bubble_map: Bubble KV map for path resolution.
+        composer_id_to_ws: Composer-to-workspace map (may point at invalid IDs).
+        invalid_workspace_ids: Workspace folder names to reassign.
+
+    Returns:
+        ``{invalid_id: replacement_id}`` for IDs with at least one vote. Ties
+        break by choosing the replacement with the highest vote count (first
+        max in iteration order). Returns ``{}`` when no invalid ID receives votes.
+    """
     votes: dict[str, dict[str, int]] = {}
     for row in composer_rows:
         cid = row["key"].split(":")[1]

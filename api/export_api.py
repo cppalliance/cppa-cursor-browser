@@ -47,8 +47,12 @@ def _get_export_state() -> dict:
         try:
             with open(state_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            _logger.warning(
+                "Could not read export state from %s: %s",
+                state_path,
+                e,
+            )
     return {}
 
 

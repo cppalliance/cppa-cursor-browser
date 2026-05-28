@@ -38,7 +38,20 @@ from services.workspace_resolver import (
 
 
 def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict], list[dict]]:
-    """Return (projects, warnings) for GET /api/workspaces."""
+    """List workspace projects for GET /api/workspaces.
+
+    Args:
+        workspace_path: Cursor ``workspaceStorage`` root.
+        rules: Exclusion rule token lists from :func:`utils.exclusion_rules.load_rules`.
+
+    Returns:
+        ``(projects, warnings)``. Each project dict has ``id``, ``name``,
+        ``path`` (``workspace.json`` path), ``conversationCount``,
+        ``lastModified`` (ISO 8601), and optional ``aliasIds`` / ``source``
+        (``"cli"`` for Cursor CLI projects). *warnings* is a list of structured
+        parse-error dicts (``type``, ``count``, ``detail``) from
+        :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
+    """
     parse_warnings = ParseWarningCollector()
     workspace_entries = collect_workspace_entries(workspace_path)
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
