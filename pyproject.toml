@@ -80,6 +80,7 @@ include = [
     "requirements.txt",
     "README.md",
     "docs/",
+    "CHANGELOG.md",
     "DEPLOYMENT.md",
     "LICENSE",
     "cursor-browser.spec",
