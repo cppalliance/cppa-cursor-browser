@@ -8,22 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Hypothesis property-based tests for blob and bubble parsing (#71, #82)
-- PDF export endpoint coverage in CI (#72, #82)
-
-### Changed
-- Extract shared `from_dict` validation helpers for model classes, reducing duplication (#70, #80)
-- Enable mypy `strict-optional` and fix nullability gaps across the codebase (#69, #79)
-
-### Fixed
-- Add incomplete-result signaling on parse failure so callers can distinguish partial vs. complete data (#67, #78)
-- Replace `print()` error output with structured logging throughout (#68, #77)
-- Replace silent `except Exception: pass` with structured logging in workspace and bubble load paths (#66, #76)
-- Rename `_`-prefixed internal functions to public names to satisfy strict linters (#82)
-
-## [0.1.0] - 2026-05-21
-
-### Added
 - **Web UI** — browse and search all Cursor AI workspaces; conversation view with syntax-highlighted code blocks, dark/light mode, and bookmarkable chat URLs (#63)
 - **Export formats** — one-click export of chats as Markdown, HTML, PDF, JSON, and CSV from the web UI (#63)
 - **CLI export** (`cursor-chat-export` / `scripts/export.py`) — zip archive or individual Markdown files with YAML frontmatter; incremental mode (`--since last`) preserves state across runs (#63, #42, #61)
@@ -34,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Python packaging infrastructure** (`pyproject.toml` with hatchling, bounded dependency pins, `requirements-lock.txt`, Dependabot) (#45, #47, #49, #53)
 - Optional exclusion rules for sensitive projects and chats (#1, #2)
 - Full-text search with workspace and log-type filters (#63)
+- Hypothesis property-based tests for blob and bubble parsing (#71, #81)
+- PDF export endpoint coverage in CI (#72, #82)
+
+### Changed
+- Extract shared `from_dict` validation helpers for model classes, reducing duplication (#70, #80)
+- Enable mypy `strict-optional` and fix nullability gaps across the codebase (#69, #79)
 
 ### Fixed
 - Path traversal and symlink-escape protection on `/api/set-workspace` (#15, #22)
@@ -43,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skip NULL bubble rows in workspace tabs loader (#50, #52)
 - Thread-unsafe `_workspace_path_override` race condition (#43, #54)
 - Normalise Windows-style paths on non-Windows hosts (#8)
+- Add incomplete-result signaling on parse failure so callers can distinguish partial vs. complete data (#67, #78)
+- Replace `print()` error output with structured logging throughout (#68, #77)
+- Replace silent `except Exception: pass` with structured logging in workspace and bubble load paths (#66, #76)
+- Rename `_`-prefixed internal functions to public names to satisfy strict linters (#82)
 
-[Unreleased]: https://github.com/cppalliance/cppa-cursor-browser/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/cppalliance/cppa-cursor-browser/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cppalliance/cppa-cursor-browser/commits/HEAD
