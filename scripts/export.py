@@ -215,11 +215,11 @@ def main():
     # behaviour where unresolvable workspaces were skipped.
     workspace_id_to_display_name: dict[str, str] = {}
     workspace_id_to_slug: dict[str, str] = {}
-    for e in workspace_entries:
-        display = lookup_workspace_display_name(workspace_path, e["name"])
-        if display != e["name"]:  # successfully resolved a human-readable name
-            workspace_id_to_display_name[e["name"]] = display
-            workspace_id_to_slug[e["name"]] = slug(display)
+    for entry in workspace_entries:
+        display = lookup_workspace_display_name(workspace_path, entry["name"])
+        if display != entry["name"]:  # successfully resolved a human-readable name
+            workspace_id_to_display_name[entry["name"]] = display
+            workspace_id_to_slug[entry["name"]] = slug(display)
 
     # ── Database reading via service layer ────────────────────────────────────
     project_layouts_map: dict = {}
