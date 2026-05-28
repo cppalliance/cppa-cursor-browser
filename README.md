@@ -242,6 +242,8 @@ The desktop app uses [pywebview](https://pywebview.flowrl.com/) to render the Fl
 
 ## Versioning
 
+> **Merge note:** The full policy and `CHANGELOG.md` ship in [PR #85](https://github.com/cppalliance/cppa-cursor-browser/pull/85) (#74). Land that PR with or before this one to avoid duplicate or dead links.
+
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJOR.MINOR.PATCH`).
 
 **Pre-1.0 stability (current):** The project is at `0.x.y`. During this phase:
@@ -260,7 +262,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 
 Adding new optional fields to JSON responses, adding new CLI flags with sensible defaults, or adding new export-format sections are *not* considered breaking.
 
-A complete history of changes is maintained in **[CHANGELOG.md](CHANGELOG.md)** following the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+Notable changes will be documented in **[CHANGELOG.md](CHANGELOG.md)** following the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format (see #74 / PR #85).
 
 When an API surface is scheduled for removal, follow the process in **[docs/API_DEPRECATION.md](docs/API_DEPRECATION.md)** (response headers, changelog entries, minimum notice period).
 
