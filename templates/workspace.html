@@ -39,17 +39,17 @@
     <p class="text-sm text-muted" id="convo-count"></p>
   </div>
 
-  <div id="loading" class="loading">
-    <div class="spinner"></div>
-    <p>Loading conversations...</p>
-  </div>
-
-  <!-- Content grid -->
-  <div id="content-grid" class="workspace-grid" style="display:none">
-    <div class="sidebar" id="sidebar"></div>
-    <div class="main-content" id="main-content">
-      <div class="card" style="padding:2rem;text-align:center">
-        <p class="text-muted">No conversation selected</p>
+  <!-- Content grid — always in layout so column widths never collapse -->
+  <div id="content-grid" class="workspace-grid">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-loading loading-center">
+        <div class="spinner" style="width:1.25rem;height:1.25rem;border-width:2px"></div>
+      </div>
+    </div>
+    <div class="main-content is-loading" id="main-content">
+      <div class="loading-center">
+        <div class="spinner"></div>
+        <p>Loading conversations…</p>
       </div>
     </div>
   </div>
@@ -78,8 +78,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('project-hash').textContent = WORKSPACE_ID;
     }
 
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('content-grid').style.display = 'grid';
     document.getElementById('convo-count').textContent = `${allTabs.length} conversations`;
 
     renderSidebar();
@@ -92,7 +90,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       selectTab(allTabs[0].id);
     }
   } catch (e) {
-    document.getElementById('loading').innerHTML = '<p class="text-danger">Failed to load workspace.</p>';
+    const main = document.getElementById('main-content');
+    main.classList.remove('is-loading');
+    main.innerHTML =
+      '<div class="card" style="padding:2rem;text-align:center"><p class="text-danger">Failed to load workspace.</p></div>';
+    document.getElementById('sidebar').innerHTML = '';
   }
 });
 
@@ -143,8 +145,10 @@ async function selectTab(id) {
     selectedTab = summary;
     tabCache[id] = summary;
   } else {
-    document.getElementById('main-content').innerHTML =
-      '<div class="card" style="padding:2rem;text-align:center"><div class="spinner"></div><p>Loading conversation…</p></div>';
+    const main = document.getElementById('main-content');
+    main.classList.add('is-loading');
+    main.innerHTML =
+      '<div class="loading-center" style="min-height:60vh"><div class="spinner"></div><p>Loading conversation…</p></div>';
     try {
       const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/tabs/${id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -154,7 +158,9 @@ async function selectTab(id) {
       tabCache[id] = data.tab;
       selectedTab = data.tab;
     } catch (e) {
-      document.getElementById('main-content').innerHTML =
+      const main = document.getElementById('main-content');
+      main.classList.remove('is-loading');
+      main.innerHTML =
         `<div class="card" style="padding:2rem;text-align:center"><p class="text-danger">Failed to load conversation: ${escapeHtml(e.message)}</p></div>`;
       return;
     }
@@ -170,6 +176,7 @@ async function selectTab(id) {
 
 function renderChat(tab) {
   const main = document.getElementById('main-content');
+  main.classList.remove('is-loading');
   const bubbles = (tab.bubbles || []).filter(b => b.text && b.text.trim());
 
   let html = `<div class="card" style="padding:1.5rem">
