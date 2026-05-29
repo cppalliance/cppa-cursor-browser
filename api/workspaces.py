@@ -50,12 +50,18 @@ _logger = logging.getLogger(__name__)
 # GET /api/workspaces
 # ---------------------------------------------------------------------------
 
+def _request_nocache() -> bool:
+    return request.args.get("nocache") in ("1", "true")
+
+
 @bp.route("/api/workspaces")
 def list_workspaces():
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
-        projects, warnings = list_workspace_projects(workspace_path, rules)
+        projects, warnings = list_workspace_projects(
+            workspace_path, rules, nocache=_request_nocache(),
+        )
         payload: dict = {"projects": projects}
         if warnings:
             payload["warnings"] = warnings
@@ -160,7 +166,9 @@ def get_workspace_tabs(workspace_id):
         rules = exclusion_rules()
         summary = request.args.get("summary") in ("1", "true")
         if summary:
-            payload, status = list_workspace_tab_summaries(workspace_id, workspace_path, rules)
+            payload, status = list_workspace_tab_summaries(
+                workspace_id, workspace_path, rules, nocache=_request_nocache(),
+            )
         else:
             payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
         return jsonify(payload), status

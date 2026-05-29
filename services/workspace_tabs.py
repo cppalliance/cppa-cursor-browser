@@ -21,17 +21,27 @@ from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from services.summary_cache import (
+    fingerprint_workspace_storage,
+    get_cached_tab_summaries,
+    nocache_enabled,
+    set_cached_tab_summaries,
+)
 from services.workspace_db import (
-    build_composer_id_to_workspace_id,
+    COMPOSER_ROWS_WITH_HEADERS_SQL,
+    build_composer_id_to_workspace_id_cached,
     collect_invalid_workspace_ids,
     collect_workspace_entries,
+    global_storage_db_path,
     load_bubbles_for_composer,
     load_code_block_diff_map,
     load_code_block_diffs_for_composer,
     load_message_request_context_for_composer,
+    load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
 )
+from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
     create_project_name_to_workspace_id_map,
     create_workspace_path_to_id_map,
@@ -425,6 +435,8 @@ def list_workspace_tab_summaries(
     workspace_id: str,
     workspace_path: str,
     rules: list,
+    *,
+    nocache: bool = False,
 ) -> tuple[dict, int]:
     """Return summary tab list for GET /api/workspaces/<id>/tabs?summary=1.
 
@@ -443,14 +455,46 @@ def list_workspace_tab_summaries(
         ``(payload, status)`` — same envelope as :func:`assemble_workspace_tabs`
         but ``tabs`` entries carry no ``bubbles`` field.
     """
+    workspace_entries = collect_workspace_entries(workspace_path)
+    gdb = global_storage_db_path(workspace_path)
+    cli_path = get_cli_chats_path()
+    fingerprint = fingerprint_workspace_storage(
+        workspace_path,
+        workspace_entries,
+        global_db_path=gdb if os.path.isfile(gdb) else None,
+        rules=rules,
+        cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        cached = get_cached_tab_summaries(fingerprint, workspace_id)
+        if cached is not None:
+            return cached
+
+    payload, status = _build_workspace_tab_summaries_uncached(
+        workspace_id, workspace_path, rules, workspace_entries, nocache=nocache,
+    )
+    if status == 200 and not nocache_enabled(request_nocache=nocache):
+        set_cached_tab_summaries(fingerprint, workspace_id, payload, status)
+    return payload, status
+
+
+def _build_workspace_tab_summaries_uncached(
+    workspace_id: str,
+    workspace_path: str,
+    rules: list,
+    workspace_entries: list,
+    *,
+    nocache: bool,
+) -> tuple[dict, int]:
     parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
-    workspace_entries = collect_workspace_entries(workspace_path)
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
     project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
     workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+        workspace_path, workspace_entries, rules, nocache=nocache,
+    )
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     with open_global_db(workspace_path) as (global_db, _):
@@ -465,32 +509,29 @@ def list_workspace_tab_summaries(
             except sqlite3.Error:
                 return []
 
-        # Summary path: load only MRC for project-layout resolution — no global
-        # bubbleId scan.
-        project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
+        project_layouts_map: dict[str, list] = {}
+        if invalid_workspace_ids:
+            project_layouts_map = load_project_layouts_map(global_db)
 
-        composer_rows = _safe_fetchall(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-            " AND value IS NOT NULL"
-            " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
-        )
+        composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases = infer_invalid_workspace_aliases(
-            composer_rows=composer_rows,
-            project_layouts_map=project_layouts_map,
-            project_name_map=project_name_map,
-            workspace_path_map=workspace_path_map,
-            workspace_entries=workspace_entries,
-            bubble_map={},
-            composer_id_to_ws=composer_id_to_ws,
-            invalid_workspace_ids=invalid_workspace_ids,
-        )
+        invalid_workspace_aliases: dict[str, str] = {}
+        if invalid_workspace_ids:
+            invalid_workspace_aliases = infer_invalid_workspace_aliases(
+                composer_rows=composer_rows,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map={},
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+            )
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
             try:
-                parsed = json.loads(row["value"])
+                cd = json.loads(row["value"])
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 payload_len, payload_fp = _kv_payload_log_meta(row["value"])
                 _logger.warning(
@@ -502,19 +543,17 @@ def list_workspace_tab_summaries(
                 )
                 parse_warnings.record_composer_skipped()
                 continue
-            try:
-                composer = Composer.from_dict(parsed, composer_id=composer_id)
-            except SchemaError as e:
-                _logger.warning(
-                    "Failed to parse Composer from composerData:%s: %s",
-                    composer_id,
-                    e,
-                )
+            if not isinstance(cd, dict):
                 parse_warnings.record_composer_skipped()
                 continue
             try:
-                cd = composer.raw
-
+                if (
+                    composer_id not in composer_id_to_ws
+                    and composer_id not in project_layouts_map
+                ):
+                    project_layouts_map[composer_id] = load_project_layouts_for_composer(
+                        global_db, composer_id,
+                    )
                 pid = determine_project_for_conversation(
                     cd, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
@@ -600,7 +639,9 @@ def assemble_single_tab(
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
     project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
     workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+        workspace_path, workspace_entries, rules,
+    )
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     with open_global_db(workspace_path) as (global_db, _):
@@ -731,7 +772,9 @@ def assemble_workspace_tabs(
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
     project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
     workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+        workspace_path, workspace_entries, rules,
+    )
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     bubble_map: dict[str, dict] = {}

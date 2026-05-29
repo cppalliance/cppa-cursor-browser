@@ -145,7 +145,10 @@ class TestServiceParseWarnings(unittest.TestCase):
             with sqlite3.connect(global_db) as conn:
                 conn.execute(
                     "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-                    ("composerData:cmp-bad-json", '{"broken":1'),
+                    (
+                        "composerData:cmp-bad-json",
+                        '{"fullConversationHeadersOnly":[{"bubbleId":"b1"}], "createdAt":',
+                    ),
                 )
                 conn.commit()
             with patch("services.workspace_listing.list_cli_projects", return_value=[]):
@@ -270,7 +273,10 @@ class TestApiParseWarnings(unittest.TestCase):
             with sqlite3.connect(global_db) as conn:
                 conn.execute(
                     "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
-                    ("composerData:cmp-bad-json", '{"broken":1'),
+                    (
+                        "composerData:cmp-bad-json",
+                        '{"fullConversationHeadersOnly":[{"bubbleId":"b1"}], "createdAt":',
+                    ),
                 )
                 conn.commit()
             with patch("api.workspaces.resolve_workspace_path", return_value=ws_root), \

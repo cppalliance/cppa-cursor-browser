@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Summary disk cache (Phase 3)** — project list and tab summaries cached under
+  `~/.cache/cursor-chat-browser/`, invalidated when global or per-workspace DB
+  mtimes change; bypass with `?nocache=1` or `CURSOR_CHAT_BROWSER_NOCACHE=1` (#84)
 - **Lazy-load workspace UI** — workspace sidebar renders from a lightweight summary
   payload; full bubble content is fetched per-conversation when the user selects it,
   reducing first-paint time from 1–2 min to < 3 s on large local fixtures (#84)
@@ -22,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `load_code_block_diffs_for_composer` — used by the single-tab path (#84)
 
 ### Changed
+- **List-path performance** — skip full `messageRequestContext` scan unless
+  invalid workspace aliases are needed; filter `composerData` in SQL; skip
+  `Composer.from_dict` on list/summary paths; cache `composer_id_to_ws` mapping (#84)
 - **`GET /api/workspaces`** (`list_workspace_projects`) no longer performs a
   global `bubbleId:%` scan; conversation presence is determined from
   `fullConversationHeadersOnly` headers alone, and workspace assignment relies
