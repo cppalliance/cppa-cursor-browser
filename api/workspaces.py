@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from api.flask_config import exclusion_rules
 
@@ -29,7 +29,11 @@ from services.workspace_resolver import (
 )
 from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
-from services.workspace_tabs import assemble_workspace_tabs
+from services.workspace_tabs import (
+    assemble_single_tab,
+    assemble_workspace_tabs,
+    list_workspace_tab_summaries,
+)
 
 # Re-exported for tests/test_models_wired_at_read_sites.py — the typed-model
 # spy harness patches `workspaces_mod.Bubble` / `.Composer` / `.Workspace` to
@@ -154,9 +158,31 @@ def get_workspace_tabs(workspace_id):
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
-        payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
+        summary = request.args.get("summary") in ("1", "true")
+        if summary:
+            payload, status = list_workspace_tab_summaries(workspace_id, workspace_path, rules)
+        else:
+            payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
         return jsonify(payload), status
     except Exception:
         _logger.exception("Failed to get workspace tabs")
         return jsonify({"error": "Failed to get workspace tabs"}), 500
+
+
+# ---------------------------------------------------------------------------
+# GET /api/workspaces/<id>/tabs/<composer_id>
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/workspaces/<workspace_id>/tabs/<composer_id>")
+def get_workspace_tab(workspace_id, composer_id):
+    if workspace_id.startswith("cli:"):
+        return jsonify({"error": "Per-tab lazy load is not supported for CLI workspaces"}), 400
+    try:
+        workspace_path = resolve_workspace_path()
+        rules = exclusion_rules()
+        payload, status = assemble_single_tab(workspace_id, composer_id, workspace_path, rules)
+        return jsonify(payload), status
+    except Exception:
+        _logger.exception("Failed to get workspace tab")
+        return jsonify({"error": "Failed to get workspace tab"}), 500
 

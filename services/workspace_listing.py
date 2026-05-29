@@ -23,7 +23,6 @@ from services.workspace_db import (
     build_composer_id_to_workspace_id,
     collect_invalid_workspace_ids,
     collect_workspace_entries,
-    load_bubble_map,
     load_project_layouts_map,
     open_global_db,
 )
@@ -76,7 +75,11 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                 )
 
                 project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
-                bubble_map: dict[str, dict] = load_bubble_map(global_db)
+                # Summary path: skip the global bubbleId scan entirely.
+                # Workspace assignment uses composer_id_to_ws (primary) and
+                # projectLayouts from MRC; bubble fallbacks are reserved for
+                # full-assembly paths (assemble_workspace_tabs, export, search).
+                bubble_map: dict[str, dict] = {}
 
                 invalid_workspace_aliases = infer_invalid_workspace_aliases(
                     composer_rows=composer_rows,
@@ -131,14 +134,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                         assigned = pid if pid else "global"
 
                         headers = cd.get("fullConversationHeadersOnly") or []
-                        has_bubbles = any(
-                            bubble_map.get(bubble_id)
-                            for h in headers
-                            if isinstance(h, dict)
-                            for bubble_id in [h.get("bubbleId")]
-                            if isinstance(bubble_id, str)
-                        )
-                        if not has_bubbles:
+                        if not headers:
                             continue
 
                         conversation_map.setdefault(assigned, []).append({
