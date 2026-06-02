@@ -14,15 +14,15 @@ import sys
 import tempfile
 import unittest
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from services.workspace_resolver import determine_project_for_conversation
 from utils.path_helpers import normalize_file_path
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
 
 
 def _write_workspace_json(parent: str, name: str, folder: str) -> dict:
