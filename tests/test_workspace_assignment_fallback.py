@@ -59,7 +59,7 @@ def _resolve(
     )
 
 
-_EMPTY_COMPOSER = {
+_EMPTY_COMPOSER: dict[str, object] = {
     "fullConversationHeadersOnly": [],
     "newlyCreatedFiles": [],
     "codeBlockData": {},
