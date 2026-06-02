@@ -296,6 +296,7 @@ COMPOSER_ROWS_WITH_HEADERS_SQL = (
     " AND LENGTH(value) > 10"
     " AND value LIKE '%fullConversationHeadersOnly%'"
     " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
+    " AND value NOT LIKE '%fullConversationHeadersOnly\": []%'"
 )
 
 

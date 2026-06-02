@@ -65,6 +65,25 @@ class TestSummaryCache(unittest.TestCase):
             fp = fingerprint_workspace_storage(ws, entries, global_db_path=None, rules=[])
             self.assertTrue(fp["workspace_files"])
 
+    def test_workspace_files_fingerprint_round_trip(self):
+        """JSON cache round-trip must match freshly computed workspace_files fingerprints."""
+        with tempfile.TemporaryDirectory() as ws:
+            entry_dir = os.path.join(ws, "entry1")
+            os.makedirs(entry_dir)
+            db = os.path.join(entry_dir, "state.vscdb")
+            with open(db, "wb") as f:
+                f.write(b"x")
+            entries = [{"name": "entry1", "workspaceJsonPath": os.path.join(entry_dir, "workspace.json")}]
+            fp = fingerprint_workspace_storage(ws, entries, global_db_path=None, rules=[])
+            projects = [{"id": "a", "name": "A", "conversationCount": 1, "lastModified": "x"}]
+            warnings: list = []
+            set_cached_projects(fp, projects, warnings)
+            fp2 = fingerprint_workspace_storage(ws, entries, global_db_path=None, rules=[])
+            hit = get_cached_projects(fp2)
+            self.assertIsNotNone(hit, msg="cache miss after JSON round-trip of workspace_files")
+            assert hit is not None
+            self.assertEqual(hit[0], projects)
+
 
 if __name__ == "__main__":
     unittest.main()

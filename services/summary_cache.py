@@ -61,7 +61,7 @@ def fingerprint_workspace_storage(
     cli_chats_path: str | None = None,
 ) -> dict[str, Any]:
     """Build a fingerprint dict for cache invalidation."""
-    ws_mt: list[tuple[str, int]] = []
+    ws_mt: list[list[str | int]] = []
     for entry in workspace_entries:
         name = entry.get("name")
         if not isinstance(name, str):
@@ -71,8 +71,8 @@ def fingerprint_workspace_storage(
             p = os.path.join(base, rel)
             mtime = _file_mtime_ns(p)
             if mtime is not None:
-                ws_mt.append((f"{name}/{rel}", mtime))
-    ws_mt.sort(key=lambda x: x[0])
+                ws_mt.append([f"{name}/{rel}", mtime])
+    ws_mt.sort(key=lambda row: row[0])
 
     return {
         "version": CACHE_VERSION,
@@ -84,10 +84,22 @@ def fingerprint_workspace_storage(
     }
 
 
+def _normalize_fingerprint(fp: dict[str, Any]) -> dict[str, Any]:
+    """Normalize fingerprint for comparison (JSON round-trip uses lists, not tuples)."""
+    normalized = dict(fp)
+    wf = fp.get("workspace_files")
+    if isinstance(wf, list):
+        normalized["workspace_files"] = [
+            [row[0], row[1]] if isinstance(row, (list, tuple)) and len(row) == 2 else row
+            for row in wf
+        ]
+    return normalized
+
+
 def _fingerprint_equal(a: object, b: dict[str, Any]) -> bool:
     if not isinstance(a, dict):
         return False
-    return a == b
+    return _normalize_fingerprint(a) == _normalize_fingerprint(b)
 
 
 def _read_cache_file(path: Path | str) -> dict[str, Any] | None:

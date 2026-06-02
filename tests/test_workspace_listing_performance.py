@@ -13,12 +13,13 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import services.workspace_listing as _ws_listing_mod
 from services.workspace_listing import list_workspace_projects
 
 COMPOSER_ID = "composer-list-perf"
@@ -78,10 +79,7 @@ class TestListWorkspaceProjectsNoBubbleScan(unittest.TestCase):
 
         executed_queries: list[str] = []
 
-        original_open_global_db = None
-        import services.workspace_db as _ws_db_mod
-
-        original_open_global_db = _ws_db_mod.open_global_db
+        original_open_global_db = _ws_listing_mod.open_global_db
 
         from contextlib import contextmanager
 
@@ -89,18 +87,13 @@ class TestListWorkspaceProjectsNoBubbleScan(unittest.TestCase):
         def _spying_open_global_db(workspace_path):
             with original_open_global_db(workspace_path) as (conn, path):
                 if conn is not None:
-                    original_execute = conn.execute
-
-                    def _spying_execute(query, params=()):
-                        executed_queries.append(query)
-                        return original_execute(query, params)
-
-                    conn.execute = _spying_execute  # type: ignore[method-assign]
+                    conn.set_trace_callback(executed_queries.append)
                 yield conn, path
 
-        with patch.object(_ws_db_mod, "open_global_db", _spying_open_global_db):
-            projects, warnings = list_workspace_projects(ws_path, rules=[])
+        with patch.object(_ws_listing_mod, "open_global_db", _spying_open_global_db):
+            list_workspace_projects(ws_path, rules=[], nocache=True)
 
+        self.assertTrue(executed_queries, msg="expected SQL queries to be recorded")
         bubble_scans = [q for q in executed_queries if "bubbleId:%" in q]
         self.assertEqual(
             bubble_scans,

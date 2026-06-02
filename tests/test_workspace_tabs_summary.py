@@ -110,25 +110,19 @@ def _make_fixture(base: str) -> str:
 
 def _collect_queries(ws_path, fn):
     """Call fn(ws_path) while recording every SQL query; return (result, queries)."""
-    import services.workspace_db as _ws_db_mod
+    import services.workspace_tabs as _ws_tabs_mod
 
-    orig = _ws_db_mod.open_global_db
+    orig = _ws_tabs_mod.open_global_db
     executed: list[str] = []
 
     @contextmanager
     def _spy(workspace_path):
         with orig(workspace_path) as (conn, path):
             if conn is not None:
-                orig_exec = conn.execute
-
-                def _tracking_execute(query, params=()):
-                    executed.append(query)
-                    return orig_exec(query, params)
-
-                conn.execute = _tracking_execute  # type: ignore[method-assign]
+                conn.set_trace_callback(executed.append)
             yield conn, path
 
-    with patch.object(_ws_db_mod, "open_global_db", _spy):
+    with patch.object(_ws_tabs_mod, "open_global_db", _spy):
         result = fn(ws_path)
     return result, executed
 
@@ -145,8 +139,9 @@ class TestListWorkspaceTabSummaries(unittest.TestCase):
         """list_workspace_tab_summaries must not issue a bubbleId:% LIKE query."""
         (payload, status), queries = _collect_queries(
             self.ws_path,
-            lambda p: list_workspace_tab_summaries("global", p, rules=[]),
+            lambda p: list_workspace_tab_summaries("global", p, rules=[], nocache=True),
         )
+        self.assertTrue(queries, msg="expected SQL queries to be recorded")
         bubble_scans = [q for q in queries if "bubbleId:%" in q]
         self.assertEqual(
             bubble_scans,
@@ -198,6 +193,7 @@ class TestAssembleSingleTab(unittest.TestCase):
             self.ws_path,
             lambda p: assemble_single_tab("global", COMPOSER_ID, p, rules=[]),
         )
+        self.assertTrue(queries, msg="expected SQL queries to be recorded")
         global_bubble_scans = [
             q for q in queries if "bubbleId:%" in q and f"bubbleId:{COMPOSER_ID}:%" not in q
         ]
