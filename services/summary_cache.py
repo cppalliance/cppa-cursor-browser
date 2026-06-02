@@ -84,7 +84,9 @@ def fingerprint_workspace_storage(
     }
 
 
-def _fingerprint_equal(a: dict[str, Any], b: dict[str, Any]) -> bool:
+def _fingerprint_equal(a: object, b: dict[str, Any]) -> bool:
+    if not isinstance(a, dict):
+        return False
     return a == b
 
 
