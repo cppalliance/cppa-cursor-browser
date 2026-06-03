@@ -20,6 +20,17 @@ from utils.path_helpers import (
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
 from services.workspace_db import open_global_db
 from models import SchemaError, Workspace
+from models.conversation import Composer
+from models.raw_access import (
+    bubble_attached_file_uris,
+    bubble_context,
+    bubble_relevant_files,
+    composer_code_block_data,
+    composer_headers,
+    composer_newly_created_files,
+    conversation_header_bubble_id,
+    message_request_context_project_layouts,
+)
 
 
 def lookup_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
@@ -118,8 +129,8 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
                         e,
                     )
                     continue
-                layouts = ctx.get("projectLayouts")
-                if not isinstance(layouts, list):
+                layouts = message_request_context_project_layouts(ctx, composer_id=cid)
+                if not layouts:
                     continue
                 for layout in layouts:
                     obj = None
@@ -225,7 +236,7 @@ def create_workspace_path_to_id_map(workspace_entries):
 
 
 def determine_project_for_conversation(
-    composer_data: dict,
+    composer_data: Composer | dict,
     composer_id: str,
     project_layouts_map: dict,
     project_name_to_workspace_id: dict,
@@ -272,7 +283,7 @@ def determine_project_for_conversation(
             return workspace_id
 
     # Fallback: newlyCreatedFiles
-    newly = composer_data.get("newlyCreatedFiles") or []
+    newly = composer_newly_created_files(composer_data, composer_id)
     for file_entry in newly:
         uri = file_entry.get("uri") if isinstance(file_entry, dict) else None
         if isinstance(uri, dict) and uri.get("path"):
@@ -281,7 +292,7 @@ def determine_project_for_conversation(
                 return pid
 
     # Fallback: codeBlockData
-    cbd = composer_data.get("codeBlockData")
+    cbd = composer_code_block_data(composer_data, composer_id)
     if isinstance(cbd, dict):
         for fp in cbd.keys():
             pid = get_project_from_file_path(re.sub(r"^file://", "", fp), workspace_entries)
@@ -289,24 +300,27 @@ def determine_project_for_conversation(
                 return pid
 
     # Fallback: conversation headers -> bubble references
-    headers = composer_data.get("fullConversationHeadersOnly") or []
+    headers = composer_headers(composer_data, composer_id)
     for header in headers:
         if not isinstance(header, dict):
             continue
-        bubble = bubble_map.get(header.get("bubbleId"))
+        bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
+        if not bubble_id:
+            continue
+        bubble = bubble_map.get(bubble_id)
         if not bubble:
             continue
-        for fp in (bubble.get("relevantFiles") or []):
+        for fp in bubble_relevant_files(bubble, bubble_id):
             if fp:
                 pid = get_project_from_file_path(fp, workspace_entries)
                 if pid:
                     return pid
-        for uri in (bubble.get("attachedFileCodeChunksUris") or []):
+        for uri in bubble_attached_file_uris(bubble, bubble_id):
             if isinstance(uri, dict) and uri.get("path"):
                 pid = get_project_from_file_path(uri["path"], workspace_entries)
                 if pid:
                     return pid
-        for fs_entry in (bubble.get("context", {}).get("fileSelections") or []):
+        for fs_entry in (bubble_context(bubble, bubble_id).get("fileSelections") or []):
             if isinstance(fs_entry, dict):
                 uri = fs_entry.get("uri")
                 if isinstance(uri, dict) and uri.get("path"):
@@ -327,16 +341,19 @@ def determine_project_for_conversation(
     for header in headers:
         if not isinstance(header, dict):
             continue
-        bubble = bubble_map.get(header.get("bubbleId"))
+        bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
+        if not bubble_id:
+            continue
+        bubble = bubble_map.get(bubble_id)
         if not bubble:
             continue
-        for fp in (bubble.get("relevantFiles") or []):
+        for fp in bubble_relevant_files(bubble, bubble_id):
             if fp:
                 path_segments.append(normalize_file_path(fp))
-        for uri in (bubble.get("attachedFileCodeChunksUris") or []):
+        for uri in bubble_attached_file_uris(bubble, bubble_id):
             if isinstance(uri, dict) and uri.get("path"):
                 path_segments.append(normalize_file_path(uri["path"]))
-        for fs_entry in (bubble.get("context", {}).get("fileSelections") or []):
+        for fs_entry in (bubble_context(bubble, bubble_id).get("fileSelections") or []):
             if isinstance(fs_entry, dict):
                 uri = fs_entry.get("uri")
                 if isinstance(uri, dict) and uri.get("path"):

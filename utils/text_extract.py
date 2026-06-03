@@ -21,8 +21,10 @@ def extract_text_from_rich_text(children: list) -> str:
     return text
 
 
-def extract_text_from_bubble(bubble: dict) -> str:
+def extract_text_from_bubble(bubble: dict | object) -> str:
     """Extract displayable text from a bubble object (text, richText, codeBlocks)."""
+    if hasattr(bubble, "raw"):
+        bubble = bubble.raw  # type: ignore[union-attr]
     if not bubble or not isinstance(bubble, dict):
         return ""
 
