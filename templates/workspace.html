@@ -39,17 +39,17 @@
     <p class="text-sm text-muted" id="convo-count"></p>
   </div>
 
-  <div id="loading" class="loading">
-    <div class="spinner"></div>
-    <p>Loading conversations...</p>
-  </div>
-
-  <!-- Content grid -->
-  <div id="content-grid" class="workspace-grid" style="display:none">
-    <div class="sidebar" id="sidebar"></div>
-    <div class="main-content" id="main-content">
-      <div class="card" style="padding:2rem;text-align:center">
-        <p class="text-muted">No conversation selected</p>
+  <!-- Content grid — always in layout so column widths never collapse -->
+  <div id="content-grid" class="workspace-grid">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-loading loading-center">
+        <div class="spinner" style="width:1.25rem;height:1.25rem;border-width:2px"></div>
+      </div>
+    </div>
+    <div class="main-content is-loading" id="main-content">
+      <div class="loading-center">
+        <div class="spinner"></div>
+        <p>Loading conversations…</p>
       </div>
     </div>
   </div>
@@ -57,14 +57,15 @@
 
 <script>
 const WORKSPACE_ID = "{{ workspace_id }}";
-let allTabs = [];
-let selectedTab = null;
+let allTabs = [];        // summary tabs (no bubbles) from ?summary=1
+let tabCache = {};       // id → full tab (with bubbles), populated on first open
+let selectedTab = null;  // always a full tab once a conversation is opened
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     const [wsRes, tabsRes] = await Promise.all([
       fetch(`/api/workspaces/${WORKSPACE_ID}`),
-      fetch(`/api/workspaces/${WORKSPACE_ID}/tabs`)
+      fetch(`/api/workspaces/${WORKSPACE_ID}/tabs?summary=1`)
     ]);
     const wsInfo = await wsRes.json();
     const data = await tabsRes.json();
@@ -77,8 +78,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('project-hash').textContent = WORKSPACE_ID;
     }
 
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('content-grid').style.display = 'grid';
     document.getElementById('convo-count').textContent = `${allTabs.length} conversations`;
 
     renderSidebar();
@@ -91,7 +90,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       selectTab(allTabs[0].id);
     }
   } catch (e) {
-    document.getElementById('loading').innerHTML = '<p class="text-danger">Failed to load workspace.</p>';
+    const main = document.getElementById('main-content');
+    main.classList.remove('is-loading');
+    main.innerHTML =
+      '<div class="card" style="padding:2rem;text-align:center"><p class="text-danger">Failed to load workspace.</p></div>';
+    document.getElementById('sidebar').innerHTML = '';
   }
 });
 
@@ -105,7 +108,6 @@ function renderSidebar() {
   for (const tab of allTabs) {
     const title = escapeHtml(tab.title || `Chat ${tab.id.slice(0,8)}`);
     const ts = formatDate(tab.timestamp);
-    // Show model if available
     const model = (tab.metadata && tab.metadata.modelsUsed && tab.metadata.modelsUsed[0]) || '';
     const modelBadge = model ? `<span style="font-size:0.65rem;opacity:0.5;display:block;margin-top:1px">${escapeHtml(model)}</span>` : '';
     html += `<button class="sidebar-item" data-id="${tab.id}" onclick="selectTab('${tab.id}')" title="${title}">
@@ -113,16 +115,16 @@ function renderSidebar() {
       <div class="sidebar-item-time">${ts}${modelBadge}</div>
     </button>`;
   }
-  // Scroll hint if many items
   if (allTabs.length > 8) {
     html += '<div class="sidebar-scroll-hint">Scroll for more</div>';
   }
   sidebar.innerHTML = html;
 }
 
-function selectTab(id) {
-  selectedTab = allTabs.find(t => t.id === id);
-  if (!selectedTab) return;
+async function selectTab(id) {
+  selectTab._latest = id;
+  const summary = allTabs.find(t => t.id === id);
+  if (!summary) return;
 
   const url = new URL(window.location);
   url.searchParams.set('tab', id);
@@ -132,20 +134,57 @@ function selectTab(id) {
     el.classList.toggle('active', el.dataset.id === id);
   });
 
+  // Scroll the active sidebar item into view
+  const activeEl = document.querySelector('.sidebar-item.active');
+  if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+  // Resolve full tab: use cache if available, lazy-fetch if not
+  if (tabCache[id]) {
+    if (selectTab._latest !== id) return;
+    selectedTab = tabCache[id];
+  } else if (summary.bubbles) {
+    // Fallback: summary endpoint returned a full tab (e.g. old server version)
+    if (selectTab._latest !== id) return;
+    selectedTab = summary;
+    tabCache[id] = summary;
+  } else {
+    const main = document.getElementById('main-content');
+    main.classList.add('is-loading');
+    main.innerHTML =
+      '<div class="loading-center" style="min-height:60vh"><div class="spinner"></div><p>Loading conversation…</p></div>';
+    try {
+      const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/tabs/${id}`);
+      if (selectTab._latest !== id) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (selectTab._latest !== id) return;
+      if (data.error) throw new Error(data.error);
+      showIncompleteResultsBanner('parse-warnings-host', data.warnings);
+      tabCache[id] = data.tab;
+      selectedTab = data.tab;
+    } catch (e) {
+      if (selectTab._latest !== id) return;
+      const main = document.getElementById('main-content');
+      main.classList.remove('is-loading');
+      main.innerHTML =
+        `<div class="card" style="padding:2rem;text-align:center"><p class="text-danger">Failed to load conversation: ${escapeHtml(e.message)}</p></div>`;
+      return;
+    }
+  }
+
+  if (selectTab._latest !== id) return;
+
   document.getElementById('action-buttons').style.display = 'flex';
 
   const codeEditsBtn = document.getElementById('dl-code-edits');
   codeEditsBtn.style.display = (selectedTab.codeBlockDiffs && selectedTab.codeBlockDiffs.length) ? 'block' : 'none';
 
   renderChat(selectedTab);
-
-  // Scroll the active sidebar item into view
-  const activeEl = document.querySelector('.sidebar-item.active');
-  if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function renderChat(tab) {
   const main = document.getElementById('main-content');
+  main.classList.remove('is-loading');
   const bubbles = (tab.bubbles || []).filter(b => b.text && b.text.trim());
 
   let html = `<div class="card" style="padding:1.5rem">

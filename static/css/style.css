@@ -106,7 +106,10 @@ a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* ---------- Layout ---------- */
-.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem; flex: 1; }
+/* width: 100% is required here: body is display:flex + flex-direction:column,
+ * and auto horizontal margins (margin: 0 auto) suppress align-items:stretch,
+ * so without an explicit width the container collapses to content width. */
+.container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem; flex: 1; }
 
 /* ---------- Navbar ---------- */
 .navbar {
@@ -297,10 +300,24 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .dropdown-item:hover { background: var(--bg-hover); text-decoration: none; }
 
 /* ---------- Loading ---------- */
-.loading { display: flex; flex-direction: column; align-items: center; padding: 3rem 0; gap: 1rem; }
+.loading,
+.loading-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 1rem;
+  text-align: center;
+}
+.loading { padding: 3rem 0; }
+.loading-center { color: var(--text-muted); font-size: 0.9rem; }
 .spinner {
+  display: block;
+  flex-shrink: 0;
   width: 2rem;
   height: 2rem;
+  margin-inline: auto;
   border: 3px solid var(--border);
   border-top-color: var(--spinner);
   border-radius: 50%;
@@ -324,7 +341,17 @@ h3 { font-size: 1.15rem; font-weight: 600; }
  * URL inside .main-content would push the column wider than 1fr — overflowing
  * the viewport on the right. min-width: 0 lets the column shrink and lets the
  * existing overflow-x: auto on .prose pre handle the scroll inside the bubble. */
-.main-content { min-width: 0; }
+/* min-height prevents the right column from collapsing during lazy-load (issue #84). */
+.main-content { min-width: 0; min-height: 60vh; }
+
+/* Loading state: full-width cell; .loading-center centers spinner + label. */
+.main-content.is-loading {
+  width: 100%;
+  min-height: 60vh;
+}
+.main-content.is-loading .loading-center {
+  min-height: 60vh;
+}
 
 /* ---------- Sidebar ---------- */
 .sidebar {
@@ -357,6 +384,13 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .sidebar::-webkit-scrollbar { width: 6px; }
 .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .sidebar::-webkit-scrollbar-track { background: transparent; }
+
+/* Placeholder shown in the sidebar column while summary tabs are fetching */
+.sidebar-loading {
+  width: 100%;
+  padding: 1.5rem 0;
+  opacity: 0.5;
+}
 
 /* Scroll hint at the bottom */
 .sidebar-scroll-hint {

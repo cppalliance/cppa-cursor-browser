@@ -17,16 +17,24 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
-from utils.workspace_path import get_cli_chats_path
-from models import Composer, ParseWarningCollector, SchemaError
+from models import ParseWarningCollector
+from services.summary_cache import (
+    fingerprint_workspace_storage,
+    get_cached_projects,
+    nocache_enabled,
+    set_cached_projects,
+)
 from services.workspace_db import (
-    build_composer_id_to_workspace_id,
+    COMPOSER_ROWS_WITH_HEADERS_SQL,
+    build_composer_id_to_workspace_id_cached,
     collect_invalid_workspace_ids,
     collect_workspace_entries,
-    load_bubble_map,
+    global_storage_db_path,
+    load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
 )
+from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
     create_project_name_to_workspace_id_map,
     create_workspace_path_to_id_map,
@@ -37,12 +45,46 @@ from services.workspace_resolver import (
 )
 
 
-def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict], list[dict]]:
+def _composer_valid_for_listing(
+    cd: dict,
+    composer_id: str,
+    parse_warnings: ParseWarningCollector,
+) -> bool:
+    """Lightweight list-path checks aligned with :class:`models.Composer` requirements."""
+    if "fullConversationHeadersOnly" not in cd:
+        return False
+    created_at = cd.get("createdAt")
+    if not isinstance(created_at, (int, float)) or isinstance(created_at, bool):
+        _logger.warning(
+            "Failed to parse Composer from composerData:%s: expected timestamp number for createdAt, got %s",
+            composer_id,
+            type(created_at).__name__,
+        )
+        parse_warnings.record_composer_skipped()
+        return False
+    headers = cd.get("fullConversationHeadersOnly")
+    if not isinstance(headers, list):
+        _logger.warning(
+            "Failed to parse Composer from composerData:%s: fullConversationHeadersOnly must be a list",
+            composer_id,
+        )
+        parse_warnings.record_composer_skipped()
+        return False
+    return True
+
+
+def list_workspace_projects(
+    workspace_path: str,
+    rules: list,
+    *,
+    nocache: bool = False,
+) -> tuple[list[dict], list[dict]]:
     """List workspace projects for GET /api/workspaces.
 
     Args:
         workspace_path: Cursor ``workspaceStorage`` root.
         rules: Exclusion rule token lists from :func:`utils.exclusion_rules.load_rules`.
+        nocache: When ``True``, skip the mtime-keyed disk cache (Phase 3).
 
     Returns:
         ``(projects, warnings)``. Each project dict has ``id``, ``name``,
@@ -52,17 +94,47 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
         parse-error dicts (``type``, ``count``, ``detail``) from
         :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
     """
-    parse_warnings = ParseWarningCollector()
     workspace_entries = collect_workspace_entries(workspace_path)
+    gdb = global_storage_db_path(workspace_path)
+    cli_path = get_cli_chats_path()
+    fingerprint = fingerprint_workspace_storage(
+        workspace_path,
+        workspace_entries,
+        global_db_path=gdb if os.path.isfile(gdb) else None,
+        rules=rules,
+        cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        cached = get_cached_projects(fingerprint)
+        if cached is not None:
+            return cached
+
+    projects, warnings = _build_workspace_projects_uncached(
+        workspace_path, rules, workspace_entries, nocache=nocache,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        set_cached_projects(fingerprint, projects, warnings)
+    return projects, warnings
+
+
+def _build_workspace_projects_uncached(
+    workspace_path: str,
+    rules: list,
+    workspace_entries: list[dict],
+    *,
+    nocache: bool,
+) -> tuple[list[dict], list[dict]]:
+    parse_warnings = ParseWarningCollector()
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
 
     project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
     workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+        workspace_path, workspace_entries, rules, nocache=nocache,
+    )
 
     conversation_map: dict[str, list] = {}
 
-    # closing semantics now baked into the context manager (issue #17).
     with open_global_db(workspace_path) as (global_db, _):
         if global_db:
             def _safe_fetchall(query: str, params: tuple = ()) -> list:
@@ -70,28 +142,32 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                     return global_db.execute(query, params).fetchall()
                 except sqlite3.Error:
                     return []
+
             try:
-                composer_rows = _safe_fetchall(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
-                )
+                composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-                project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
-                bubble_map: dict[str, dict] = load_bubble_map(global_db)
+                project_layouts_map: dict[str, list] = {}
+                if invalid_workspace_ids:
+                    project_layouts_map = load_project_layouts_map(global_db)
 
-                invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                    composer_rows=composer_rows,
-                    project_layouts_map=project_layouts_map,
-                    project_name_map=project_name_map,
-                    workspace_path_map=workspace_path_map,
-                    workspace_entries=workspace_entries,
-                    bubble_map=bubble_map,
-                    composer_id_to_ws=composer_id_to_ws,
-                    invalid_workspace_ids=invalid_workspace_ids,
-                )
+                bubble_map: dict[str, dict] = {}
+                invalid_workspace_aliases: dict[str, str] = {}
+                if invalid_workspace_ids:
+                    invalid_workspace_aliases = infer_invalid_workspace_aliases(
+                        composer_rows=composer_rows,
+                        project_layouts_map=project_layouts_map,
+                        project_name_map=project_name_map,
+                        workspace_path_map=workspace_path_map,
+                        workspace_entries=workspace_entries,
+                        bubble_map=bubble_map,
+                        composer_id_to_ws=composer_id_to_ws,
+                        invalid_workspace_ids=invalid_workspace_ids,
+                    )
+
                 for row in composer_rows:
                     cid = row["key"].split(":")[1]
                     try:
-                        parsed = json.loads(row["value"])
+                        cd = json.loads(row["value"])
                     except (json.JSONDecodeError, TypeError, ValueError) as e:
                         _logger.warning(
                             "Failed to decode Composer from composerData:%s: %s",
@@ -100,26 +176,24 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                         )
                         parse_warnings.record_composer_skipped()
                         continue
-                    if not isinstance(parsed, dict):
+                    if not isinstance(cd, dict):
                         _logger.warning(
                             "Failed to parse Composer from composerData:%s: expected object, got %s",
                             cid,
-                            type(parsed).__name__,
+                            type(cd).__name__,
                         )
                         parse_warnings.record_composer_skipped()
                         continue
-                    try:
-                        composer = Composer.from_dict(parsed, composer_id=cid)
-                    except SchemaError as e:
-                        _logger.warning(
-                            "Failed to parse Composer from composerData:%s: %s",
-                            cid,
-                            e,
-                        )
-                        parse_warnings.record_composer_skipped()
+                    if not _composer_valid_for_listing(cd, cid, parse_warnings):
                         continue
-                    cd = composer.raw
                     try:
+                        if (
+                            cid not in composer_id_to_ws
+                            and cid not in project_layouts_map
+                        ):
+                            project_layouts_map[cid] = load_project_layouts_for_composer(
+                                global_db, cid,
+                            )
                         pid = determine_project_for_conversation(
                             cd, cid, project_layouts_map,
                             project_name_map, workspace_path_map,
@@ -131,14 +205,7 @@ def list_workspace_projects(workspace_path: str, rules: list) -> tuple[list[dict
                         assigned = pid if pid else "global"
 
                         headers = cd.get("fullConversationHeadersOnly") or []
-                        has_bubbles = any(
-                            bubble_map.get(bubble_id)
-                            for h in headers
-                            if isinstance(h, dict)
-                            for bubble_id in [h.get("bubbleId")]
-                            if isinstance(bubble_id, str)
-                        )
-                        if not has_bubbles:
+                        if not headers:
                             continue
 
                         conversation_map.setdefault(assigned, []).append({

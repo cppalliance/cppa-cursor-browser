@@ -47,11 +47,52 @@ def load_bubble_map(global_db) -> dict[str, dict]:
     return bubble_map
 
 
-def load_project_layouts_map(global_db) -> dict[str, list]:
-    """Load ``projectLayouts`` from ``messageRequestContext:*`` KV entries.
+def _extract_root_paths_from_context(ctx: dict) -> list[str]:
+    """Pull ``rootPath`` strings from a messageRequestContext JSON object."""
+    paths: list[str] = []
+    layouts = ctx.get("projectLayouts")
+    if not isinstance(layouts, list):
+        return paths
+    for layout in layouts:
+        try:
+            o = json.loads(layout) if isinstance(layout, str) else layout
+            if isinstance(o, dict) and o.get("rootPath"):
+                paths.append(o["rootPath"])
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+            continue
+    return paths
 
-    Returns ``{composer_id: [root_path_str, ...]}``.  String-encoded layout
-    objects are JSON-decoded before the ``rootPath`` field is extracted.
+
+def load_project_layouts_for_composer(global_db, composer_id: str) -> list[str]:
+    """Scoped MRC load: ``messageRequestContext:{composer_id}:%`` only."""
+    paths: list[str] = []
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
+            (f"messageRequestContext:{composer_id}:%",),
+        ).fetchall()
+    except sqlite3.Error:
+        return paths
+    for row in rows:
+        try:
+            ctx = json.loads(row["value"])
+            if isinstance(ctx, dict):
+                paths.extend(_extract_root_paths_from_context(ctx))
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug(
+                "Skipping malformed messageRequestContext row %s: %s",
+                row["key"],
+                e,
+            )
+    return paths
+
+
+def load_project_layouts_map(global_db) -> dict[str, list]:
+    """Load ``projectLayouts`` from all ``messageRequestContext:*`` KV entries.
+
+    Returns ``{composer_id: [root_path_str, ...]}``.  Prefer
+    :func:`load_project_layouts_for_composer` on list paths when only a few
+    composers need layout fallbacks.
     """
     layouts_map: dict[str, list] = {}
     try:
@@ -67,17 +108,9 @@ def load_project_layouts_map(global_db) -> dict[str, list]:
         cid = parts[1]
         try:
             ctx = json.loads(row["value"])
-            layouts = ctx.get("projectLayouts")
-            if not isinstance(layouts, list):
-                continue
-            layouts_map.setdefault(cid, [])
-            for layout in layouts:
-                try:
-                    o = json.loads(layout) if isinstance(layout, str) else layout
-                    if isinstance(o, dict) and o.get("rootPath"):
-                        layouts_map[cid].append(o["rootPath"])
-                except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-                    _logger.debug("Skipping malformed layout entry in %s: %s", row["key"], e)
+            if isinstance(ctx, dict):
+                layouts_map.setdefault(cid, [])
+                layouts_map[cid].extend(_extract_root_paths_from_context(ctx))
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
             _logger.debug("Skipping malformed messageRequestContext row %s: %s", row["key"], e)
     return layouts_map
@@ -111,6 +144,99 @@ def load_code_block_diff_map(global_db) -> dict[str, list]:
         except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
             _logger.debug("Skipping malformed codeBlockDiff row %s: %s", row["key"], e)
     return diff_map
+
+
+def load_bubbles_for_composer(global_db, composer_id: str) -> dict[str, dict]:
+    """Load ``bubbleId:{composer_id}:*`` KV entries into ``{bubble_id: bubble_dict}``.
+
+    Scoped alternative to :func:`load_bubble_map` for single-conversation assembly;
+    avoids a full global ``bubbleId:%`` scan.
+    """
+    bubble_map: dict[str, dict] = {}
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
+            (f"bubbleId:{composer_id}:%",),
+        ).fetchall()
+    except sqlite3.Error:
+        return bubble_map
+    for row in rows:
+        parts = row["key"].split(":")
+        if len(parts) < 3:
+            continue
+        bid = parts[2]
+        try:
+            b = json.loads(row["value"])
+            if isinstance(b, dict):
+                bubble_map[bid] = b
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
+    return bubble_map
+
+
+def load_message_request_context_for_composer(
+    global_db, composer_id: str
+) -> list[dict]:
+    """Load ``messageRequestContext:{composer_id}:*`` KV entries.
+
+    Returns a list of context dicts, each with an injected ``contextId`` key
+    taken from the third path component of the KV key.  Scoped alternative to
+    the global MRC pass inside :func:`load_project_layouts_map`.
+    """
+    contexts: list[dict] = []
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
+            (f"messageRequestContext:{composer_id}:%",),
+        ).fetchall()
+    except sqlite3.Error:
+        return contexts
+    for row in rows:
+        parts = row["key"].split(":")
+        if len(parts) < 3:
+            continue
+        context_id = parts[2]
+        try:
+            ctx = json.loads(row["value"])
+            if isinstance(ctx, dict):
+                contexts.append({**ctx, "contextId": context_id})
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug(
+                "Skipping malformed messageRequestContext row %s: %s",
+                row["key"],
+                e,
+            )
+    return contexts
+
+
+def load_code_block_diffs_for_composer(
+    global_db, composer_id: str
+) -> list[dict]:
+    """Load ``codeBlockDiff:{composer_id}:*`` KV entries.
+
+    Returns a list of diff dicts, each with an injected ``diffId`` key.
+    Scoped alternative to :func:`load_code_block_diff_map` for single-conversation
+    assembly.
+    """
+    diffs: list[dict] = []
+    try:
+        rows = global_db.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
+            (f"codeBlockDiff:{composer_id}:%",),
+        ).fetchall()
+    except sqlite3.Error:
+        return diffs
+    for row in rows:
+        parts = row["key"].split(":")
+        try:
+            d = json.loads(row["value"])
+            if isinstance(d, dict):
+                diffs.append({**d, "diffId": parts[2] if len(parts) > 2 else None})
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            _logger.debug(
+                "Skipping malformed codeBlockDiff row %s: %s", row["key"], e
+            )
+    return diffs
 
 
 def collect_workspace_entries(workspace_path: str) -> list[dict]:
@@ -164,6 +290,21 @@ def collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
     return invalid
 
 
+# Composers that have at least one header entry (list/summary paths).
+COMPOSER_ROWS_WITH_HEADERS_SQL = (
+    "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+    " AND LENGTH(value) > 10"
+    " AND value LIKE '%fullConversationHeadersOnly%'"
+    " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
+    " AND value NOT LIKE '%fullConversationHeadersOnly\": []%'"
+)
+
+
+def global_storage_db_path(workspace_path: str) -> str:
+    """Resolved path to Cursor global ``state.vscdb`` for a workspace storage root."""
+    return os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
+
+
 def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: list) -> dict:
     """Build mapping from composer ID to workspace folder name.
 
@@ -212,6 +353,41 @@ def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: li
     return mapping
 
 
+def build_composer_id_to_workspace_id_cached(
+    workspace_path: str,
+    workspace_entries: list,
+    rules: list,
+    *,
+    nocache: bool = False,
+) -> dict:
+    """Like :func:`build_composer_id_to_workspace_id` with optional disk cache."""
+    from services.summary_cache import (
+        fingerprint_workspace_storage,
+        get_cached_composer_id_to_ws,
+        nocache_enabled,
+        set_cached_composer_id_to_ws,
+    )
+    from utils.workspace_path import get_cli_chats_path
+
+    gdb = global_storage_db_path(workspace_path)
+    cli_path = get_cli_chats_path()
+    fingerprint = fingerprint_workspace_storage(
+        workspace_path,
+        workspace_entries,
+        global_db_path=gdb if os.path.isfile(gdb) else None,
+        rules=rules,
+        cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        cached = get_cached_composer_id_to_ws(fingerprint)
+        if cached is not None:
+            return cached
+    mapping = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    if not nocache_enabled(request_nocache=nocache):
+        set_cached_composer_id_to_ws(fingerprint, mapping)
+    return mapping
+
+
 @contextmanager
 def open_global_db(workspace_path: str):
     """Open Cursor global storage SQLite database read-only.
@@ -224,8 +400,7 @@ def open_global_db(workspace_path: str):
         ``row_factory=sqlite3.Row``, or ``None`` if the database file is missing
         or cannot be opened. ``path`` is always the resolved global DB path.
     """
-    global_db_path = os.path.join(workspace_path, "..", "globalStorage", "state.vscdb")
-    global_db_path = os.path.normpath(global_db_path)
+    global_db_path = global_storage_db_path(workspace_path)
     if not os.path.isfile(global_db_path):
         yield None, global_db_path
         return
