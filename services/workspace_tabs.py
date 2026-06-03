@@ -689,12 +689,15 @@ def assemble_single_tab(
         cd = composer.raw
 
         # Verify the conversation belongs to the requested workspace.
-        # Scoped MRC load for this composer only; full map + alias scan only
-        # when invalid workspace folders need majority-vote reassignment.
+        # Always scoped: only load messageRequestContext rows for this composer.
         project_layouts_map: dict[str, list] = {}
         invalid_workspace_aliases: dict[str, str] = {}
+        project_layouts_map[composer_id] = load_project_layouts_for_composer(
+            global_db, composer_id,
+        )
         if invalid_workspace_ids:
-            project_layouts_map = load_project_layouts_map(global_db)
+            # Alias resolution still needs the composer roster, but project layouts
+            # are intentionally limited to this composer (single-tab scope).
             composer_rows_for_aliases = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=composer_rows_for_aliases,
@@ -705,10 +708,6 @@ def assemble_single_tab(
                 bubble_map={},
                 composer_id_to_ws=composer_id_to_ws,
                 invalid_workspace_ids=invalid_workspace_ids,
-            )
-        else:
-            project_layouts_map[composer_id] = load_project_layouts_for_composer(
-                global_db, composer_id,
             )
 
         pid = determine_project_for_conversation(

@@ -108,6 +108,31 @@ def _make_fixture(base: str) -> str:
     return ws_path
 
 
+def _add_invalid_workspace_and_mrc_rows(ws_path: str) -> None:
+    """Add an invalid workspace entry and MRC rows for two composers (alias-path trigger)."""
+    invalid_dir = os.path.join(ws_path, "invalid-ws")
+    os.makedirs(invalid_dir, exist_ok=True)
+    wj = os.path.join(invalid_dir, "workspace.json")
+    with open(wj, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+
+    global_db = os.path.join(os.path.dirname(ws_path), "globalStorage", "state.vscdb")
+    conn = sqlite3.connect(global_db)
+    for cid, ctx_id in (
+        (COMPOSER_ID, "ctx-summary"),
+        (OTHER_COMPOSER_ID, "ctx-other"),
+    ):
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"messageRequestContext:{cid}:{ctx_id}",
+                json.dumps({"projectLayouts": [f"/roots/{cid}"]}),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
 def _collect_queries(ws_path, fn):
     """Call fn(ws_path) while recording every SQL query; return (result, queries)."""
     import services.workspace_tabs as _ws_tabs_mod
@@ -201,6 +226,25 @@ class TestAssembleSingleTab(unittest.TestCase):
             global_bubble_scans,
             [],
             msg=f"assemble_single_tab ran a non-scoped bubble scan:\n{global_bubble_scans}",
+        )
+
+    def test_scoped_mrc_load_with_invalid_workspaces(self):
+        """With invalid workspace folders, alias scan runs but MRC stays per-composer."""
+        _add_invalid_workspace_and_mrc_rows(self.ws_path)
+        (_, _), queries = _collect_queries(
+            self.ws_path,
+            lambda p: assemble_single_tab("global", COMPOSER_ID, p, rules=[]),
+        )
+        self.assertTrue(queries, msg="expected SQL queries to be recorded")
+        mrc_scans = [
+            q for q in queries
+            if "messageRequestContext:%" in q
+            and f"messageRequestContext:{COMPOSER_ID}:%" not in q
+        ]
+        self.assertEqual(
+            mrc_scans,
+            [],
+            msg=f"assemble_single_tab ran a global MRC scan:\n{mrc_scans}",
         )
 
     def test_scoped_mrc_load_no_invalid_workspaces(self):
