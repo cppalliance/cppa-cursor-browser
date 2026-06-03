@@ -203,6 +203,29 @@ class TestAssembleSingleTab(unittest.TestCase):
             msg=f"assemble_single_tab ran a non-scoped bubble scan:\n{global_bubble_scans}",
         )
 
+    def test_scoped_mrc_load_no_invalid_workspaces(self):
+        """Without invalid workspace folders, per-tab load must not full-scan MRC or composers."""
+        (_, _), queries = _collect_queries(
+            self.ws_path,
+            lambda p: assemble_single_tab("global", COMPOSER_ID, p, rules=[]),
+        )
+        mrc_scans = [
+            q for q in queries
+            if "messageRequestContext:%" in q
+            and f"messageRequestContext:{COMPOSER_ID}:%" not in q
+        ]
+        self.assertEqual(
+            mrc_scans,
+            [],
+            msg=f"assemble_single_tab ran a global MRC scan:\n{mrc_scans}",
+        )
+        composer_scans = [q for q in queries if "composerData:%" in q]
+        self.assertEqual(
+            composer_scans,
+            [],
+            msg=f"assemble_single_tab scanned all composers for aliases:\n{composer_scans}",
+        )
+
     def test_single_tab_structure(self):
         payload, status = assemble_single_tab("global", COMPOSER_ID, self.ws_path, rules=[])
         self.assertEqual(status, 200)

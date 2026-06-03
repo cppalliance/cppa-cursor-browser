@@ -102,6 +102,52 @@ class TestGetWorkspaceTabs:
         body = response.get_json()
         assert "error" in body
 
+    def test_summary_query_returns_tab_list_without_bubbles(self, client):
+        response = client.get(f"/api/workspaces/{HAPPY_WORKSPACE_ID}/tabs?summary=1")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert "tabs" in body and isinstance(body["tabs"], list)
+        assert body["tabs"], "expected at least one summary tab"
+        tab = next(t for t in body["tabs"] if t["id"] == HAPPY_COMPOSER_ID)
+        assert "title" in tab
+        assert "timestamp" in tab and isinstance(tab["timestamp"], int)
+        assert "messageCount" in tab and isinstance(tab["messageCount"], int)
+        assert "bubbles" not in tab
+
+    def test_summary_query_global_workspace(self, client):
+        response = client.get("/api/workspaces/global/tabs?summary=1")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert "tabs" in body and isinstance(body["tabs"], list)
+
+
+class TestGetWorkspaceTab:
+    def test_happy_path_returns_single_tab(self, client):
+        response = client.get(
+            f"/api/workspaces/{HAPPY_WORKSPACE_ID}/tabs/{HAPPY_COMPOSER_ID}"
+        )
+        assert response.status_code == 200
+        body = response.get_json()
+        assert "tab" in body
+        tab = body["tab"]
+        assert tab["id"] == HAPPY_COMPOSER_ID
+        assert "title" in tab
+        assert "timestamp" in tab and isinstance(tab["timestamp"], int)
+        assert "bubbles" in tab and isinstance(tab["bubbles"], list)
+        assert "codeBlockDiffs" in tab
+
+    def test_unknown_composer_returns_404(self, client):
+        response = client.get(
+            f"/api/workspaces/{HAPPY_WORKSPACE_ID}/tabs/no-such-composer"
+        )
+        assert response.status_code == 404
+        assert "error" in response.get_json()
+
+    def test_cli_workspace_returns_400(self, client):
+        response = client.get("/api/workspaces/cli:proj-1/tabs/cmp-happy")
+        assert response.status_code == 400
+        assert "error" in response.get_json()
+
 
 # ---------------------------------------------------------------------------
 # GET /api/search?q=...

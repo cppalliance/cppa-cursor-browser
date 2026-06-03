@@ -689,26 +689,27 @@ def assemble_single_tab(
         cd = composer.raw
 
         # Verify the conversation belongs to the requested workspace.
-        # Use MRC-based project layouts (no bubble scan) for the resolver.
-        project_layouts_map: dict[str, list] = load_project_layouts_map(global_db)
-
-        # Build aliases for workspace resolution (empty bubble_map — summary path)
-        composer_rows_for_aliases = _safe_fetchall(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-            " AND value IS NOT NULL"
-            " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
-        )
-        invalid_workspace_aliases = infer_invalid_workspace_aliases(
-            composer_rows=composer_rows_for_aliases,
-            project_layouts_map=project_layouts_map,
-            project_name_map=project_name_map,
-            workspace_path_map=workspace_path_map,
-            workspace_entries=workspace_entries,
-            bubble_map={},
-            composer_id_to_ws=composer_id_to_ws,
-            invalid_workspace_ids=invalid_workspace_ids,
-        )
+        # Scoped MRC load for this composer only; full map + alias scan only
+        # when invalid workspace folders need majority-vote reassignment.
+        project_layouts_map: dict[str, list] = {}
+        invalid_workspace_aliases: dict[str, str] = {}
+        if invalid_workspace_ids:
+            project_layouts_map = load_project_layouts_map(global_db)
+            composer_rows_for_aliases = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+            invalid_workspace_aliases = infer_invalid_workspace_aliases(
+                composer_rows=composer_rows_for_aliases,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map={},
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+            )
+        else:
+            project_layouts_map[composer_id] = load_project_layouts_for_composer(
+                global_db, composer_id,
+            )
 
         pid = determine_project_for_conversation(
             cd, composer_id, project_layouts_map,
