@@ -112,6 +112,34 @@ class TestDetermineProjectPrimaryMapping(unittest.TestCase):
         self.assertIsNone(assigned)
 
 
+class TestDetermineProjectStageOrdering(unittest.TestCase):
+    """Non-definitive stages are tried in fixed order; earlier stage wins on conflict."""
+
+    def test_newly_created_files_wins_over_conflicting_code_block_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_a_root = os.path.join(tmp, "project-a")
+            ws_b_root = os.path.join(tmp, "project-b")
+            os.makedirs(ws_a_root, exist_ok=True)
+            os.makedirs(ws_b_root, exist_ok=True)
+            entries = [
+                _write_workspace_json(tmp, "ws-a", ws_a_root),
+                _write_workspace_json(tmp, "ws-b", ws_b_root),
+            ]
+            file_a = os.path.join(ws_a_root, "src", "a.py")
+            file_b = os.path.join(ws_b_root, "src", "b.py")
+            os.makedirs(os.path.dirname(file_a), exist_ok=True)
+            os.makedirs(os.path.dirname(file_b), exist_ok=True)
+
+            assigned = _resolve(
+                {
+                    "newlyCreatedFiles": [{"uri": {"path": file_a}}],
+                    "codeBlockData": {f"file://{file_b}": {"language": "python"}},
+                },
+                workspace_entries=entries,
+            )
+            self.assertEqual(assigned, "ws-a")
+
+
 class TestDetermineProjectLayoutsStage(unittest.TestCase):
     def test_project_layouts_resolves_via_workspace_path_to_id(self) -> None:
         root = normalize_file_path("/work/repos/myapp")
@@ -133,7 +161,8 @@ class TestDetermineProjectLayoutsStage(unittest.TestCase):
         )
         self.assertEqual(assigned, "ws-from-name")
 
-    def test_missing_project_layouts_key_falls_through(self) -> None:
+    def test_newly_created_files_resolves_without_project_layouts_entry(self) -> None:
+        """No projectLayouts row: newlyCreatedFiles still resolves via workspace_entries."""
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = os.path.join(tmp, "proj")
             os.makedirs(ws_root, exist_ok=True)
@@ -147,6 +176,24 @@ class TestDetermineProjectLayoutsStage(unittest.TestCase):
                 workspace_entries=entries,
             )
             self.assertEqual(assigned, "ws-entries")
+
+    def test_unresolvable_project_layouts_falls_through_to_file_paths(self) -> None:
+        """projectLayouts roots that do not map still allow later file-path stages."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_root = os.path.join(tmp, "fallback-proj")
+            os.makedirs(ws_root, exist_ok=True)
+            entries = [_write_workspace_json(tmp, "ws-fallback", ws_root)]
+            inside = os.path.join(ws_root, "lib", "mod.py")
+            os.makedirs(os.path.dirname(inside), exist_ok=True)
+            unmapped_root = normalize_file_path("/no/such/workspace/root")
+
+            assigned = _resolve(
+                {"newlyCreatedFiles": [{"uri": {"path": inside}}]},
+                composer_id="cmp-unmapped-layout",
+                project_layouts_map={"cmp-unmapped-layout": [unmapped_root]},
+                workspace_entries=entries,
+            )
+            self.assertEqual(assigned, "ws-fallback")
 
 
 class TestDetermineProjectFilePathStages(unittest.TestCase):
@@ -290,6 +337,23 @@ class TestDetermineProjectPathSegmentStage(unittest.TestCase):
             )
             self.assertEqual(assigned, "ws-long")
 
+    def test_path_segment_matching_from_bubble_relevant_files(self) -> None:
+        """Path-segment last resort can use bubble file refs when composer has no file keys."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_root = os.path.join(tmp, "storage", "bubbleseg")
+            os.makedirs(ws_root, exist_ok=True)
+            entries = [_write_workspace_json(tmp, "ws-bubble-seg", ws_root)]
+
+            orphan = os.path.join(tmp, "external", "bubbleseg", "orphan.py")
+            os.makedirs(os.path.dirname(orphan), exist_ok=True)
+
+            assigned = _resolve(
+                {"fullConversationHeadersOnly": [{"bubbleId": "b-seg"}]},
+                bubble_map={"b-seg": {"relevantFiles": [orphan]}},
+                workspace_entries=entries,
+            )
+            self.assertEqual(assigned, "ws-bubble-seg")
+
 
 class TestDetermineProjectTerminalNone(unittest.TestCase):
     def test_all_stages_fail_returns_none(self) -> None:
@@ -397,6 +461,29 @@ class TestDetermineProjectFuzz(unittest.TestCase):
             invalid_workspace_ids=set(),
         )
         self.assertEqual(result, workspace_id)
+
+    @given(
+        composer_id=st.text(min_size=1, max_size=40),
+        invalid_id=st.text(min_size=1, max_size=40),
+    )
+    @settings(max_examples=60, deadline=None)
+    def test_invalid_definitive_mapping_never_returned_without_fallback(
+        self, composer_id: str, invalid_id: str
+    ) -> None:
+        """Ignored invalid mapping must not leak through when no heuristic stage matches."""
+        result = determine_project_for_conversation(
+            composer_data=dict(_EMPTY_COMPOSER),
+            composer_id=composer_id,
+            project_layouts_map={},
+            project_name_to_workspace_id={},
+            workspace_path_to_id={},
+            workspace_entries=[],
+            bubble_map={},
+            composer_id_to_workspace_id={composer_id: invalid_id},
+            invalid_workspace_ids={invalid_id},
+        )
+        self.assertNotEqual(result, invalid_id)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
