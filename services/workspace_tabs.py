@@ -848,20 +848,20 @@ def assemble_workspace_tabs(
             if len(parts) < 2:
                 continue
             chat_id = parts[1]
-            ctx = _loads_kv_value_logged(row["key"], row["value"])
-            if not isinstance(ctx, dict):
+            mrc = _loads_kv_value_logged(row["key"], row["value"])
+            if not isinstance(mrc, dict):
                 continue
 
             # Per-bubble context map (needs the contextId at parts[2])
             if len(parts) >= 3:
                 context_id = parts[2]
                 message_request_context_map.setdefault(chat_id, []).append({
-                    **ctx,
+                    **mrc,
                     "contextId": context_id,
                 })
 
             # Project-layout map (root paths used by the resolver)
-            layouts = ctx.get("projectLayouts")
+            layouts = mrc.get("projectLayouts")
             if isinstance(layouts, list):
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
