@@ -4,8 +4,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-_logger = logging.getLogger(__name__)
-
 from models.errors import SchemaError
 from models.from_dict_validation import (
     require_dict,
@@ -14,6 +12,8 @@ from models.from_dict_validation import (
     require_non_empty_str_field,
     require_type,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)

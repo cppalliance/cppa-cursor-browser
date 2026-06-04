@@ -1,7 +1,17 @@
 """Text extraction helpers mirroring the bubble/richText parsing in the Node.js codebase."""
 
+from __future__ import annotations
+
 import json
 import re
+from typing import Any, Protocol
+
+
+class HasBubbleRaw(Protocol):
+    """Bubble model or any object exposing a Cursor JSON ``raw`` dict."""
+
+    @property
+    def raw(self) -> dict[str, Any]: ...
 
 
 def extract_text_from_rich_text(children: list) -> str:
@@ -21,12 +31,12 @@ def extract_text_from_rich_text(children: list) -> str:
     return text
 
 
-def extract_text_from_bubble(bubble: dict | object) -> str:
+def extract_text_from_bubble(bubble: HasBubbleRaw | dict[str, Any]) -> str:
     """Extract displayable text from a bubble object (text, richText, codeBlocks)."""
-    if hasattr(bubble, "raw"):
-        bubble = bubble.raw  # type: ignore[union-attr]
-    if not bubble or not isinstance(bubble, dict):
+    raw: dict[str, Any] = bubble if isinstance(bubble, dict) else bubble.raw
+    if not raw:
         return ""
+    bubble = raw
 
     text = ""
 

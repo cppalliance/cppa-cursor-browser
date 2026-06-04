@@ -163,13 +163,19 @@ def composer_headers(
 
     if isinstance(data, Composer):
         return data.full_conversation_headers_only
-    headers = optional_raw_list(
-        data,
-        "fullConversationHeadersOnly",
-        model="Composer",
-        entity_id=composer_id,
-    )
-    return headers if headers is not None else []
+    if not isinstance(data, dict):
+        return []
+    value = data.get("fullConversationHeadersOnly")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        _logger.warning(
+            "Schema drift in Composer %s: invalid type for fullConversationHeadersOnly (expected list, got %s)",
+            composer_id,
+            type(value).__name__,
+        )
+        return []
+    return value
 
 
 def composer_newly_created_files(data: Any, composer_id: str) -> list[Any]:
@@ -206,11 +212,13 @@ def bubble_relevant_files(bubble: Any, bubble_id: str = "") -> list[Any]:
     if isinstance(bubble, Bubble):
         return bubble.relevant_files
     if isinstance(bubble, dict):
-        value = bubble.get("relevantFiles")
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
+        files = optional_raw_list(
+            bubble,
+            "relevantFiles",
+            model="Bubble",
+            entity_id=bubble_id,
+        )
+        return files if files is not None else []
     return []
 
 
@@ -220,11 +228,13 @@ def bubble_attached_file_uris(bubble: Any, bubble_id: str = "") -> list[Any]:
     if isinstance(bubble, Bubble):
         return bubble.attached_file_code_chunks_uris
     if isinstance(bubble, dict):
-        value = bubble.get("attachedFileCodeChunksUris")
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
+        uris = optional_raw_list(
+            bubble,
+            "attachedFileCodeChunksUris",
+            model="Bubble",
+            entity_id=bubble_id,
+        )
+        return uris if uris is not None else []
     return []
 
 
@@ -232,11 +242,13 @@ def bubble_context(bubble: Any, bubble_id: str = "") -> dict[str, Any]:
     from models.conversation import Bubble
 
     if isinstance(bubble, Bubble):
-        return bubble.context or {}
+        return bubble.context
     if isinstance(bubble, dict):
-        ctx = bubble.get("context")
-        if ctx is None:
-            return {}
-        if isinstance(ctx, dict):
-            return ctx
+        ctx = optional_raw_dict(
+            bubble,
+            "context",
+            model="Bubble",
+            entity_id=bubble_id,
+        )
+        return ctx if ctx is not None else {}
     return {}

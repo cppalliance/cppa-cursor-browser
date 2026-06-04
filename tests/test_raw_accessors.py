@@ -24,7 +24,9 @@ from tests.test_models import GOOD_COMPOSER_RAW
 
 class TestRawAccessorDriftLogging(unittest.TestCase):
     def test_composer_newly_created_files_empty_when_key_missing(self) -> None:
-        bare = Composer.from_dict(GOOD_COMPOSER_RAW, composer_id="cid-2")
+        raw = dict(GOOD_COMPOSER_RAW)
+        raw.pop("newlyCreatedFiles", None)
+        bare = Composer.from_dict(raw, composer_id="cid-2")
         with self.assertNoLogs("models.conversation", level="WARNING"):
             self.assertEqual(bare.newly_created_files, [])
 
