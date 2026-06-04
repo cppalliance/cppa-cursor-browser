@@ -29,17 +29,21 @@ from services.summary_cache import (
 )
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
+    assigned_workspace_from_mapping,
     build_composer_id_to_workspace_id_cached,
+    get_workspace_composer_registry_cached,
     collect_invalid_workspace_ids,
     collect_workspace_entries,
     global_storage_db_path,
     load_bubbles_for_composer,
     load_code_block_diff_map,
     load_code_block_diffs_for_composer,
+    load_composer_rows_for_workspace_summary,
     load_message_request_context_for_composer,
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
+    prefetch_project_layouts_for_unmapped,
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
@@ -49,6 +53,7 @@ from services.workspace_resolver import (
     infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
 )
+from services.workspace_listing import _composer_valid_for_listing
 
 
 
@@ -492,9 +497,10 @@ def _build_workspace_tab_summaries_uncached(
     invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
     project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
     workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+    registry = get_workspace_composer_registry_cached(
         workspace_path, workspace_entries, rules, nocache=nocache,
     )
+    composer_id_to_ws = registry.composer_id_to_ws
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     with open_global_db(workspace_path) as (global_db, _):
@@ -513,12 +519,24 @@ def _build_workspace_tab_summaries_uncached(
         if invalid_workspace_ids:
             project_layouts_map = load_project_layouts_map(global_db)
 
-        composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+        composer_rows, alias_rows, unmapped_for_layouts = load_composer_rows_for_workspace_summary(
+            global_db,
+            composer_id_to_ws,
+            matching_ws_ids,
+            invalid_workspace_ids,
+            registry=registry,
+        )
+        prefetch_project_layouts_for_unmapped(
+            global_db,
+            unmapped_for_layouts,
+            project_layouts_map,
+            invalid_workspace_ids=invalid_workspace_ids,
+        )
 
         invalid_workspace_aliases: dict[str, str] = {}
         if invalid_workspace_ids:
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                composer_rows=composer_rows,
+                composer_rows=alias_rows,
                 project_layouts_map=project_layouts_map,
                 project_name_map=project_name_map,
                 workspace_path_map=workspace_path_map,
@@ -530,39 +548,26 @@ def _build_workspace_tab_summaries_uncached(
 
         for row in composer_rows:
             composer_id = row["key"].split(":")[1]
-            try:
-                cd = json.loads(row["value"])
-            except (json.JSONDecodeError, TypeError, ValueError) as e:
-                payload_len, payload_fp = _kv_payload_log_meta(row["value"])
-                _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s (payload_len=%d, payload_sha256=%s)",
-                    composer_id,
-                    e,
-                    payload_len,
-                    payload_fp,
-                )
-                parse_warnings.record_composer_skipped()
-                continue
+            cd = _loads_kv_value_logged(row["key"], row["value"])
             if not isinstance(cd, dict):
                 parse_warnings.record_composer_skipped()
                 continue
+            if not _composer_valid_for_listing(cd, composer_id, parse_warnings):
+                continue
             try:
-                if (
-                    composer_id not in composer_id_to_ws
-                    and composer_id not in project_layouts_map
-                ):
-                    project_layouts_map[composer_id] = load_project_layouts_for_composer(
-                        global_db, composer_id,
-                    )
-                pid = determine_project_for_conversation(
-                    cd, composer_id, project_layouts_map,
-                    project_name_map, workspace_path_map,
-                    workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
+                assigned = assigned_workspace_from_mapping(
+                    composer_id,
+                    composer_id_to_ws,
+                    invalid_workspace_ids,
+                    invalid_workspace_aliases,
                 )
-                mapped_ws = composer_id_to_ws.get(composer_id)
-                if not pid and mapped_ws in invalid_workspace_ids:
-                    pid = invalid_workspace_aliases.get(mapped_ws)
-                assigned = pid if pid else "global"
+                if assigned is None:
+                    pid = determine_project_for_conversation(
+                        cd, composer_id, project_layouts_map,
+                        project_name_map, workspace_path_map,
+                        workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
+                    )
+                    assigned = pid if pid else "global"
 
                 if assigned not in matching_ws_ids:
                     continue

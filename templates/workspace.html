@@ -88,6 +88,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       selectTab(tabParam);
     } else if (allTabs.length > 0) {
       selectTab(allTabs[0].id);
+    } else {
+      const main = document.getElementById('main-content');
+      main.classList.remove('is-loading');
+      main.innerHTML =
+        '<div class="card" style="padding:2rem;text-align:center"><p class="text-muted">No conversations in this workspace.</p></div>';
+      document.getElementById('action-buttons').style.display = 'none';
     }
   } catch (e) {
     const main = document.getElementById('main-content');

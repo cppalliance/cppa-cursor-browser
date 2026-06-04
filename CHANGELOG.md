@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `load_code_block_diffs_for_composer` — used by the single-tab path (#84)
 
 ### Changed
+- **Workspace load performance (phase 2)** — project list and workspace summaries
+  no longer read every ``composerData`` JSON blob from global storage; mapped
+  composers are fetched by id, unmapped composers are discovered via a key-only
+  scan; per-workspace sidebar loads only composers mapped to that workspace;
+  ``composer_id → workspace`` disk cache no longer invalidates on global DB writes
+- **Workspace load performance** — sidebar summaries skip composers definitively
+  mapped to other workspaces (avoid JSON parse/heuristics on unrelated chats);
+  batched `messageRequestContext` layout loading replaces per-composer N+1
+  queries on list/summary paths
 - **List-path performance** — skip full `messageRequestContext` scan unless
   invalid workspace aliases are needed; filter `composerData` in SQL; skip
   `Composer.from_dict` on list/summary paths; cache `composer_id_to_ws` mapping (#84)

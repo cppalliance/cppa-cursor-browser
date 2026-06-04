@@ -84,6 +84,35 @@ def fingerprint_workspace_storage(
     }
 
 
+def fingerprint_composer_map(
+    workspace_path: str,
+    workspace_entries: list[dict],
+    rules: list,
+) -> dict[str, Any]:
+    """Fingerprint for ``composer_id → workspace`` map cache only.
+
+    Omits global DB mtime because the map is derived from per-workspace
+    ``state.vscdb`` files, not global storage.
+    """
+    ws_mt: list[list[str | int]] = []
+    for entry in workspace_entries:
+        name = entry.get("name")
+        if not isinstance(name, str):
+            continue
+        p = os.path.join(workspace_path, name, "state.vscdb")
+        mtime = _file_mtime_ns(p)
+        if mtime is not None:
+            ws_mt.append([f"{name}/state.vscdb", mtime])
+    ws_mt.sort(key=lambda row: row[0])
+    return {
+        "version": CACHE_VERSION,
+        "kind": "composer_map",
+        "workspace_path": os.path.normpath(workspace_path),
+        "workspace_files": ws_mt,
+        "rules_digest": _rules_digest(rules),
+    }
+
+
 def _normalize_fingerprint(fp: dict[str, Any]) -> dict[str, Any]:
     """Normalize fingerprint for comparison (JSON round-trip uses lists, not tuples)."""
     normalized = dict(fp)
@@ -182,6 +211,42 @@ def set_cached_composer_id_to_ws(
         {
             "fingerprint": fingerprint,
             "composer_id_to_ws": mapping,
+        },
+    )
+
+
+def get_cached_composer_registry(fingerprint: dict[str, Any]):
+    """Return cached :class:`~services.workspace_db.WorkspaceComposerRegistry`."""
+    from services.workspace_db import WorkspaceComposerRegistry
+
+    data = _read_cache_file(COMPOSER_MAP_CACHE_FILE)
+    if not data:
+        return None
+    if not _fingerprint_equal(data.get("fingerprint"), fingerprint):
+        return None
+    mapping = data.get("composer_id_to_ws")
+    by_ws = data.get("composers_by_workspace")
+    if not isinstance(mapping, dict):
+        return None
+    if not isinstance(by_ws, dict):
+        by_ws = {}
+    composer_id_to_ws = {str(k): str(v) for k, v in mapping.items()}
+    composers_by_workspace: dict[str, list] = {}
+    for ws_id, composers in by_ws.items():
+        if isinstance(composers, list):
+            composers_by_workspace[str(ws_id)] = [
+                c for c in composers if isinstance(c, dict)
+            ]
+    return WorkspaceComposerRegistry(composer_id_to_ws, composers_by_workspace)
+
+
+def set_cached_composer_registry(fingerprint: dict[str, Any], registry) -> None:
+    _write_cache_file(
+        COMPOSER_MAP_CACHE_FILE,
+        {
+            "fingerprint": fingerprint,
+            "composer_id_to_ws": registry.composer_id_to_ws,
+            "composers_by_workspace": registry.composers_by_workspace,
         },
     )
 
