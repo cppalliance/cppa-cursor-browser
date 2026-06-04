@@ -246,8 +246,18 @@ class Bubble:
         return value
 
     @property
-    def token_count(self) -> Any | None:
-        return self.raw.get("tokenCount")
+    def token_count(self) -> dict[str, Any] | None:
+        value = self.raw.get("tokenCount")
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            _logger.warning(
+                "Schema drift in Bubble %s: invalid type for tokenCount (expected dict, got %s)",
+                self.bubble_id,
+                type(value).__name__,
+            )
+            return None
+        return value
 
     @property
     def tool_former_data(self) -> dict[str, Any] | None:
@@ -279,11 +289,23 @@ class Bubble:
 
     @property
     def thinking(self) -> Any | None:
+        if "thinking" not in self.raw:
+            return None
         return self.raw.get("thinking")
 
     @property
-    def thinking_duration_ms(self) -> Any | None:
-        return self.raw.get("thinkingDurationMs")
+    def thinking_duration_ms(self) -> int | float | None:
+        value = self.raw.get("thinkingDurationMs")
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _logger.warning(
+                "Schema drift in Bubble %s: invalid type for thinkingDurationMs (expected number, got %s)",
+                self.bubble_id,
+                type(value).__name__,
+            )
+            return None
+        return value
 
     @property
     def context_window_status_at_creation(self) -> dict[str, Any]:

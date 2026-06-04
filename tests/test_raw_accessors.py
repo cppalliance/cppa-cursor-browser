@@ -44,17 +44,47 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         with self.assertNoLogs("models.conversation", level="WARNING"):
             self.assertEqual(bubble.relevant_files, [])
 
-    def test_project_layouts_warns_when_key_missing(self) -> None:
-        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+    def test_project_layouts_silent_when_key_missing(self) -> None:
+        with self.assertNoLogs("models.raw_access", level="WARNING"):
             layouts = message_request_context_project_layouts({}, composer_id="cmp-1")
+        self.assertIsNone(layouts)
+
+    def test_project_layouts_warns_on_wrong_type(self) -> None:
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            layouts = message_request_context_project_layouts(
+                {"projectLayouts": "not-a-list"},
+                composer_id="cmp-1",
+            )
         self.assertIsNone(layouts)
         self.assertTrue(any("projectLayouts" in m for m in logs.output), logs.output)
 
-    def test_conversation_header_bubble_id_warns_when_missing(self) -> None:
-        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+    def test_conversation_header_bubble_id_silent_when_missing(self) -> None:
+        with self.assertNoLogs("models.raw_access", level="WARNING"):
             bid = conversation_header_bubble_id({"type": 1}, composer_id="cmp-1")
         self.assertIsNone(bid)
+
+    def test_conversation_header_bubble_id_warns_on_wrong_type(self) -> None:
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            bid = conversation_header_bubble_id(
+                {"bubbleId": 123, "type": 1},
+                composer_id="cmp-1",
+            )
+        self.assertIsNone(bid)
         self.assertTrue(any("bubbleId" in m for m in logs.output), logs.output)
+
+    def test_bubble_timestamp_ms_prefers_created_at_and_handles_zero(self) -> None:
+        b = Bubble.from_dict(
+            {"createdAt": 0, "timestamp": 99},
+            bubble_id="b-ts",
+        )
+        self.assertEqual(b.bubble_timestamp_ms(), 0)
+
+        no_ts = Bubble.from_dict({"text": "hi"}, bubble_id="b-none")
+        self.assertIsNone(no_ts.bubble_timestamp_ms())
+
+        bad_bool = Bubble.from_dict({"createdAt": True}, bubble_id="b-bool")
+        with self.assertNoLogs("models.conversation", level="WARNING"):
+            self.assertIsNone(bad_bool.bubble_timestamp_ms())
 
     def test_dict_bridge_newly_created_files_matches_composer_property(self) -> None:
         data = {**GOOD_COMPOSER_RAW, "newlyCreatedFiles": [{"uri": {"path": "/a"}}]}

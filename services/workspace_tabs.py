@@ -82,6 +82,21 @@ def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
         return None
 
 
+def _bubble_entry_timestamp_ms(bubble: Bubble) -> int:
+    raw_ts = bubble.bubble_timestamp_ms()
+    if raw_ts is not None:
+        return to_epoch_ms(raw_ts)
+    return int(datetime.now().timestamp() * 1000)
+
+
+def _composer_tab_timestamp_ms(composer: Composer) -> int:
+    if composer.last_updated_at is not None:
+        return to_epoch_ms(composer.last_updated_at)
+    if composer.created_at is not None:
+        return to_epoch_ms(composer.created_at)
+    return int(datetime.now().timestamp() * 1000)
+
+
 def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
     """Byte length and short SHA-256 prefix for logs without emitting raw KV payloads."""
     if value is None:
@@ -245,7 +260,8 @@ def _assemble_tab_from_composer_data(
             model_name = None
 
         if msg_type == "ai":
-            tc_dict = token_count if isinstance(token_count, dict) else {}
+            tc_dict = token_count or {}
+            tool_results = bubble.tool_results
             in_tok = tc_dict.get("inputTokens") or 0
             out_tok = tc_dict.get("outputTokens") or 0
             cached_tok = tc_dict.get("cachedTokens") or 0
@@ -254,8 +270,8 @@ def _assemble_tab_from_composer_data(
                 "inputTokens": in_tok if in_tok > 0 else None,
                 "outputTokens": out_tok if out_tok > 0 else None,
                 "cachedTokens": cached_tok if cached_tok > 0 else None,
-                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(bubble.tool_results) if bubble.tool_results else None),
-                "toolResults": bubble.tool_results if bubble.tool_results else None,
+                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(tool_results) if tool_results else None),
+                "toolResults": tool_results if tool_results else None,
                 "toolCalls": tool_calls,
                 "thinking": thinking,
                 "thinkingDurationMs": thinking_duration_ms,
@@ -282,7 +298,7 @@ def _assemble_tab_from_composer_data(
         b_entry = {
             "type": msg_type,
             "text": display_text,
-            "timestamp": to_epoch_ms(bubble.bubble_timestamp_ms()) or int(datetime.now().timestamp() * 1000),
+            "timestamp": _bubble_entry_timestamp_ms(bubble),
         }
         if bubble_meta:
             b_entry["metadata"] = bubble_meta
@@ -405,7 +421,7 @@ def _assemble_tab_from_composer_data(
     tab: dict[str, Any] = {
         "id": composer_id,
         "title": title,
-        "timestamp": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or int(datetime.now().timestamp() * 1000),
+        "timestamp": _composer_tab_timestamp_ms(composer),
         "bubbles": [{
             "type": b["type"],
             "text": b.get("text", ""),
@@ -624,7 +640,8 @@ def _build_workspace_tab_summaries_uncached(
                 tab_entry: dict = {
                     "id": composer_id,
                     "title": title,
-                    "timestamp": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or int(datetime.now().timestamp() * 1000),
+                    "timestamp": _composer_tab_timestamp_ms(composer),
+                    # Header count (KV rows), not renderable bubbles after assembly filters.
                     "messageCount": len(headers),
                 }
                 if tab_meta:
