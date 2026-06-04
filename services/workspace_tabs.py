@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -95,7 +96,7 @@ def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
 def _assemble_tab_from_composer_data(
     composer_id: str,
     composer: Composer,
-    bubble_map: dict[str, Bubble | dict[str, Any]],
+    bubble_map: Mapping[str, Bubble | dict[str, Any]],
     contexts: list[dict],
     code_block_diffs: list[dict],
     workspace_display_name: str,
