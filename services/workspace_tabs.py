@@ -131,7 +131,7 @@ def _assemble_tab_from_composer_data(
         if not bubble_id:
             continue
         bubble_entry = bubble_map.get(bubble_id)
-        if not bubble_entry:
+        if bubble_entry is None:
             continue
         if isinstance(bubble_entry, Bubble):
             bubble = bubble_entry
@@ -572,6 +572,16 @@ def _build_workspace_tab_summaries_uncached(
                 parse_warnings.record_composer_skipped()
                 continue
             try:
+                composer = Composer.from_dict(cd, composer_id=composer_id)
+            except SchemaError as e:
+                _logger.warning(
+                    "Failed to parse Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
+                parse_warnings.record_composer_skipped()
+                continue
+            try:
                 if (
                     composer_id not in composer_id_to_ws
                     and composer_id not in project_layouts_map
@@ -580,7 +590,7 @@ def _build_workspace_tab_summaries_uncached(
                         global_db, composer_id,
                     )
                 pid = determine_project_for_conversation(
-                    cd, composer_id, project_layouts_map,
+                    composer, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
                     workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
                 )
@@ -592,14 +602,13 @@ def _build_workspace_tab_summaries_uncached(
                 if assigned not in matching_ws_ids:
                     continue
 
-                headers = cd.get("fullConversationHeadersOnly") or []
+                headers = composer.full_conversation_headers_only
                 if not headers:
                     continue
 
-                title = cd.get("name") or f"Conversation {composer_id[:8]}"
+                title = composer.name or f"Conversation {composer_id[:8]}"
 
-                _early_model_config = cd.get("modelConfig") or {}
-                _early_model_name = _early_model_config.get("modelName")
+                _early_model_name = composer.model_name_from_config()
                 _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
                 if is_excluded_by_rules(rules, build_searchable_text(
                     project_name=workspace_display_name,
@@ -615,7 +624,7 @@ def _build_workspace_tab_summaries_uncached(
                 tab_entry: dict = {
                     "id": composer_id,
                     "title": title,
-                    "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
+                    "timestamp": to_epoch_ms(composer.last_updated_at) or to_epoch_ms(composer.created_at) or int(datetime.now().timestamp() * 1000),
                     "messageCount": len(headers),
                 }
                 if tab_meta:
