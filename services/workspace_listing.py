@@ -24,7 +24,7 @@ from services.summary_cache import (
     nocache_enabled,
     set_cached_projects,
 )
-from services.workspace_context import resolve_workspace_context
+from services.workspace_context import resolve_workspace_context_cached
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
     collect_workspace_entries,
@@ -122,12 +122,11 @@ def _build_workspace_projects_uncached(
     nocache: bool,
 ) -> tuple[list[dict], list[dict]]:
     parse_warnings = ParseWarningCollector()
-    ctx = resolve_workspace_context(
+    ctx = resolve_workspace_context_cached(
         workspace_path,
+        rules,
         workspace_entries=workspace_entries,
-        rules=rules,
         nocache=nocache,
-        use_composer_cache=True,
     )
     invalid_workspace_ids = ctx.invalid_workspace_ids
     project_name_map = ctx.project_name_to_workspace_id
