@@ -22,17 +22,15 @@ from utils.path_helpers import to_epoch_ms
 from utils.text_extract import extract_text_from_bubble, slug
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.cursor_md_exporter import cursor_ide_chat_to_markdown
+from services.workspace_context import (
+    enrich_workspace_context_from_global_db,
+    resolve_workspace_context,
+)
 from services.workspace_db import (
-    build_composer_id_to_workspace_id,
-    collect_workspace_entries,
-    load_bubble_map,
     load_code_block_diff_map,
     open_global_db,
 )
-from services.workspace_resolver import (
-    create_project_name_to_workspace_id_map,
-    lookup_workspace_display_name,
-)
+from services.workspace_resolver import lookup_workspace_display_name
 
 bp = Blueprint("export_api", __name__)
 _logger = logging.getLogger(__name__)
@@ -102,9 +100,13 @@ def export_chats():
                 last_export_ms = to_epoch_ms(ts_str)
 
         # ── Workspace scanning via service layer ──────────────────────────────
-        workspace_entries = collect_workspace_entries(workspace_path)
-        composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
-        project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
+        ctx = resolve_workspace_context(
+            workspace_path,
+            include_invalid_workspace_ids=False,
+            include_workspace_path_map=False,
+        )
+        workspace_entries = ctx.workspace_entries
+        composer_id_to_ws = ctx.composer_id_to_workspace_id
 
         # Build display-name and slug maps
         ws_id_to_slug: dict[str, str] = {}
@@ -124,7 +126,10 @@ def export_chats():
             if global_db is None:
                 return jsonify({"error": "Cursor global storage not found"}), 404
 
-            bubble_map = load_bubble_map(global_db)
+            ctx = enrich_workspace_context_from_global_db(
+                ctx, global_db, populate_bubble_map=True,
+            )
+            bubble_map = ctx.bubble_map
             code_block_diff_map = load_code_block_diff_map(global_db)
 
             try:
