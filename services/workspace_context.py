@@ -95,9 +95,18 @@ def resolve_workspace_context_cached(
     )
 
 
-def resolve_workspace_context_minimal(workspace_path: str) -> WorkspaceContext:
-    """Entries, project-name, and composer maps only (HTTP export)."""
-    entries = collect_workspace_entries(workspace_path)
+def resolve_workspace_context_minimal(
+    workspace_path: str,
+    *,
+    workspace_entries: list[dict] | None = None,
+) -> WorkspaceContext:
+    """Entries, project-name, and composer maps only (HTTP export).
+
+    Args:
+        workspace_path: Cursor ``workspaceStorage`` root.
+        workspace_entries: Pre-collected entries; when ``None``, scanned from disk.
+    """
+    entries = _entries(workspace_path, workspace_entries)
     return _assemble_context(
         entries,
         invalid_workspace_ids=set(),

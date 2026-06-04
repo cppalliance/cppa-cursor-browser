@@ -78,6 +78,18 @@ def test_resolve_workspace_context_populates_invalid_workspace_ids():
         assert "abc123workspace" not in ctx.invalid_workspace_ids
 
 
+def test_resolve_workspace_context_cached_passes_nocache():
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _make_workspace_root(tmp)
+        with patch(
+            "services.workspace_context.build_composer_id_to_workspace_id_cached",
+            return_value={},
+        ) as mock_cached:
+            resolve_workspace_context_cached(ws_root, [], nocache=True)
+        mock_cached.assert_called_once()
+        assert mock_cached.call_args.kwargs["nocache"] is True
+
+
 def test_resolve_workspace_context_cached_uses_cached_composer_map():
     with tempfile.TemporaryDirectory() as tmp:
         ws_root = _make_workspace_root(tmp)
@@ -130,6 +142,19 @@ def test_resolve_workspace_context_accepts_pre_collected_entries():
         assert ctx.workspace_entries is entries
 
 
+def test_resolve_workspace_context_minimal_accepts_pre_collected_entries():
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _make_workspace_root(tmp)
+        entries = [{"name": "x", "workspaceJsonPath": "/fake/workspace.json"}]
+        with patch(
+            "services.workspace_context.collect_workspace_entries",
+            return_value=entries,
+        ) as mock_collect:
+            ctx = resolve_workspace_context_minimal(ws_root, workspace_entries=entries)
+        mock_collect.assert_not_called()
+        assert ctx.workspace_entries is entries
+
+
 def test_enrich_populates_bubble_map():
     with tempfile.TemporaryDirectory() as tmp:
         ctx = resolve_workspace_context(_make_workspace_root(tmp))
@@ -169,3 +194,46 @@ def test_enrich_populates_project_layouts_map():
             conn.close()
         assert enriched.project_layouts_map["composer-1"] == ["/tmp/myproject"]
         assert ctx.project_layouts_map == {}
+
+
+def test_enrich_populates_both_global_maps():
+    with tempfile.TemporaryDirectory() as tmp:
+        ctx = resolve_workspace_context(_make_workspace_root(tmp))
+        conn = _open_global_db(tmp)
+        mrc = {
+            "projectLayouts": [json.dumps({"rootPath": "/tmp/myproject"})],
+        }
+        conn.execute(
+            "INSERT INTO cursorDiskKV VALUES (?, ?)",
+            ("messageRequestContext:composer-1:ctx1", json.dumps(mrc)),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV VALUES (?, ?)",
+            ("bubbleId:cid1:bid1", json.dumps({"type": 1, "text": "hi"})),
+        )
+        conn.commit()
+        try:
+            enriched = enrich_workspace_context_from_global_db(
+                ctx,
+                conn,
+                populate_project_layouts=True,
+                populate_bubble_map=True,
+            )
+        finally:
+            conn.close()
+        assert enriched.project_layouts_map["composer-1"] == ["/tmp/myproject"]
+        assert enriched.bubble_map.get("bid1") is not None
+        assert ctx.project_layouts_map == {}
+        assert ctx.bubble_map == {}
+
+
+def test_enrich_with_no_flags_returns_unchanged_context():
+    with tempfile.TemporaryDirectory() as tmp:
+        ctx = resolve_workspace_context(_make_workspace_root(tmp))
+        conn = _open_global_db(tmp)
+        conn.commit()
+        try:
+            result = enrich_workspace_context_from_global_db(ctx, conn)
+        finally:
+            conn.close()
+        assert result is ctx
