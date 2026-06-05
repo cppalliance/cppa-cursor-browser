@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -21,6 +22,10 @@ from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from models.raw_access import (
+    conversation_header_bubble_id,
+    message_request_context_project_layouts,
+)
 from services.summary_cache import (
     fingerprint_workspace_storage,
     get_cached_tab_summaries,
@@ -77,6 +82,21 @@ def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
         return None
 
 
+def _bubble_entry_timestamp_ms(bubble: Bubble) -> int:
+    raw_ts = bubble.bubble_timestamp_ms()
+    if raw_ts is not None:
+        return to_epoch_ms(raw_ts)
+    return int(datetime.now().timestamp() * 1000)
+
+
+def _composer_tab_timestamp_ms(composer: Composer) -> int:
+    if composer.last_updated_at is not None:
+        return to_epoch_ms(composer.last_updated_at)
+    if composer.created_at is not None:
+        return to_epoch_ms(composer.created_at)
+    return int(datetime.now().timestamp() * 1000)
+
+
 def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
     """Byte length and short SHA-256 prefix for logs without emitting raw KV payloads."""
     if value is None:
@@ -90,20 +110,20 @@ def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
 
 def _assemble_tab_from_composer_data(
     composer_id: str,
-    cd: dict,
-    bubble_map: dict[str, dict],
+    composer: Composer,
+    bubble_map: Mapping[str, Bubble | dict[str, Any]],
     contexts: list[dict],
     code_block_diffs: list[dict],
     workspace_display_name: str,
     rules: list,
     parse_warnings: ParseWarningCollector,
 ) -> dict | None:
-    """Assemble a single tab dict from an already-parsed composer dict.
+    """Assemble a single tab dict from a validated :class:`Composer`.
 
     Args:
         composer_id: Composer UUID.
-        cd: Raw ``composerData`` dict (``composer.raw``).
-        bubble_map: ``{bubble_id: bubble_dict}`` — may be global or scoped.
+        composer: Validated composer model (typed field access on ``.raw``).
+        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` — global or scoped.
         contexts: ``messageRequestContext`` entries for *this* composer
             (list of dicts, each with an injected ``contextId`` key and a
             ``bubbleId`` field from the JSON value).
@@ -116,18 +136,31 @@ def _assemble_tab_from_composer_data(
         A tab dict on success, or ``None`` when the tab should be omitted
         (no renderable bubbles or excluded by rules).
     """
-    headers = cd.get("fullConversationHeadersOnly") or []
+    headers = composer.full_conversation_headers_only
 
     bubbles: list[dict[str, Any]] = []
     for header in headers:
         if not isinstance(header, dict):
             continue
-        bubble_id = header.get("bubbleId")
-        if not isinstance(bubble_id, str):
+        bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
+        if not bubble_id:
             continue
-        bubble = bubble_map.get(bubble_id)
-        if not bubble:
+        bubble_entry = bubble_map.get(bubble_id)
+        if bubble_entry is None:
             continue
+        if isinstance(bubble_entry, Bubble):
+            bubble = bubble_entry
+        else:
+            try:
+                bubble = Bubble.from_dict(bubble_entry, bubble_id=bubble_id)
+            except SchemaError as e:
+                _logger.warning(
+                    "Failed to parse Bubble from bubbleId:%s: %s",
+                    bubble_id,
+                    e,
+                )
+                parse_warnings.record_bubble_skipped()
+                continue
 
         is_user = header.get("type") == 1
         msg_type = "user" if is_user else "ai"
@@ -174,11 +207,10 @@ def _assemble_tab_from_composer_data(
                         context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
 
         full_text = text + context_text
-        raw = bubble
-        token_count = raw.get("tokenCount")
+        token_count = bubble.token_count
 
         tool_calls = None
-        tfd = raw.get("toolFormerData")
+        tfd = bubble.tool_former_data
         if isinstance(tfd, dict):
             tool_call = parse_tool_call(tfd)
             if isinstance(tool_call, dict):
@@ -186,15 +218,24 @@ def _assemble_tab_from_composer_data(
 
         thinking = None
         thinking_duration_ms = None
-        if raw.get("thinking"):
-            thinking = raw["thinking"] if isinstance(raw["thinking"], str) else (raw["thinking"].get("text") if isinstance(raw["thinking"], dict) else None)
-            thinking_duration_ms = raw.get("thinkingDurationMs")
+        thinking_raw = bubble.thinking
+        if thinking_raw:
+            thinking = (
+                thinking_raw
+                if isinstance(thinking_raw, str)
+                else (
+                    thinking_raw.get("text")
+                    if isinstance(thinking_raw, dict)
+                    else None
+                )
+            )
+            thinking_duration_ms = bubble.thinking_duration_ms
 
         has_content = full_text.strip() or tool_calls or thinking
         if not has_content:
             continue
 
-        ctx_window = raw.get("contextWindowStatusAtCreation") or {}
+        ctx_window = bubble.context_window_status_at_creation
         ctx_pct = None
         if isinstance(ctx_window, dict):
             if ctx_window.get("percentageRemainingFloat") is not None:
@@ -213,13 +254,14 @@ def _assemble_tab_from_composer_data(
             display_text = thinking
 
         bubble_meta = None
-        model_info = raw.get("modelInfo") or {}
+        model_info = bubble.model_info
         model_name = model_info.get("modelName")
         if model_name == "default":
             model_name = None
 
         if msg_type == "ai":
-            tc_dict = token_count if isinstance(token_count, dict) else {}
+            tc_dict = token_count or {}
+            tool_results = bubble.tool_results
             in_tok = tc_dict.get("inputTokens") or 0
             out_tok = tc_dict.get("outputTokens") or 0
             cached_tok = tc_dict.get("cachedTokens") or 0
@@ -228,8 +270,8 @@ def _assemble_tab_from_composer_data(
                 "inputTokens": in_tok if in_tok > 0 else None,
                 "outputTokens": out_tok if out_tok > 0 else None,
                 "cachedTokens": cached_tok if cached_tok > 0 else None,
-                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(raw["toolResults"]) if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None),
-                "toolResults": raw.get("toolResults") if isinstance(raw.get("toolResults"), list) and raw["toolResults"] else None,
+                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(tool_results) if tool_results else None),
+                "toolResults": tool_results if tool_results else None,
                 "toolCalls": tool_calls,
                 "thinking": thinking,
                 "thinkingDurationMs": thinking_duration_ms,
@@ -256,7 +298,7 @@ def _assemble_tab_from_composer_data(
         b_entry = {
             "type": msg_type,
             "text": display_text,
-            "timestamp": to_epoch_ms(bubble.get("createdAt")) or to_epoch_ms(bubble.get("timestamp")) or int(datetime.now().timestamp() * 1000),
+            "timestamp": _bubble_entry_timestamp_ms(bubble),
         }
         if bubble_meta:
             b_entry["metadata"] = bubble_meta
@@ -265,8 +307,8 @@ def _assemble_tab_from_composer_data(
     if not bubbles:
         return None
 
-    title = cd.get("name") or f"Conversation {composer_id[:8]}"
-    if not cd.get("name") and bubbles:
+    title = composer.name or f"Conversation {composer_id[:8]}"
+    if not composer.name and bubbles:
         first_msg = bubbles[0].get("text", "")
         if first_msg:
             first_lines = [ln for ln in first_msg.split("\n") if ln.strip()]
@@ -275,8 +317,7 @@ def _assemble_tab_from_composer_data(
                 if len(title) == 100:
                     title += "..."
 
-    _early_model_config = cd.get("modelConfig") or {}
-    _early_model_name = _early_model_config.get("modelName")
+    _early_model_name = composer.model_name_from_config()
     _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
     if is_excluded_by_rules(rules, build_searchable_text(
         project_name=workspace_display_name,
@@ -324,15 +365,15 @@ def _assemble_tab_from_composer_data(
         if m.get("thinkingDurationMs"):
             total_thinking_ms += m["thinkingDurationMs"]
 
-    usage = cd.get("usageData") or {}
+    usage = composer.usage_data
     composer_cost = usage.get("cost") or usage.get("estimatedCost")
     if isinstance(composer_cost, (int, float)) and total_cost == 0:
         total_cost = composer_cost
 
-    lines_added = cd.get("totalLinesAdded", 0)
-    lines_removed = cd.get("totalLinesRemoved", 0)
-    files_added = cd.get("addedFiles", 0)
-    files_removed = cd.get("removedFiles", 0)
+    lines_added = composer.total_lines_added
+    lines_removed = composer.total_lines_removed
+    files_added = composer.added_files
+    files_removed = composer.removed_files
 
     max_ctx_tokens = 0
     ctx_token_limit = 0
@@ -367,8 +408,7 @@ def _assemble_tab_from_composer_data(
         }
         tab_meta = {k: v for k, v in tab_meta_raw.items() if v is not None}
 
-    model_config = cd.get("modelConfig") or {}
-    model_name_from_config = model_config.get("modelName")
+    model_name_from_config = composer.model_name_from_config()
     if model_name_from_config and model_name_from_config != "default":
         if not tab_meta:
             tab_meta = {}
@@ -381,7 +421,7 @@ def _assemble_tab_from_composer_data(
     tab: dict[str, Any] = {
         "id": composer_id,
         "title": title,
-        "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
+        "timestamp": _composer_tab_timestamp_ms(composer),
         "bubbles": [{
             "type": b["type"],
             "text": b.get("text", ""),
@@ -548,6 +588,16 @@ def _build_workspace_tab_summaries_uncached(
                 parse_warnings.record_composer_skipped()
                 continue
             try:
+                composer = Composer.from_dict(cd, composer_id=composer_id)
+            except SchemaError as e:
+                _logger.warning(
+                    "Failed to parse Composer from composerData:%s: %s",
+                    composer_id,
+                    e,
+                )
+                parse_warnings.record_composer_skipped()
+                continue
+            try:
                 if (
                     composer_id not in composer_id_to_ws
                     and composer_id not in project_layouts_map
@@ -556,7 +606,7 @@ def _build_workspace_tab_summaries_uncached(
                         global_db, composer_id,
                     )
                 pid = determine_project_for_conversation(
-                    cd, composer_id, project_layouts_map,
+                    composer, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
                     workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
                 )
@@ -568,14 +618,13 @@ def _build_workspace_tab_summaries_uncached(
                 if assigned not in matching_ws_ids:
                     continue
 
-                headers = cd.get("fullConversationHeadersOnly") or []
+                headers = composer.full_conversation_headers_only
                 if not headers:
                     continue
 
-                title = cd.get("name") or f"Conversation {composer_id[:8]}"
+                title = composer.name or f"Conversation {composer_id[:8]}"
 
-                _early_model_config = cd.get("modelConfig") or {}
-                _early_model_name = _early_model_config.get("modelName")
+                _early_model_name = composer.model_name_from_config()
                 _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
                 if is_excluded_by_rules(rules, build_searchable_text(
                     project_name=workspace_display_name,
@@ -591,7 +640,8 @@ def _build_workspace_tab_summaries_uncached(
                 tab_entry: dict = {
                     "id": composer_id,
                     "title": title,
-                    "timestamp": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000),
+                    "timestamp": _composer_tab_timestamp_ms(composer),
+                    # Header count (KV rows), not renderable bubbles after assembly filters.
                     "messageCount": len(headers),
                 }
                 if tab_meta:
@@ -686,8 +736,6 @@ def assemble_single_tab(
             )
             return {"error": "Failed to parse conversation"}, 500
 
-        cd = composer.raw
-
         # Verify the conversation belongs to the requested workspace.
         # Always scoped: only load messageRequestContext rows for this composer.
         project_layouts_map: dict[str, list] = {}
@@ -711,7 +759,7 @@ def assemble_single_tab(
             )
 
         pid = determine_project_for_conversation(
-            cd, composer_id, project_layouts_map,
+            composer, composer_id, project_layouts_map,
             project_name_map, workspace_path_map,
             workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
         )
@@ -730,7 +778,7 @@ def assemble_single_tab(
 
         tab = _assemble_tab_from_composer_data(
             composer_id=composer_id,
-            cd=cd,
+            composer=composer,
             bubble_map=bubble_map,
             contexts=contexts,
             code_block_diffs=code_block_diffs,
@@ -776,7 +824,7 @@ def assemble_workspace_tabs(
     composer_id_to_ws = ctx.composer_id_to_workspace_id
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
-    bubble_map: dict[str, dict] = {}
+    bubble_map: dict[str, Bubble] = {}
     code_block_diff_map: dict[str, list] = {}
     message_request_context_map: dict[str, list] = {}
 
@@ -816,7 +864,7 @@ def assemble_workspace_tabs(
                     continue
                 try:
                     bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
-                    bubble_map[bid] = bubble_obj.raw
+                    bubble_map[bid] = bubble_obj
                 except SchemaError as e:
                     # Drift logged so the operator can chase disappearing
                     # bubbles instead of guessing. Bad row still skipped so the
@@ -852,8 +900,8 @@ def assemble_workspace_tabs(
                 })
 
             # Project-layout map (root paths used by the resolver)
-            layouts = mrc.get("projectLayouts")
-            if isinstance(layouts, list):
+            layouts = message_request_context_project_layouts(mrc, composer_id=chat_id)
+            if layouts:
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
                     if isinstance(layout, str):
@@ -915,11 +963,9 @@ def assemble_workspace_tabs(
                 parse_warnings.record_composer_skipped()
                 continue
             try:
-                cd = composer.raw
-
                 # Determine project
                 pid = determine_project_for_conversation(
-                    cd, composer_id, project_layouts_map,
+                    composer, composer_id, project_layouts_map,
                     project_name_map, workspace_path_map,
                     workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
                 )
@@ -933,7 +979,7 @@ def assemble_workspace_tabs(
 
                 tab = _assemble_tab_from_composer_data(
                     composer_id=composer_id,
-                    cd=cd,
+                    composer=composer,
                     bubble_map=bubble_map,
                     contexts=message_request_context_map.get(composer_id, []),
                     code_block_diffs=code_block_diff_map.get(composer_id, []),

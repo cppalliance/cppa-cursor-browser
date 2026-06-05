@@ -6,8 +6,10 @@ import os
 import re
 import sqlite3
 import sys
+from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -20,6 +22,17 @@ from utils.path_helpers import (
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
 from services.workspace_db import open_global_db
 from models import SchemaError, Workspace
+from models.conversation import Bubble, Composer
+from models.raw_access import (
+    bubble_attached_file_uris,
+    bubble_context,
+    bubble_relevant_files,
+    composer_code_block_data,
+    composer_headers,
+    composer_newly_created_files,
+    conversation_header_bubble_id,
+    message_request_context_project_layouts,
+)
 
 
 def lookup_workspace_display_name(workspace_path: str, workspace_id: str) -> str:
@@ -118,8 +131,8 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
                         e,
                     )
                     continue
-                layouts = ctx.get("projectLayouts")
-                if not isinstance(layouts, list):
+                layouts = message_request_context_project_layouts(ctx, composer_id=cid)
+                if not layouts:
                     continue
                 for layout in layouts:
                     obj = None
@@ -225,13 +238,13 @@ def create_workspace_path_to_id_map(workspace_entries):
 
 
 def determine_project_for_conversation(
-    composer_data: dict,
+    composer_data: Composer | dict,
     composer_id: str,
     project_layouts_map: dict,
     project_name_to_workspace_id: dict,
     workspace_path_to_id: dict,
     workspace_entries: list,
-    bubble_map: dict,
+    bubble_map: Mapping[str, Bubble | dict[str, Any]],
     composer_id_to_workspace_id: dict | None = None,
     invalid_workspace_ids: set[str] | None = None,
 ) -> str | None:
@@ -244,7 +257,7 @@ def determine_project_for_conversation(
         project_name_to_workspace_id: Basename-to-workspace-folder map.
         workspace_path_to_id: Normalized root path to workspace folder map.
         workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
-        bubble_map: ``{bubble_id: bubble_dict}`` from global KV.
+        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` from global KV.
         composer_id_to_workspace_id: Definitive per-workspace composer map; when
             ``None``, layout and path heuristics are used without this shortcut.
         invalid_workspace_ids: Workspace folders marked invalid; mapped IDs in
@@ -272,7 +285,7 @@ def determine_project_for_conversation(
             return workspace_id
 
     # Fallback: newlyCreatedFiles
-    newly = composer_data.get("newlyCreatedFiles") or []
+    newly = composer_newly_created_files(composer_data, composer_id)
     for file_entry in newly:
         uri = file_entry.get("uri") if isinstance(file_entry, dict) else None
         if isinstance(uri, dict) and uri.get("path"):
@@ -281,41 +294,16 @@ def determine_project_for_conversation(
                 return pid
 
     # Fallback: codeBlockData
-    cbd = composer_data.get("codeBlockData")
+    cbd = composer_code_block_data(composer_data, composer_id)
     if isinstance(cbd, dict):
         for fp in cbd.keys():
             pid = get_project_from_file_path(re.sub(r"^file://", "", fp), workspace_entries)
             if pid:
                 return pid
 
-    # Fallback: conversation headers -> bubble references
-    headers = composer_data.get("fullConversationHeadersOnly") or []
-    for header in headers:
-        if not isinstance(header, dict):
-            continue
-        bubble = bubble_map.get(header.get("bubbleId"))
-        if not bubble:
-            continue
-        for fp in (bubble.get("relevantFiles") or []):
-            if fp:
-                pid = get_project_from_file_path(fp, workspace_entries)
-                if pid:
-                    return pid
-        for uri in (bubble.get("attachedFileCodeChunksUris") or []):
-            if isinstance(uri, dict) and uri.get("path"):
-                pid = get_project_from_file_path(uri["path"], workspace_entries)
-                if pid:
-                    return pid
-        for fs_entry in (bubble.get("context", {}).get("fileSelections") or []):
-            if isinstance(fs_entry, dict):
-                uri = fs_entry.get("uri")
-                if isinstance(uri, dict) and uri.get("path"):
-                    pid = get_project_from_file_path(uri["path"], workspace_entries)
-                    if pid:
-                        return pid
-
-    # Last fallback: path-segment matching
-    path_segments = []
+    # Fallback: conversation headers -> bubble references (single pass)
+    headers = composer_headers(composer_data, composer_id)
+    path_segments: list[str] = []
     for f in newly:
         if isinstance(f, dict):
             uri = f.get("uri")
@@ -327,19 +315,31 @@ def determine_project_for_conversation(
     for header in headers:
         if not isinstance(header, dict):
             continue
-        bubble = bubble_map.get(header.get("bubbleId"))
+        bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
+        if not bubble_id:
+            continue
+        bubble = bubble_map.get(bubble_id)
         if not bubble:
             continue
-        for fp in (bubble.get("relevantFiles") or []):
+        for fp in bubble_relevant_files(bubble, bubble_id):
             if fp:
+                pid = get_project_from_file_path(fp, workspace_entries)
+                if pid:
+                    return pid
                 path_segments.append(normalize_file_path(fp))
-        for uri in (bubble.get("attachedFileCodeChunksUris") or []):
+        for uri in bubble_attached_file_uris(bubble, bubble_id):
             if isinstance(uri, dict) and uri.get("path"):
+                pid = get_project_from_file_path(uri["path"], workspace_entries)
+                if pid:
+                    return pid
                 path_segments.append(normalize_file_path(uri["path"]))
-        for fs_entry in (bubble.get("context", {}).get("fileSelections") or []):
+        for fs_entry in (bubble_context(bubble, bubble_id).get("fileSelections") or []):
             if isinstance(fs_entry, dict):
                 uri = fs_entry.get("uri")
                 if isinstance(uri, dict) and uri.get("path"):
+                    pid = get_project_from_file_path(uri["path"], workspace_entries)
+                    if pid:
+                        return pid
                     path_segments.append(normalize_file_path(uri["path"]))
 
     sep = "\\" if sys.platform == "win32" else "/"
@@ -376,7 +376,7 @@ def infer_invalid_workspace_aliases(
     project_name_map: dict,
     workspace_path_map: dict,
     workspace_entries: list,
-    bubble_map: dict,
+    bubble_map: Mapping[str, Bubble | dict[str, Any]],
     composer_id_to_ws: dict,
     invalid_workspace_ids: set[str],
 ) -> dict[str, str]:
@@ -392,7 +392,7 @@ def infer_invalid_workspace_aliases(
         project_name_map: Basename map for path resolution.
         workspace_path_map: Normalized path map for path resolution.
         workspace_entries: Workspace folder entries from storage scan.
-        bubble_map: Bubble KV map for path resolution.
+        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` for path resolution.
         composer_id_to_ws: Composer-to-workspace map (may point at invalid IDs).
         invalid_workspace_ids: Workspace folder names to reassign.
 
@@ -423,8 +423,17 @@ def infer_invalid_workspace_aliases(
                 type(cd).__name__,
             )
             continue
+        try:
+            composer = Composer.from_dict(cd, composer_id=cid)
+        except SchemaError as e:
+            _logger.warning(
+                "Failed to parse Composer from composerData:%s: %s",
+                cid,
+                e,
+            )
+            continue
         inferred = determine_project_for_conversation(
-            cd,
+            composer,
             cid,
             project_layouts_map,
             project_name_map,

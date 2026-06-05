@@ -55,7 +55,10 @@ _BUBBLE_RAW_ANY = st.one_of(
 )
 
 _BUBBLE_ID = st.text(
-    alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00"),
+    alphabet=st.characters(
+        blacklist_categories=("Cs",),  # type: ignore[arg-type]
+        blacklist_characters="\x00",
+    ),
     min_size=1,
     max_size=80,
 )

@@ -159,7 +159,7 @@ def search():
                         bid = parts[2]
                         try:
                             bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
-                            text = extract_text_from_bubble(bubble.raw)
+                            text = extract_text_from_bubble(bubble)
                             bubble_map[bid] = {"text": text, "raw": bubble.raw}
                         except SchemaError as e:
                             # Drift logged so the operator can see why a chat dropped

@@ -1,7 +1,17 @@
 """Text extraction helpers mirroring the bubble/richText parsing in the Node.js codebase."""
 
+from __future__ import annotations
+
 import json
 import re
+from typing import Any, Protocol
+
+
+class HasBubbleRaw(Protocol):
+    """Bubble model or any object exposing a Cursor JSON ``raw`` dict."""
+
+    @property
+    def raw(self) -> dict[str, Any]: ...
 
 
 def extract_text_from_rich_text(children: list) -> str:
@@ -21,28 +31,29 @@ def extract_text_from_rich_text(children: list) -> str:
     return text
 
 
-def extract_text_from_bubble(bubble: dict) -> str:
+def extract_text_from_bubble(bubble: HasBubbleRaw | dict[str, Any]) -> str:
     """Extract displayable text from a bubble object (text, richText, codeBlocks)."""
-    if not bubble or not isinstance(bubble, dict):
+    payload: dict[str, Any] = bubble if isinstance(bubble, dict) else bubble.raw
+    if not payload:
         return ""
 
     text = ""
 
     # Try text field first (coerce non-str values — Cursor payloads can drift)
-    if bubble.get("text") and str(bubble["text"]).strip():
-        text = str(bubble["text"])
+    if payload.get("text") and str(payload["text"]).strip():
+        text = str(payload["text"])
 
     # Fall back to richText
-    if not text and bubble.get("richText"):
+    if not text and payload.get("richText"):
         try:
-            rich = json.loads(bubble["richText"]) if isinstance(bubble["richText"], str) else bubble["richText"]
+            rich = json.loads(payload["richText"]) if isinstance(payload["richText"], str) else payload["richText"]
             if isinstance(rich, dict) and rich.get("root") and rich["root"].get("children"):
                 text = extract_text_from_rich_text(rich["root"]["children"])
         except Exception:
             pass
 
     # Append code blocks if present
-    code_blocks = bubble.get("codeBlocks")
+    code_blocks = payload.get("codeBlocks")
     if isinstance(code_blocks, list):
         for cb in code_blocks:
             if isinstance(cb, dict) and cb.get("content"):
