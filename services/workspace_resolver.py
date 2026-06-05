@@ -376,7 +376,7 @@ def infer_invalid_workspace_aliases(
     project_name_map: dict,
     workspace_path_map: dict,
     workspace_entries: list,
-    bubble_map: dict,
+    bubble_map: Mapping[str, Bubble | dict[str, Any]],
     composer_id_to_ws: dict,
     invalid_workspace_ids: set[str],
 ) -> dict[str, str]:
@@ -392,7 +392,7 @@ def infer_invalid_workspace_aliases(
         project_name_map: Basename map for path resolution.
         workspace_path_map: Normalized path map for path resolution.
         workspace_entries: Workspace folder entries from storage scan.
-        bubble_map: Bubble KV map for path resolution.
+        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` for path resolution.
         composer_id_to_ws: Composer-to-workspace map (may point at invalid IDs).
         invalid_workspace_ids: Workspace folder names to reassign.
 

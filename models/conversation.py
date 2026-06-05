@@ -288,10 +288,18 @@ class Bubble:
         return value
 
     @property
-    def thinking(self) -> Any | None:
-        if "thinking" not in self.raw:
+    def thinking(self) -> str | dict[str, Any] | None:
+        value = self.raw.get("thinking")
+        if value is None:
             return None
-        return self.raw.get("thinking")
+        if isinstance(value, (str, dict)):
+            return value
+        _logger.warning(
+            "Schema drift in Bubble %s: invalid type for thinking (expected str or dict, got %s)",
+            self.bubble_id,
+            type(value).__name__,
+        )
+        return None
 
     @property
     def thinking_duration_ms(self) -> int | float | None:

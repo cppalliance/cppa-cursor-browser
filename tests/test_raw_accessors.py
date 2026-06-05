@@ -6,12 +6,14 @@ import logging
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from models.conversation import Bubble, Composer
+from services.workspace_tabs import _bubble_entry_timestamp_ms
 from models.raw_access import (
     composer_newly_created_files,
     conversation_header_bubble_id,
@@ -85,6 +87,45 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         bad_bool = Bubble.from_dict({"createdAt": True}, bubble_id="b-bool")
         with self.assertNoLogs("models.conversation", level="WARNING"):
             self.assertIsNone(bad_bool.bubble_timestamp_ms())
+
+    def test_bubble_thinking_silent_when_missing(self) -> None:
+        bubble = Bubble.from_dict({"text": "hi"}, bubble_id="b-1")
+        with self.assertNoLogs("models.conversation", level="WARNING"):
+            self.assertIsNone(bubble.thinking)
+
+    def test_bubble_thinking_warns_on_wrong_type(self) -> None:
+        bubble = Bubble.from_dict({"thinking": 42}, bubble_id="b-bad")
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertIsNone(bubble.thinking)
+        self.assertTrue(any("thinking" in m for m in logs.output), logs.output)
+
+    def test_bubble_thinking_accepts_str_or_dict(self) -> None:
+        s = Bubble.from_dict({"thinking": "trace"}, bubble_id="b-str")
+        self.assertEqual(s.thinking, "trace")
+        d = Bubble.from_dict({"thinking": {"text": "nested"}}, bubble_id="b-dict")
+        self.assertEqual(d.thinking, {"text": "nested"})
+
+    def test_bubble_entry_timestamp_ms_preserves_epoch_zero(self) -> None:
+        """Regression: falsy ``or now()`` must not replace a valid ``createdAt`` of 0."""
+        bubble = Bubble.from_dict({"createdAt": 0}, bubble_id="b-zero")
+        sentinel_now_ms = 9_999_000_000_000
+        with patch(
+            "services.workspace_tabs.datetime",
+        ) as mock_datetime:
+            mock_datetime.now.return_value.timestamp.return_value = sentinel_now_ms / 1000
+            ts = _bubble_entry_timestamp_ms(bubble)
+        self.assertEqual(ts, 0)
+        self.assertNotEqual(ts, sentinel_now_ms)
+
+    def test_bubble_entry_timestamp_ms_falls_back_when_no_timestamp(self) -> None:
+        bubble = Bubble.from_dict({"text": "hi"}, bubble_id="b-none")
+        sentinel_now_ms = 1_700_000_000_000
+        with patch(
+            "services.workspace_tabs.datetime",
+        ) as mock_datetime:
+            mock_datetime.now.return_value.timestamp.return_value = sentinel_now_ms / 1000
+            ts = _bubble_entry_timestamp_ms(bubble)
+        self.assertEqual(ts, sentinel_now_ms)
 
     def test_dict_bridge_newly_created_files_matches_composer_property(self) -> None:
         data = {**GOOD_COMPOSER_RAW, "newlyCreatedFiles": [{"uri": {"path": "/a"}}]}
