@@ -53,18 +53,15 @@ from utils.cursor_md_exporter import (  # noqa: E402
     cursor_ide_chat_to_markdown,
 )
 from models import ExportEntry, SchemaError  # noqa: E402
+from services.workspace_context import (  # noqa: E402
+    enrich_workspace_context_from_global_db,
+    resolve_workspace_context,
+)
 from services.workspace_db import (  # noqa: E402
-    build_composer_id_to_workspace_id,
-    collect_invalid_workspace_ids,
-    collect_workspace_entries,
-    load_bubble_map,
     load_code_block_diff_map,
-    load_project_layouts_map,
     open_global_db,
 )
 from services.workspace_resolver import (  # noqa: E402
-    create_project_name_to_workspace_id_map,
-    create_workspace_path_to_id_map,
     determine_project_for_conversation,
     infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
@@ -203,11 +200,12 @@ def main():
             )
 
     # ── Workspace scanning via service layer ──────────────────────────────────
-    workspace_entries = collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id(workspace_path, workspace_entries)
+    ctx = resolve_workspace_context(workspace_path)
+    workspace_entries = ctx.workspace_entries
+    invalid_workspace_ids = ctx.invalid_workspace_ids
+    project_name_map = ctx.project_name_to_workspace_id
+    workspace_path_map = ctx.workspace_path_to_id
+    composer_id_to_ws = ctx.composer_id_to_workspace_id
 
     # Build display-name and slug maps from workspace entries.
     # Entries whose workspace.json cannot be resolved are omitted so the
@@ -235,8 +233,14 @@ def main():
                 global_db_path,
             )
         else:
-            project_layouts_map = load_project_layouts_map(global_db)
-            bubble_map = load_bubble_map(global_db)
+            ctx = enrich_workspace_context_from_global_db(
+                ctx,
+                global_db,
+                populate_project_layouts=True,
+                populate_bubble_map=True,
+            )
+            project_layouts_map = ctx.project_layouts_map
+            bubble_map = ctx.bubble_map
             code_block_diff_map = load_code_block_diff_map(global_db)
 
             try:

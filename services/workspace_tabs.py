@@ -27,10 +27,9 @@ from services.summary_cache import (
     nocache_enabled,
     set_cached_tab_summaries,
 )
+from services.workspace_context import resolve_workspace_context_cached
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
-    build_composer_id_to_workspace_id_cached,
-    collect_invalid_workspace_ids,
     collect_workspace_entries,
     global_storage_db_path,
     load_bubbles_for_composer,
@@ -43,8 +42,6 @@ from services.workspace_db import (
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
-    create_project_name_to_workspace_id_map,
-    create_workspace_path_to_id_map,
     determine_project_for_conversation,
     infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
@@ -489,12 +486,16 @@ def _build_workspace_tab_summaries_uncached(
     parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
-    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
-        workspace_path, workspace_entries, rules, nocache=nocache,
+    ctx = resolve_workspace_context_cached(
+        workspace_path,
+        rules,
+        workspace_entries=workspace_entries,
+        nocache=nocache,
     )
+    invalid_workspace_ids = ctx.invalid_workspace_ids
+    project_name_map = ctx.project_name_to_workspace_id
+    workspace_path_map = ctx.workspace_path_to_id
+    composer_id_to_ws = ctx.composer_id_to_workspace_id
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     with open_global_db(workspace_path) as (global_db, _):
@@ -635,13 +636,12 @@ def assemble_single_tab(
     """
     parse_warnings = ParseWarningCollector()
 
-    workspace_entries = collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
-        workspace_path, workspace_entries, rules,
-    )
+    ctx = resolve_workspace_context_cached(workspace_path, rules)
+    workspace_entries = ctx.workspace_entries
+    invalid_workspace_ids = ctx.invalid_workspace_ids
+    project_name_map = ctx.project_name_to_workspace_id
+    workspace_path_map = ctx.workspace_path_to_id
+    composer_id_to_ws = ctx.composer_id_to_workspace_id
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     with open_global_db(workspace_path) as (global_db, _):
@@ -768,13 +768,12 @@ def assemble_workspace_tabs(
     parse_warnings = ParseWarningCollector()
     response: dict = {"tabs": []}
 
-    workspace_entries = collect_workspace_entries(workspace_path)
-    invalid_workspace_ids = collect_invalid_workspace_ids(workspace_entries)
-    project_name_map = create_project_name_to_workspace_id_map(workspace_entries)
-    workspace_path_map = create_workspace_path_to_id_map(workspace_entries)
-    composer_id_to_ws = build_composer_id_to_workspace_id_cached(
-        workspace_path, workspace_entries, rules,
-    )
+    ctx = resolve_workspace_context_cached(workspace_path, rules)
+    workspace_entries = ctx.workspace_entries
+    invalid_workspace_ids = ctx.invalid_workspace_ids
+    project_name_map = ctx.project_name_to_workspace_id
+    workspace_path_map = ctx.workspace_path_to_id
+    composer_id_to_ws = ctx.composer_id_to_workspace_id
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     bubble_map: dict[str, dict] = {}
@@ -840,20 +839,20 @@ def assemble_workspace_tabs(
             if len(parts) < 2:
                 continue
             chat_id = parts[1]
-            ctx = _loads_kv_value_logged(row["key"], row["value"])
-            if not isinstance(ctx, dict):
+            mrc = _loads_kv_value_logged(row["key"], row["value"])
+            if not isinstance(mrc, dict):
                 continue
 
             # Per-bubble context map (needs the contextId at parts[2])
             if len(parts) >= 3:
                 context_id = parts[2]
                 message_request_context_map.setdefault(chat_id, []).append({
-                    **ctx,
+                    **mrc,
                     "contextId": context_id,
                 })
 
             # Project-layout map (root paths used by the resolver)
-            layouts = ctx.get("projectLayouts")
+            layouts = mrc.get("projectLayouts")
             if isinstance(layouts, list):
                 project_layouts_map.setdefault(chat_id, [])
                 for layout in layouts:
