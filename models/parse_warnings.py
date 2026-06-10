@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -10,6 +10,7 @@ class ParseWarningCollector:
     composers_skipped: int = 0
     bubbles_skipped: int = 0
     composers_processing_failed: int = 0
+    source_failures: list[dict] = field(default_factory=list)
 
     def record_composer_skipped(self, count: int = 1) -> None:
         if count > 0:
@@ -24,12 +25,22 @@ class ParseWarningCollector:
         if count > 0:
             self.composers_processing_failed += count
 
+    def record_source_failure(self, exc: BaseException, source: str) -> None:
+        """Record a whole-source failure (e.g. the global storage DB is unreadable).
+
+        Distinct from per-item parse skips: signals that an entire data source
+        could not be searched so the API can warn callers that results may be
+        incomplete.
+        """
+        self.source_failures.append({"source": source, "detail": str(exc)})
+
     @property
     def has_warnings(self) -> bool:
         return (
             self.composers_skipped > 0
             or self.bubbles_skipped > 0
             or self.composers_processing_failed > 0
+            or bool(self.source_failures)
         )
 
     def to_api_list(self) -> list[dict]:
@@ -64,6 +75,12 @@ class ParseWarningCollector:
                 "detail": (
                     f"{n} {noun} could not be fully assembled after parsing"
                 ),
+            })
+        for sf in self.source_failures:
+            warnings.append({
+                "type": "source_failure",
+                "source": sf["source"],
+                "detail": sf["detail"],
             })
         return warnings
 

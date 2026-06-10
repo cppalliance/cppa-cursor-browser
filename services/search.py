@@ -26,10 +26,10 @@ from datetime import datetime
 from pathlib import Path
 
 __all__ = [
+    "rank_results",
+    "search_cli_sessions",
     "search_global_storage",
     "search_legacy_workspaces",
-    "search_cli_sessions",
-    "rank_results",
 ]
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
@@ -334,8 +334,9 @@ def search_global_storage(
                 )
                 parse_warnings.record_composer_processing_failure()
 
-    except Exception:
+    except Exception as exc:
         _logger.exception("Error searching global storage")
+        parse_warnings.record_source_failure(exc, source="global_storage")
 
     return results
 
@@ -568,7 +569,7 @@ def rank_results(results: list[dict]) -> list[dict]:
         t = r.get("timestamp", 0)
         if isinstance(t, str):
             try:
-                # .timestamp() → epoch-seconds; ×1000 → epoch-ms to match ints
+                # .timestamp() -> epoch-seconds; x1000 -> epoch-ms to match ints
                 return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000
             except Exception:
                 return 0.0
