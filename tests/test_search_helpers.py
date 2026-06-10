@@ -22,7 +22,6 @@ import pytest
 
 from models import ParseWarningCollector
 from services.search import (
-    _build_exclusion_searchable,
     _extract_snippet,
     _find_match,
     rank_results,
@@ -148,6 +147,21 @@ class TestRankResults:
         assert ranked[0]["timestamp"] == 500
         # Missing timestamp entry sorts last
         assert "timestamp" not in ranked[-1]
+
+    def test_mixed_epoch_ms_and_iso_string_sort_by_recency(self):
+        # composer/CLI results use integer epoch-ms (~1.715e12);
+        # legacy chat results may carry an ISO string from lastSendTime.
+        # A chat from 2025-01 must rank above a composer from 2024-05 when
+        # both are in the same result set.
+        results = [
+            {"timestamp": 1_715_000_000_000, "type": "composer"},  # 2024-05
+            {"timestamp": "2025-01-01T00:00:00Z", "type": "chat"},  # 2025-01
+        ]
+        ranked = rank_results(results)
+        assert ranked[0]["type"] == "chat", (
+            "2025-01 chat must outrank 2024-05 composer; "
+            f"got order: {[r['type'] for r in ranked]}"
+        )
 
 
 # ---------------------------------------------------------------------------

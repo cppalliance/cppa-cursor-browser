@@ -25,6 +25,12 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
+__all__ = [
+    "search_global_storage",
+    "search_legacy_workspaces",
+    "search_cli_sessions",
+    "rank_results",
+]
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
 from services.workspace_db import (
     build_composer_id_to_workspace_id,
@@ -120,7 +126,6 @@ def _find_match(
 
 
 def _build_ws_id_to_name(
-    workspace_path: str,
     workspace_entries: list[dict],
 ) -> dict[str, str]:
     """Map workspace folder IDs to human-readable display names.
@@ -204,7 +209,7 @@ def search_global_storage(
     results: list[dict] = []
     try:
         workspace_entries = collect_workspace_entries(workspace_path)
-        ws_id_to_name = _build_ws_id_to_name(workspace_path, workspace_entries)
+        ws_id_to_name = _build_ws_id_to_name(workspace_entries)
         composer_id_to_ws = build_composer_id_to_workspace_id(
             workspace_path, workspace_entries
         )
@@ -435,7 +440,7 @@ def search_legacy_workspaces(
                         "workspaceFolder": workspace_folder,
                         "chatId": tab.get("tabId"),
                         "chatTitle": ct or f"Chat {(tab.get('tabId') or '')[:8]}",
-                        "timestamp": tab.get("lastSendTime") or datetime.now().isoformat(),
+                        "timestamp": tab.get("lastSendTime") or 0,
                         "matchingText": matching_text,
                         "type": "chat",
                     })
@@ -554,14 +559,17 @@ def search_cli_sessions(
 def rank_results(results: list[dict]) -> list[dict]:
     """Sort *results* by timestamp descending.
 
-    Handles both integer epoch-ms timestamps and ISO 8601 strings so the
-    three source types (composer, chat, cli_agent) sort together correctly.
+    All three source types use epoch-millisecond integers, except
+    ``search_legacy_workspaces`` which may emit ISO 8601 strings for the
+    ``lastSendTime`` field.  ISO strings are converted to epoch-ms so
+    cross-source comparisons are made in the same unit.
     """
     def _ts(r: dict) -> float:
         t = r.get("timestamp", 0)
         if isinstance(t, str):
             try:
-                return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp()
+                # .timestamp() → epoch-seconds; ×1000 → epoch-ms to match ints
+                return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000
             except Exception:
                 return 0.0
         return float(t) if t else 0.0
