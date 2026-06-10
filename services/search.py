@@ -24,6 +24,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 __all__ = [
     "rank_results",
@@ -31,7 +32,7 @@ __all__ = [
     "search_global_storage",
     "search_legacy_workspaces",
 ]
-from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from models import Bubble, Composer, ParseWarningCollector, SchemaError, SearchResult
 from services.workspace_db import (
     build_composer_id_to_workspace_id,
     collect_workspace_entries,
@@ -54,7 +55,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _json_dump_safe(value) -> str:
+def _json_dump_safe(value: object) -> str:
     """Best-effort JSON serialisation for exclusion-rule matching."""
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -148,16 +149,16 @@ def _build_ws_id_to_name(
 
 
 def _build_search_bubble_map(
-    global_db,
+    global_db: sqlite3.Connection,
     parse_warnings: ParseWarningCollector,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Load ``bubbleId:*`` rows from an open global DB connection.
 
     Returns ``{bubble_id: {"text": str, "raw": dict}}``.  Rows that fail
     schema validation or JSON decoding are skipped; the skip is recorded in
     *parse_warnings*.
     """
-    bubble_map: dict[str, dict] = {}
+    bubble_map: dict[str, dict[str, Any]] = {}
     for row in global_db.execute(
         "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
     ):
@@ -188,9 +189,9 @@ def search_global_storage(
     workspace_path: str,
     query: str,
     query_lower: str,
-    rules: list,
+    rules: list[Any],
     parse_warnings: ParseWarningCollector,
-) -> list[dict]:
+) -> list[SearchResult]:
     """Search composer conversations stored in the global ``cursorDiskKV`` table.
 
     This is the primary data source for current Cursor versions.
@@ -206,7 +207,7 @@ def search_global_storage(
         List of search result dicts with keys ``workspaceId``, ``workspaceFolder``,
         ``chatId``, ``chatTitle``, ``timestamp``, ``matchingText``, ``type``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     try:
         workspace_entries = collect_workspace_entries(workspace_path)
         ws_id_to_name = _build_ws_id_to_name(workspace_entries)
@@ -346,8 +347,8 @@ def search_legacy_workspaces(
     query: str,
     query_lower: str,
     search_type: str,
-    rules: list,
-) -> list[dict]:
+    rules: list[Any],
+) -> list[SearchResult]:
     """Search legacy per-workspace ItemTable chat data.
 
     Iterates per-workspace ``state.vscdb`` files looking for the
@@ -364,7 +365,7 @@ def search_legacy_workspaces(
     Returns:
         List of search result dicts with ``type`` set to ``"chat"``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     if search_type not in ("all", "chat"):
         return results
 
@@ -461,8 +462,8 @@ def search_cli_sessions(
     cli_chats_path: str,
     query: str,
     query_lower: str,
-    rules: list,
-) -> list[dict]:
+    rules: list[Any],
+) -> list[SearchResult]:
     """Search Cursor CLI agent sessions stored as JSONL + blob files.
 
     Reads from ``~/.cursor/chats/`` (or the path returned by
@@ -478,7 +479,7 @@ def search_cli_sessions(
         List of search result dicts with ``type`` set to ``"cli_agent"`` and
         ``source`` set to ``"cli"``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     try:
         cli_projects = list_cli_projects(cli_chats_path)
         for cp in cli_projects:
@@ -557,7 +558,7 @@ def search_cli_sessions(
 # ---------------------------------------------------------------------------
 
 
-def rank_results(results: list[dict]) -> list[dict]:
+def rank_results(results: list[SearchResult]) -> list[SearchResult]:
     """Sort *results* by timestamp descending.
 
     All three source types use epoch-millisecond integers, except
@@ -565,7 +566,7 @@ def rank_results(results: list[dict]) -> list[dict]:
     ``lastSendTime`` field.  ISO strings are converted to epoch-ms so
     cross-source comparisons are made in the same unit.
     """
-    def _ts(r: dict) -> float:
+    def _ts(r: SearchResult) -> float:
         t = r.get("timestamp", 0)
         if isinstance(t, str):
             try:

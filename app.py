@@ -9,8 +9,9 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, Response, render_template, send_from_directory
 
 from utils.debug_flag import resolve_debug_flag
 
@@ -24,18 +25,18 @@ from api.config_api import bp as config_bp
 from utils.exclusion_rules import resolve_exclusion_rules_path, load_rules
 
 
-def _get_base_path():
+def _get_base_path() -> Path:
     """Return the directory that contains templates/ and static/.
 
     In a PyInstaller bundle the files live under sys._MEIPASS;
     otherwise they sit next to this source file.
     """
     if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS)
+        return Path(getattr(sys, "_MEIPASS"))
     return Path(__file__).resolve().parent
 
 
-def create_app(exclusion_rules_path=None):
+def create_app(exclusion_rules_path: str | None = None) -> Flask:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s",
@@ -56,7 +57,7 @@ def create_app(exclusion_rules_path=None):
     app.config["EXCLUSION_RULES"] = load_rules(resolved)
 
     @app.context_processor
-    def inject_year():
+    def inject_year() -> dict[str, int]:
         return {"current_year": datetime.now().year}
 
     # Register API blueprints
@@ -71,25 +72,26 @@ def create_app(exclusion_rules_path=None):
     # ---------- Page routes ----------
 
     @app.route("/")
-    def home():
+    def home() -> str:
         return render_template("index.html")
 
     @app.route("/config")
-    def config_page():
+    def config_page() -> str:
         return render_template("config.html")
 
     @app.route("/search")
-    def search_page():
+    def search_page() -> str:
         return render_template("search.html")
 
     @app.route("/workspace/<workspace_id>")
-    def workspace_page(workspace_id):
+    def workspace_page(workspace_id: str) -> str:
         return render_template("workspace.html", workspace_id=workspace_id)
 
     # Serve favicon
     @app.route("/favicon.ico")
-    def favicon():
-        return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/x-icon")
+    def favicon() -> Response:
+        static_folder = cast(str, app.static_folder)
+        return send_from_directory(static_folder, "favicon.ico", mimetype="image/x-icon")
 
     return app
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from models.errors import SchemaError
 from models.from_dict_validation import (
@@ -126,7 +126,7 @@ class Composer:
                     type(value).__name__,
                 )
             return 0
-        return value
+        return cast(int | float, value)
 
     @property
     def total_lines_added(self) -> int | float:
@@ -313,7 +313,7 @@ class Bubble:
                 type(value).__name__,
             )
             return None
-        return value
+        return cast(int | float, value)
 
     @property
     def context_window_status_at_creation(self) -> dict[str, Any]:

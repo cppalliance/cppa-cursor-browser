@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ from services.workspace_resolver import (
 
 
 def _composer_valid_for_listing(
-    cd: dict,
+    cd: dict[str, Any],
     composer_id: str,
     parse_warnings: ParseWarningCollector,
 ) -> bool:
@@ -72,10 +73,10 @@ def _composer_valid_for_listing(
 
 def list_workspace_projects(
     workspace_path: str,
-    rules: list,
+    rules: list[Any],
     *,
     nocache: bool = False,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """List workspace projects for GET /api/workspaces.
 
     Args:
@@ -116,11 +117,11 @@ def list_workspace_projects(
 
 def _build_workspace_projects_uncached(
     workspace_path: str,
-    rules: list,
-    workspace_entries: list[dict],
+    rules: list[Any],
+    workspace_entries: list[dict[str, Any]],
     *,
     nocache: bool,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parse_warnings = ParseWarningCollector()
     ctx = resolve_workspace_context_cached(
         workspace_path,
@@ -133,24 +134,29 @@ def _build_workspace_projects_uncached(
     workspace_path_map = ctx.workspace_path_to_id
     composer_id_to_ws = ctx.composer_id_to_workspace_id
 
-    conversation_map: dict[str, list] = {}
+    conversation_map: dict[str, list[dict[str, Any]]] = {}
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db:
-            def _safe_fetchall(query: str, params: tuple = ()) -> list:
+            def _safe_fetchall(
+                query: str, params: tuple[Any, ...] = (),
+            ) -> list[sqlite3.Row]:
                 try:
-                    return global_db.execute(query, params).fetchall()
+                    return cast(
+                        list[sqlite3.Row],
+                        global_db.execute(query, params).fetchall(),
+                    )
                 except sqlite3.Error:
                     return []
 
             try:
                 composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-                project_layouts_map: dict[str, list] = {}
+                project_layouts_map: dict[str, list[str]] = {}
                 if invalid_workspace_ids:
                     project_layouts_map = load_project_layouts_map(global_db)
 
-                bubble_map: dict[str, dict] = {}
+                bubble_map: dict[str, dict[str, Any]] = {}
                 invalid_workspace_aliases: dict[str, str] = {}
                 if invalid_workspace_ids:
                     invalid_workspace_aliases = infer_invalid_workspace_aliases(
@@ -229,7 +235,7 @@ def _build_workspace_projects_uncached(
                 )
 
     # Group workspace entries by normalized folder path
-    folder_to_entries: dict[str, list] = {}
+    folder_to_entries: dict[str, list[dict[str, Any]]] = {}
     entry_folder_map: dict[str, str] = {}
     for entry in workspace_entries:
         norm_folder = ""
@@ -246,8 +252,8 @@ def _build_workspace_projects_uncached(
         entry_folder_map[entry["name"]] = norm_folder
         folder_to_entries.setdefault(norm_folder, []).append(entry)
 
-    projects: list[dict] = []
-    seen_folders: set = set()
+    projects: list[dict[str, Any]] = []
+    seen_folders: set[str] = set()
     for entry in workspace_entries:
         norm_folder = entry_folder_map[entry["name"]]
         if norm_folder in seen_folders:

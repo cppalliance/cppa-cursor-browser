@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from api.flask_config import exclusion_rules
 
@@ -55,14 +56,14 @@ def _request_nocache() -> bool:
 
 
 @bp.route("/api/workspaces")
-def list_workspaces():
+def list_workspaces() -> tuple[Response, int] | Response:
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
         projects, warnings = list_workspace_projects(
             workspace_path, rules, nocache=_request_nocache(),
         )
-        payload: dict = {"projects": projects}
+        payload: dict[str, Any] = {"projects": projects}
         if warnings:
             payload["warnings"] = warnings
         return jsonify(payload)
@@ -76,7 +77,7 @@ def list_workspaces():
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>")
-def get_workspace(workspace_id):
+def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
     try:
         if workspace_id == "global":
             return jsonify({
@@ -154,7 +155,7 @@ def get_workspace(workspace_id):
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>/tabs")
-def get_workspace_tabs(workspace_id):
+def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     if workspace_id.startswith("cli:"):
         try:
             return get_cli_workspace_tabs(workspace_id, exclusion_rules())
@@ -182,7 +183,7 @@ def get_workspace_tabs(workspace_id):
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>/tabs/<composer_id>")
-def get_workspace_tab(workspace_id, composer_id):
+def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, int] | Response:
     if workspace_id.startswith("cli:"):
         return jsonify({"error": "Per-tab lazy load is not supported for CLI workspaces"}), 400
     try:

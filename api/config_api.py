@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from utils.path_validation import WorkspacePathError, validate_workspace_path
 from utils.workspace_path import set_workspace_path_override
@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 
 @bp.route("/api/detect-environment")
-def detect_environment():
+def detect_environment() -> Response:
     try:
         is_wsl = False
         is_remote = bool(
@@ -56,7 +56,7 @@ def detect_environment():
 
 
 @bp.route("/api/validate-path", methods=["POST"])
-def validate_path():
+def validate_path() -> tuple[Response, int] | Response:
     """Same path rules as POST /api/set-workspace: realpath, markers (issue #15)."""
     try:
         body = request.get_json(silent=True) or {}
@@ -97,7 +97,7 @@ def validate_path():
 
 
 @bp.route("/api/set-workspace", methods=["POST"])
-def set_workspace():
+def set_workspace() -> tuple[Response, int] | Response:
     # Reject non-dict JSON bodies (array / string / number / null). Without
     # this, get_json returns the value directly, the truthy fallback `or {}`
     # is bypassed, and `body.get("path", "")` raises AttributeError — which
@@ -126,7 +126,7 @@ def set_workspace():
 
 
 @bp.route("/api/get-username")
-def get_username():
+def get_username() -> Response:
     try:
         username = "YOUR_USERNAME"
 

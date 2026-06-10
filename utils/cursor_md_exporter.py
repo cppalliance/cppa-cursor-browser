@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from utils.cli_chat_reader import traverse_blobs, messages_to_bubbles
 from utils.path_helpers import to_epoch_ms
@@ -31,9 +32,9 @@ from utils.tool_parser import parse_tool_call
 
 def cursor_cli_session_to_markdown(
     db_path: str | Path,
-    session_meta: dict | None = None,
-    workspace_info: dict | None = None,
-    bubbles: list[dict] | None = None,
+    session_meta: dict[str, Any] | None = None,
+    workspace_info: dict[str, Any] | None = None,
+    bubbles: list[dict[str, Any]] | None = None,
     title_override: str | None = None,
 ) -> str:
     """Generate a complete Markdown document from a Cursor CLI store.db session.
@@ -191,11 +192,11 @@ def cursor_cli_session_to_markdown(
 
 
 def cursor_ide_chat_to_markdown(
-    composer_data: dict,
+    composer_data: dict[str, Any],
     composer_id: str,
-    bubble_map: dict,
-    code_block_diff_map: dict | None = None,
-    workspace_info: dict | None = None,
+    bubble_map: dict[str, Any],
+    code_block_diff_map: dict[str, Any] | None = None,
+    workspace_info: dict[str, Any] | None = None,
 ) -> str:
     """Generate a complete Markdown document from a Cursor IDE composer session.
 
@@ -235,7 +236,7 @@ def cursor_ide_chat_to_markdown(
     headers = cd.get("fullConversationHeadersOnly") or []
 
     # ── Build bubble list ─────────────────────────────────────────────────────
-    bubbles: list[dict] = []
+    bubbles: list[dict[str, Any]] = []
     for h in headers:
         b = bubble_map.get(h.get("bubbleId"))
         if not b:

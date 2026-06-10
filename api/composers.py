@@ -9,8 +9,9 @@ import logging
 import os
 import sqlite3
 from contextlib import closing
+from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, Response, jsonify
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -20,13 +21,13 @@ bp = Blueprint("composers", __name__)
 _logger = logging.getLogger(__name__)
 
 
-def _read_json_file(path: str):
+def _read_json_file(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 @bp.route("/api/composers")
-def list_composers():
+def list_composers() -> tuple[Response, int] | Response:
     try:
         workspace_path = resolve_workspace_path()
         composers = []
@@ -120,7 +121,7 @@ def list_composers():
 
 
 @bp.route("/api/composers/<composer_id>")
-def get_composer(composer_id):
+def get_composer(composer_id: str) -> tuple[Response, int] | Response:
     try:
         workspace_path = resolve_workspace_path()
 

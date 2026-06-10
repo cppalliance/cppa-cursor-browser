@@ -1,9 +1,12 @@
 """Path utility functions mirroring src/utils/path.ts"""
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
 from datetime import datetime
+from typing import Any, cast
 from urllib.parse import unquote
 
 
@@ -57,7 +60,7 @@ def normalize_file_path(file_path: str) -> str:
     return normalized
 
 
-def to_epoch_ms(value) -> int:
+def to_epoch_ms(value: Any) -> int:
     """Convert a timestamp value to epoch milliseconds.
 
     Handles:
@@ -89,7 +92,7 @@ def to_epoch_ms(value) -> int:
     return 0
 
 
-def get_workspace_folder_paths(workspace_data: dict) -> list:
+def get_workspace_folder_paths(workspace_data: dict[str, Any]) -> list[str]:
     """Extract folder paths from workspace.json data.
 
     Supports legacy and newer multi-root entry shapes:
@@ -100,24 +103,24 @@ def get_workspace_folder_paths(workspace_data: dict) -> list:
       - {"folders": ["<path>"]}         (defensive)
     """
 
-    def _extract_path(entry) -> str | None:
+    def _extract_path(entry: Any) -> str | None:
         if isinstance(entry, str):
             return entry
         if not isinstance(entry, dict):
             return None
         if isinstance(entry.get("path"), str):
-            return entry["path"]
+            return cast(str, entry["path"])
         uri = entry.get("uri")
         if isinstance(uri, str):
             return uri
         if isinstance(uri, dict):
             if isinstance(uri.get("path"), str):
-                return uri["path"]
+                return cast(str, uri["path"])
             if isinstance(uri.get("fsPath"), str):
-                return uri["fsPath"]
+                return cast(str, uri["fsPath"])
         return None
 
-    paths = []
+    paths: list[str] = []
     folder = workspace_data.get("folder")
     folder_path = _extract_path(folder)
     if folder_path:
@@ -132,7 +135,7 @@ def get_workspace_folder_paths(workspace_data: dict) -> list:
     return paths
 
 
-def get_workspace_display_name(workspace_data: dict, fallback: str | None = None) -> str:
+def get_workspace_display_name(workspace_data: dict[str, Any], fallback: str | None = None) -> str:
     """Return a user-friendly workspace name from workspace.json data."""
     for folder in get_workspace_folder_paths(workspace_data):
         raw = str(folder).strip()

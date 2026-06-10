@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-06-04
+### Added
+- **Strict mypy** — `strict = true` in `pyproject.toml`; core TypedDict models
+  (`SearchResult`, `ConversationSummary`) and full annotations on API routes and
+  `utils/` (#100)
+
+### Changed
+- CI typecheck job runs `mypy .` using pyproject config (strict production code;
+  per-module overrides for `scripts/export.py` and `tests.*`)
 
 ### Added
 - **Summary disk cache (Phase 3)** — project list and tab summaries cached under

@@ -7,7 +7,7 @@ import os
 import sqlite3
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
@@ -112,12 +112,12 @@ def _assemble_tab_from_composer_data(
     composer_id: str,
     composer: Composer,
     bubble_map: Mapping[str, Bubble | dict[str, Any]],
-    contexts: list[dict],
-    code_block_diffs: list[dict],
+    contexts: list[dict[str, Any]],
+    code_block_diffs: list[dict[str, Any]],
     workspace_display_name: str,
-    rules: list,
+    rules: list[Any],
     parse_warnings: ParseWarningCollector,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Assemble a single tab dict from a validated :class:`Composer`.
 
     Args:
@@ -345,7 +345,7 @@ def _assemble_tab_from_composer_data(
     total_cost = 0.0
     total_tool_calls = 0
     total_thinking_ms = 0
-    models_set: set = set()
+    models_set: set[str] = set()
     for b in bubbles:
         m = b.get("metadata") or {}
         if m.get("inputTokens"):
@@ -435,7 +435,11 @@ def _assemble_tab_from_composer_data(
     return tab
 
 
-def _build_matching_ws_ids(workspace_id: str, workspace_path: str, workspace_entries: list) -> set[str]:
+def _build_matching_ws_ids(
+    workspace_id: str,
+    workspace_path: str,
+    workspace_entries: list[dict[str, Any]],
+) -> set[str]:
     """Return the set of workspace folder IDs that share the same project folder as *workspace_id*.
 
     Cursor sometimes creates multiple workspace entries for the same on-disk
@@ -471,10 +475,10 @@ def _build_matching_ws_ids(workspace_id: str, workspace_path: str, workspace_ent
 def list_workspace_tab_summaries(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
+    rules: list[Any],
     *,
     nocache: bool = False,
-) -> tuple[dict, int]:
+) -> tuple[dict[str, Any], int]:
     """Return summary tab list for GET /api/workspaces/<id>/tabs?summary=1.
 
     Does **not** load the global ``bubbleId:%`` index.  Each tab entry contains
@@ -518,13 +522,13 @@ def list_workspace_tab_summaries(
 def _build_workspace_tab_summaries_uncached(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
-    workspace_entries: list,
+    rules: list[Any],
+    workspace_entries: list[dict[str, Any]],
     *,
     nocache: bool,
-) -> tuple[dict, int]:
+) -> tuple[dict[str, Any], int]:
     parse_warnings = ParseWarningCollector()
-    response: dict = {"tabs": []}
+    response: dict[str, Any] = {"tabs": []}
 
     ctx = resolve_workspace_context_cached(
         workspace_path,
@@ -544,13 +548,18 @@ def _build_workspace_tab_summaries_uncached(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
+        def _safe_fetchall(
+            query: str, params: tuple[Any, ...] = (),
+        ) -> list[sqlite3.Row]:
             try:
-                return global_db.execute(query, params).fetchall()
+                return cast(
+                    list[sqlite3.Row],
+                    global_db.execute(query, params).fetchall(),
+                )
             except sqlite3.Error:
                 return []
 
-        project_layouts_map: dict[str, list] = {}
+        project_layouts_map: dict[str, list[str]] = {}
         if invalid_workspace_ids:
             project_layouts_map = load_project_layouts_map(global_db)
 
@@ -633,11 +642,11 @@ def _build_workspace_tab_summaries_uncached(
                 )):
                     continue
 
-                tab_meta: dict | None = None
+                tab_meta: dict[str, Any] | None = None
                 if _early_model_names:
                     tab_meta = {"modelsUsed": _early_model_names}
 
-                tab_entry: dict = {
+                tab_entry: dict[str, Any] = {
                     "id": composer_id,
                     "title": title,
                     "timestamp": _composer_tab_timestamp_ms(composer),
@@ -664,8 +673,8 @@ def assemble_single_tab(
     workspace_id: str,
     composer_id: str,
     workspace_path: str,
-    rules: list,
-) -> tuple[dict, int]:
+    rules: list[Any],
+) -> tuple[dict[str, Any], int]:
     """Assemble a single conversation tab for GET /api/workspaces/<id>/tabs/<composer_id>.
 
     Loads only the KV rows scoped to *composer_id* (``bubbleId:{id}:%``,
@@ -700,9 +709,14 @@ def assemble_single_tab(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
+        def _safe_fetchall(
+            query: str, params: tuple[Any, ...] = (),
+        ) -> list[sqlite3.Row]:
             try:
-                return global_db.execute(query, params).fetchall()
+                return cast(
+                    list[sqlite3.Row],
+                    global_db.execute(query, params).fetchall(),
+                )
             except sqlite3.Error:
                 return []
 
@@ -738,7 +752,7 @@ def assemble_single_tab(
 
         # Verify the conversation belongs to the requested workspace.
         # Always scoped: only load messageRequestContext rows for this composer.
-        project_layouts_map: dict[str, list] = {}
+        project_layouts_map: dict[str, list[str]] = {}
         invalid_workspace_aliases: dict[str, str] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
             global_db, composer_id,
@@ -790,15 +804,15 @@ def assemble_single_tab(
         if tab is None:
             return {"error": "Conversation not found"}, 404
 
-        response: dict = {"tab": tab}
+        response: dict[str, Any] = {"tab": tab}
         return parse_warnings.attach_to(response), 200
 
 
 def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
-) -> tuple[dict, int]:
+    rules: list[Any],
+) -> tuple[dict[str, Any], int]:
     """Build tabs payload for GET /api/workspaces/<id>/tabs (IDE workspaces).
 
     Args:
@@ -814,7 +828,7 @@ def assemble_workspace_tabs(
         ``{"error": "Global storage not found"}``.
     """
     parse_warnings = ParseWarningCollector()
-    response: dict = {"tabs": []}
+    response: dict[str, Any] = {"tabs": []}
 
     ctx = resolve_workspace_context_cached(workspace_path, rules)
     workspace_entries = ctx.workspace_entries
@@ -825,8 +839,8 @@ def assemble_workspace_tabs(
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
     bubble_map: dict[str, Bubble] = {}
-    code_block_diff_map: dict[str, list] = {}
-    message_request_context_map: dict[str, list] = {}
+    code_block_diff_map: dict[str, list[dict[str, Any]]] = {}
+    message_request_context_map: dict[str, list[dict[str, Any]]] = {}
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
@@ -834,9 +848,14 @@ def assemble_workspace_tabs(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
+        def _safe_fetchall(
+            query: str, params: tuple[Any, ...] = (),
+        ) -> list[sqlite3.Row]:
             try:
-                return global_db.execute(query, params).fetchall()
+                return cast(
+                    list[sqlite3.Row],
+                    global_db.execute(query, params).fetchall(),
+                )
             except sqlite3.Error:
                 return []
 
@@ -881,7 +900,7 @@ def assemble_workspace_tabs(
 
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.
-        project_layouts_map: dict[str, list] = {}
+        project_layouts_map: dict[str, list[str]] = {}
         for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
             parts = row["key"].split(":")
             if len(parts) < 2:

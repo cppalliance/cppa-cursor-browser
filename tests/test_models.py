@@ -14,6 +14,7 @@ from models import (
     Composer,
     ExportEntry,
     SchemaError,
+    SearchResult,
     Workspace,
     WorkspaceLocalComposer,
 )
@@ -265,6 +266,33 @@ class CliSessionMetaAndBlobChain(unittest.TestCase):
 
     def test_blob_chain_empty_returns_empty_list(self) -> None:
         self.assertEqual(extract_blob_refs(b""), [])
+
+
+class SearchResultTypedDictTests(unittest.TestCase):
+    def test_search_result_accepts_composer_shape(self) -> None:
+        hit: SearchResult = {
+            "workspaceId": "ws-1",
+            "workspaceFolder": "my-project",
+            "chatId": "composer-abc",
+            "chatTitle": "Refactor search",
+            "timestamp": 1_715_000_000_000,
+            "matchingText": "...matching snippet...",
+            "type": "composer",
+        }
+        self.assertEqual(hit["type"], "composer")
+
+    def test_search_result_accepts_cli_agent_shape(self) -> None:
+        hit: SearchResult = {
+            "workspaceId": "cli:proj1",
+            "workspaceFolder": None,
+            "chatId": "sess-1",
+            "chatTitle": "CLI session",
+            "timestamp": 1_715_000_000_000,
+            "matchingText": "hello",
+            "type": "cli_agent",
+            "source": "cli",
+        }
+        self.assertEqual(hit["source"], "cli")
 
 
 if __name__ == "__main__":

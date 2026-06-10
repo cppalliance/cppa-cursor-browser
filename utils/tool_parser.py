@@ -3,7 +3,10 @@ Shared utility for parsing Cursor's toolFormerData into structured tool call obj
 Used by both workspaces.py (browser API) and export_api.py (bulk export).
 """
 
+from __future__ import annotations
+
 import json
+from typing import Any
 
 
 def short_path(p: str) -> str:
@@ -16,7 +19,7 @@ def short_path(p: str) -> str:
     return p
 
 
-def parse_tool_call(tfd: dict) -> dict:
+def parse_tool_call(tfd: dict[str, Any]) -> dict[str, str]:
     """Parse toolFormerData into a structured tool call object with human-readable summaries."""
     name = tfd.get("name") or "unknown"
     status = tfd.get("status") or ""

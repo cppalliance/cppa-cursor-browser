@@ -9,7 +9,7 @@ import sys
 from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
     # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
     # naive f"file:{path}" breaks sqlite URI parsing.
     _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
-    row: tuple | None = None
+    row: tuple[Any, ...] | None = None
     try:
         with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
             row = lconn.execute(
@@ -161,7 +161,7 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
 
 def get_project_from_file_path(
     file_path: str,
-    workspace_entries: list[dict],
+    workspace_entries: list[dict[str, Any]],
 ) -> str | None:
     """Map a file path to the workspace folder that contains it.
 
@@ -192,7 +192,9 @@ def get_project_from_file_path(
     return best_match
 
 
-def create_project_name_to_workspace_id_map(workspace_entries):
+def create_project_name_to_workspace_id_map(
+    workspace_entries: list[dict[str, Any]],
+) -> dict[str, str]:
     """Map workspace folder basenames to workspace folder names.
 
     Args:
@@ -201,7 +203,7 @@ def create_project_name_to_workspace_id_map(workspace_entries):
     Returns:
         Dict mapping last path segment (folder name) to workspace id.
     """
-    mapping = {}
+    mapping: dict[str, str] = {}
     for entry in workspace_entries:
         try:
             wd = read_json_file(entry["workspaceJsonPath"])
@@ -216,7 +218,9 @@ def create_project_name_to_workspace_id_map(workspace_entries):
     return mapping
 
 
-def create_workspace_path_to_id_map(workspace_entries):
+def create_workspace_path_to_id_map(
+    workspace_entries: list[dict[str, Any]],
+) -> dict[str, str]:
     """Map normalized workspace root paths to workspace folder names.
 
     Args:
@@ -225,7 +229,7 @@ def create_workspace_path_to_id_map(workspace_entries):
     Returns:
         Dict mapping normalized folder paths to workspace ids.
     """
-    out = {}
+    out: dict[str, str] = {}
     for entry in workspace_entries:
         try:
             wd = read_json_file(entry["workspaceJsonPath"])
@@ -238,14 +242,14 @@ def create_workspace_path_to_id_map(workspace_entries):
 
 
 def determine_project_for_conversation(
-    composer_data: Composer | dict,
+    composer_data: Composer | dict[str, Any],
     composer_id: str,
-    project_layouts_map: dict,
-    project_name_to_workspace_id: dict,
-    workspace_path_to_id: dict,
-    workspace_entries: list,
+    project_layouts_map: dict[str, list[str]],
+    project_name_to_workspace_id: dict[str, str],
+    workspace_path_to_id: dict[str, str],
+    workspace_entries: list[dict[str, Any]],
     bubble_map: Mapping[str, Bubble | dict[str, Any]],
-    composer_id_to_workspace_id: dict | None = None,
+    composer_id_to_workspace_id: dict[str, str] | None = None,
     invalid_workspace_ids: set[str] | None = None,
 ) -> str | None:
     """Resolve which workspace folder owns a composer conversation.
@@ -365,19 +369,19 @@ def determine_project_for_conversation(
                     best_len = len(item["name"])
                     best_id = item["id"]
     if best_id:
-        return best_id
+        return cast(str, best_id)
 
     return None
 
 
 def infer_invalid_workspace_aliases(
-    composer_rows: list,
-    project_layouts_map: dict,
-    project_name_map: dict,
-    workspace_path_map: dict,
-    workspace_entries: list,
+    composer_rows: list[sqlite3.Row],
+    project_layouts_map: dict[str, list[str]],
+    project_name_map: dict[str, str],
+    workspace_path_map: dict[str, str],
+    workspace_entries: list[dict[str, Any]],
     bubble_map: Mapping[str, Bubble | dict[str, Any]],
-    composer_id_to_ws: dict,
+    composer_id_to_ws: dict[str, str],
     invalid_workspace_ids: set[str],
 ) -> dict[str, str]:
     """Map invalid workspace IDs to valid replacements by majority vote.

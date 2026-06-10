@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -48,9 +49,9 @@ class ParseWarningCollector:
             or bool(self.source_failures)
         )
 
-    def to_api_list(self) -> list[dict]:
+    def to_api_list(self) -> list[dict[str, Any]]:
         """Structured warnings for JSON API responses (issue #67)."""
-        warnings: list[dict] = []
+        warnings: list[dict[str, Any]] = []
         if self.composers_skipped:
             n = self.composers_skipped
             noun = "conversation" if n == 1 else "conversations"
@@ -89,7 +90,7 @@ class ParseWarningCollector:
             })
         return warnings
 
-    def attach_to(self, payload: dict) -> dict:
+    def attach_to(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add ``warnings`` to a dict response when any failures were recorded."""
         if self.has_warnings:
             payload = {**payload, "warnings": self.to_api_list()}
