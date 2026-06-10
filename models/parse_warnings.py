@@ -31,8 +31,13 @@ class ParseWarningCollector:
         Distinct from per-item parse skips: signals that an entire data source
         could not be searched so the API can warn callers that results may be
         incomplete.
+
+        The raw exception is intentionally not stored — it is logged server-side
+        by the caller (``_logger.exception``) before this method is invoked.
+        Only the source identifier is retained so ``to_api_list`` can produce a
+        safe client message without leaking file paths or Python internals.
         """
-        self.source_failures.append({"source": source, "detail": str(exc)})
+        self.source_failures.append({"source": source})
 
     @property
     def has_warnings(self) -> bool:
@@ -80,7 +85,7 @@ class ParseWarningCollector:
             warnings.append({
                 "type": "source_failure",
                 "source": sf["source"],
-                "detail": sf["detail"],
+                "detail": f"Search source '{sf['source']}' could not be queried; results may be incomplete",
             })
         return warnings
 
