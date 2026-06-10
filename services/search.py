@@ -263,6 +263,8 @@ def search_global_storage(
                 bubble_meta: list[str] = []
                 for header in headers:
                     bid = header.get("bubbleId")
+                    if not bid:
+                        continue
                     entry = bubble_map.get(bid)
                     if not entry:
                         continue
