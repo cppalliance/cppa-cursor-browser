@@ -446,6 +446,35 @@ class TestSearchLegacyWorkspaces:
 
 
 # ---------------------------------------------------------------------------
+# CLI session fixture helper
+# ---------------------------------------------------------------------------
+
+
+def _make_store_db(path: str, meta: dict, json_blobs: dict[str, dict]) -> None:
+    """Create a minimal ``store.db`` with *meta* and one or more JSON blobs.
+
+    The meta value is hex-encoded JSON, matching the real Cursor CLI format
+    (see ``utils/cli_chat_reader._read_meta`` and ``traverse_blobs``).
+    Blob IDs are arbitrary strings; no chain/binary blobs are needed for a
+    single-message session since ``traverse_blobs`` collects the root blob
+    directly when it is a JSON blob.
+    """
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
+        conn.execute(
+            "INSERT INTO meta VALUES ('0', ?)",
+            (json.dumps(meta).encode("utf-8").hex(),),
+        )
+        for blob_id, msg in json_blobs.items():
+            conn.execute(
+                "INSERT INTO blobs VALUES (?, ?)",
+                (blob_id, json.dumps(msg).encode("utf-8")),
+            )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
 # search_cli_sessions
 # ---------------------------------------------------------------------------
 
@@ -469,4 +498,80 @@ class TestSearchCliSessions:
             query_lower="anything",
             rules=[],
         )
+        assert results == []
+
+    def test_seeded_session_found_by_content_match(self, tmp_workspace_root):
+        """Seed a real store.db session and verify search_cli_sessions finds it.
+
+        Directory layout mirrors the real Cursor CLI storage:
+            cli_root/{project_id}/{session_id}/store.db
+
+        The store.db contains:
+        - ``meta`` row: hex-encoded JSON with ``latestRootBlobId`` pointing
+          to the single user-message blob.
+        - ``blobs`` row: JSON bytes ``{"role": "user", "content": "<term>"}``
+          where ``<term>`` is the unique query we search for.
+        """
+        dirs = tmp_workspace_root
+        cli_root = dirs["cli_root"]
+        project_id = "proj-cli-test"
+        session_id = "sess-cli-test"
+        blob_id = "blob-msg-0001"
+        search_term = "cli-session-unique-sentinel-xyz"
+
+        session_dir = os.path.join(cli_root, project_id, session_id)
+        os.makedirs(session_dir, exist_ok=True)
+
+        _make_store_db(
+            path=os.path.join(session_dir, "store.db"),
+            meta={
+                "latestRootBlobId": blob_id,
+                "name": "CLI search test session",
+                "createdAt": 1_715_100_000_000,
+            },
+            json_blobs={
+                blob_id: {"role": "user", "content": f"Please help me with {search_term}"},
+            },
+        )
+
+        results = search_cli_sessions(
+            cli_chats_path=cli_root,
+            query=search_term,
+            query_lower=search_term,
+            rules=[],
+        )
+
+        assert len(results) >= 1
+        hit = next((r for r in results if r["chatId"] == session_id), None)
+        assert hit is not None, f"session {session_id!r} not in results: {results}"
+        assert hit["type"] == "cli_agent"
+        assert hit["source"] == "cli"
+        assert search_term in hit["matchingText"]
+
+    def test_seeded_session_not_returned_when_query_misses(self, tmp_workspace_root):
+        """Same store.db fixture; a non-matching query must return empty."""
+        dirs = tmp_workspace_root
+        cli_root = dirs["cli_root"]
+        project_id = "proj-cli-miss"
+        session_id = "sess-cli-miss"
+        blob_id = "blob-msg-miss"
+
+        session_dir = os.path.join(cli_root, project_id, session_id)
+        os.makedirs(session_dir, exist_ok=True)
+
+        _make_store_db(
+            path=os.path.join(session_dir, "store.db"),
+            meta={"latestRootBlobId": blob_id, "name": "Miss session", "createdAt": 0},
+            json_blobs={
+                blob_id: {"role": "user", "content": "completely unrelated content"},
+            },
+        )
+
+        results = search_cli_sessions(
+            cli_chats_path=cli_root,
+            query="xyzzy-no-match-cli",
+            query_lower="xyzzy-no-match-cli",
+            rules=[],
+        )
+
         assert results == []
