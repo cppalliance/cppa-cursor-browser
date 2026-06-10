@@ -98,7 +98,7 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
 
     def test_search_endpoint_calls_bubble_from_dict(self):
         from app import create_app
-        import api.search as search_mod
+        import services.search as search_mod
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
@@ -149,7 +149,7 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with self.assertLogs("api.search", level="WARNING") as logs:
+        with self.assertLogs("services.search", level="WARNING") as logs:
             client = app.test_client()
             response = client.get("/api/search?q=sentinel-wired")
             self.assertEqual(response.status_code, 200)
