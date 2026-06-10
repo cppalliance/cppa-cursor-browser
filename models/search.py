@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, TypedDict
 
 
 class ConversationSummary(TypedDict, total=False):
@@ -14,9 +14,7 @@ class ConversationSummary(TypedDict, total=False):
     raw: dict[str, Any]
 
 
-class SearchResult(TypedDict):
-    """One hit returned by ``/api/search`` and the search service helpers."""
-
+class _SearchResultRequired(TypedDict):
     workspaceId: str
     workspaceFolder: str | None
     chatId: str
@@ -24,4 +22,11 @@ class SearchResult(TypedDict):
     timestamp: int | str
     matchingText: str
     type: str  # "composer" | "chat" | "cli_agent"
-    source: NotRequired[str]  # "cli" for CLI agent sessions
+
+
+class _SearchResultOptional(TypedDict, total=False):
+    source: str  # "cli" for CLI agent sessions
+
+
+class SearchResult(_SearchResultRequired, _SearchResultOptional):
+    """One hit returned by ``/api/search`` and the search service helpers."""
