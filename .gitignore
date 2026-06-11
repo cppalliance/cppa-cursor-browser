@@ -9,7 +9,6 @@ __pycache__/
 venv/
 .venv/
 env/
-.mypy-ci-test/
 
 # Packaging
 *.egg-info/

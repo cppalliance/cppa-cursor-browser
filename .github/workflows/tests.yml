@@ -149,7 +149,9 @@ jobs:
       - name: Install runtime deps + mypy
         # Install from the pinned lock file for deterministic resolution,
         # then add mypy (dev-only; not in requirements-lock.txt).
-        # Flask 3.1+ ships inline types — do not install types-Flask (conflicts).
+        # Flask 3.1+ includes inline type hints — do not add or install types-Flask
+        # (it will conflict with our pip installs). Preventative guidance for future
+        # maintainers editing the steps below.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-lock.txt
