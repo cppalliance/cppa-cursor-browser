@@ -22,6 +22,7 @@ from tests._fixture_ids import (  # noqa: E402,F401  (re-export for legacy impor
     HAPPY_COMPOSER_ID,
     HAPPY_WORKSPACE_ID,
 )
+from utils.exclusion_rules import tokenize_rule
 
 
 def _make_global_state_db(path: str) -> None:
@@ -138,6 +139,19 @@ def client(workspace_storage: str):
     app = create_app()
     app.config["TESTING"] = True
     app.config["EXCLUSION_RULES"] = []
+    return app.test_client()
+
+
+def client_with_rules(rule_lines: list[str]) -> FlaskClient:
+    """Flask test client with EXCLUSION_RULES parsed from the given lines.
+
+    Requires WORKSPACE_PATH / CLI_CHATS_PATH to already be set (e.g. by
+    ``workspace_storage`` fixture).
+    """
+    parsed = [tokenize_rule(line) for line in rule_lines]
+    app = create_app()
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = [r for r in parsed if r]
     return app.test_client()
 
 
