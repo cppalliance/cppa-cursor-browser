@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast, overload
+from typing import Any, overload
 
 from flask import Response, current_app, jsonify
 
@@ -24,8 +24,9 @@ def json_response(
     data: Any,
     status: int | None = None,
 ) -> Response | tuple[Response, int]:
-    """Typed wrapper around :func:`flask.jsonify` for strict mypy (types-Flask)."""
-    response = cast(Response, jsonify(data))
+    """Typed wrapper around :func:`flask.jsonify` for strict mypy."""
+    response = jsonify(data)
+    assert isinstance(response, Response)
     if status is None:
         return response
     return response, status
