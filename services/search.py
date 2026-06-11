@@ -130,7 +130,7 @@ def _find_match(
 
 
 def _build_ws_id_to_name(
-    workspace_entries: list[dict],
+    workspace_entries: list[dict[str, Any]],
 ) -> dict[str, str]:
     """Map workspace folder IDs to human-readable display names.
 
@@ -580,8 +580,6 @@ def rank_results(results: list[SearchResult]) -> list[SearchResult]:
                 return 0.0
         if isinstance(t, bool) or not isinstance(t, (int, float)):
             return 0.0
-        if t > 1e12:
-            return float(t) / 1000.0
         return float(t) if t else 0.0
 
     return sorted(results, key=_ts, reverse=True)

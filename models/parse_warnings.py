@@ -11,7 +11,7 @@ class ParseWarningCollector:
     composers_skipped: int = 0
     bubbles_skipped: int = 0
     composers_processing_failed: int = 0
-    source_failures: list[dict] = field(default_factory=list)
+    source_failures: list[dict[str, Any]] = field(default_factory=list)
 
     def record_composer_skipped(self, count: int = 1) -> None:
         if count > 0:
