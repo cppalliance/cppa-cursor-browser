@@ -137,6 +137,10 @@ class TestToEpochMs(unittest.TestCase):
     def test_zero_returns_zero(self) -> None:
         self.assertEqual(to_epoch_ms(0), 0)
 
+    def test_bool_returns_zero(self) -> None:
+        self.assertEqual(to_epoch_ms(True), 0)
+        self.assertEqual(to_epoch_ms(False), 0)
+
     def test_iso8601_zulu(self) -> None:
         expected = int(
             datetime(2026, 2, 3, 20, 39, 54, 17_000, tzinfo=timezone.utc).timestamp() * 1000

@@ -34,7 +34,7 @@ __all__ = [
 ]
 from models import Bubble, Composer, ParseWarningCollector, SchemaError, SearchResult
 from services.workspace_db import (
-    build_composer_id_to_workspace_id,
+    build_composer_id_to_workspace_id_cached,
     collect_workspace_entries,
     open_global_db,
 )
@@ -93,6 +93,8 @@ def _extract_snippet(text: str, query: str, query_lower: str) -> str:
 
     Returns an empty string if there is no match.
     """
+    if not query_lower:
+        return ""
     idx = text.lower().find(query_lower)
     if idx == -1:
         return ""
@@ -214,8 +216,8 @@ def search_global_storage(
     try:
         workspace_entries = collect_workspace_entries(workspace_path)
         ws_id_to_name = _build_ws_id_to_name(workspace_entries)
-        composer_id_to_ws = build_composer_id_to_workspace_id(
-            workspace_path, workspace_entries
+        composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+            workspace_path, workspace_entries, rules
         )
 
         with open_global_db(workspace_path) as (conn, _db_path):
@@ -294,7 +296,6 @@ def search_global_storage(
                         _json_dump_safe(cd.get("conversationSummary")),
                         _json_dump_safe(cd.get("usage")),
                         _json_dump_safe(cd.get("requestMetadata")),
-                        _json_dump_safe(cd),
                         "\n".join(bubble_meta),
                     ],
                 )
@@ -443,16 +444,21 @@ def search_legacy_workspaces(
 
                     results.append({
                         "workspaceId": name,
-                        "workspaceFolder": workspace_folder,
+                        "workspaceFolder": workspace_name,
                         "chatId": tab_id,
                         "chatTitle": ct or f"Chat {tab_id[:8]}",
-                        "timestamp": tab.get("lastSendTime") or _UNKNOWN_SEARCH_TIMESTAMP,
+                        "timestamp": to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP,
                         "matchingText": matching_text,
                         "type": "chat",
                     })
 
             except Exception as exc:
-                _logger.warning("Failed to search legacy workspace %s: %s", name, exc)
+                _logger.warning(
+                    "Failed to search legacy workspace %s: %s",
+                    name,
+                    exc,
+                    exc_info=True,
+                )
 
     except Exception as exc:
         _logger.warning(
@@ -505,6 +511,14 @@ def search_cli_sessions(
                     )
                     continue
 
+                if not messages and meta:
+                    _logger.warning(
+                        "CLI session %s has meta but traverse_blobs returned no "
+                        "messages from %s",
+                        session_id,
+                        session["db_path"],
+                    )
+
                 bubbles = messages_to_bubbles(messages, created_ms)
                 if not bubbles:
                     continue
@@ -542,7 +556,7 @@ def search_cli_sessions(
 
                 results.append({
                     "workspaceId": f"cli:{cp['project_id']}",
-                    "workspaceFolder": cp.get("workspace_path"),
+                    "workspaceFolder": ws_name,
                     "chatId": session_id,
                     "chatTitle": title,
                     "timestamp": created_ms,

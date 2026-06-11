@@ -70,6 +70,8 @@ def to_epoch_ms(value: Any) -> int:
     """
     if value is None:
         return 0
+    if isinstance(value, bool):
+        return 0
     if isinstance(value, (int, float)):
         if value > 1e12:
             return int(value)           # already ms

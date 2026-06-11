@@ -16,7 +16,7 @@ class ConversationSummary(TypedDict, total=False):
 
 class _SearchResultRequired(TypedDict):
     workspaceId: str
-    workspaceFolder: str | None
+    workspaceFolder: str | None  # display-name leaf (e.g. "myrepo"), not a file path
     chatId: str
     chatTitle: str
     timestamp: int | str

@@ -59,6 +59,9 @@ class TestExtractSnippet:
         snippet = _extract_snippet(text, "Query", "query")
         assert "Query" in snippet
 
+    def test_empty_query_returns_empty(self):
+        assert _extract_snippet("any text here", "", "") == ""
+
     def test_snippet_length_is_bounded(self):
         text = "a" * 1000 + "target" + "b" * 1000
         snippet = _extract_snippet(text, "target", "target")
