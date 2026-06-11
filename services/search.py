@@ -49,6 +49,9 @@ from utils.text_extract import extract_text_from_bubble
 
 _logger = logging.getLogger(__name__)
 
+# Missing/unparseable timestamps sort last in rank_results() (treated as 0.0 s).
+_UNKNOWN_SEARCH_TIMESTAMP: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Private helpers — pure functions / small utilities
@@ -322,7 +325,7 @@ def search_global_storage(
                     "timestamp": (
                         to_epoch_ms(composer.last_updated_at)
                         or to_epoch_ms(composer.created_at)
-                        or int(datetime.now().timestamp() * 1000)
+                        or _UNKNOWN_SEARCH_TIMESTAMP
                     ),
                     "matchingText": matching_text,
                     "type": "composer",
@@ -443,7 +446,7 @@ def search_legacy_workspaces(
                         "workspaceFolder": workspace_folder,
                         "chatId": tab_id,
                         "chatTitle": ct or f"Chat {tab_id[:8]}",
-                        "timestamp": tab.get("lastSendTime") or datetime.now().isoformat(),
+                        "timestamp": tab.get("lastSendTime") or _UNKNOWN_SEARCH_TIMESTAMP,
                         "matchingText": matching_text,
                         "type": "chat",
                     })
@@ -488,9 +491,7 @@ def search_cli_sessions(
             for session in cp["sessions"]:
                 meta = session.get("meta", {})
                 session_id = session["session_id"]
-                created_ms: int = (
-                    meta.get("createdAt") or int(datetime.now().timestamp() * 1000)
-                )
+                created_ms: int = to_epoch_ms(meta.get("createdAt"))
                 session_name: str = meta.get("name") or f"Session {session_id[:8]}"
 
                 try:
