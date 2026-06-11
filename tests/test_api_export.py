@@ -58,6 +58,15 @@ class TestExportState:
         assert body["exportedCount"] == 3
         assert body["lastExportTime"] == "2026-01-01T12:00:00"
 
+    def test_get_state_handles_non_dict_json(self, client, export_state_dir):
+        state_path = export_state_dir / "export_state.json"
+        state_path.write_text('["not","a","dict"]', encoding="utf-8")
+        response = client.get("/api/export/state")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert isinstance(body, dict)
+        assert body == {}
+
 
 class TestExportHappyPath:
     def test_post_returns_zip_with_markdown_entry(self, client, export_state_dir):
