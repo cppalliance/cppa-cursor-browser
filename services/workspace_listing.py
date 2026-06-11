@@ -18,7 +18,7 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
-from models import ParseWarningCollector
+from models import Bubble, ParseWarningCollector
 from services.summary_cache import (
     fingerprint_workspace_storage,
     get_cached_projects,
@@ -146,7 +146,7 @@ def _build_workspace_projects_uncached(
                 if invalid_workspace_ids:
                     project_layouts_map = load_project_layouts_map(global_db)
 
-                bubble_map: dict[str, dict[str, Any]] = {}
+                bubble_map: dict[str, Bubble] = {}
                 invalid_workspace_aliases: dict[str, str] = {}
                 if invalid_workspace_ids:
                     invalid_workspace_aliases = infer_invalid_workspace_aliases(

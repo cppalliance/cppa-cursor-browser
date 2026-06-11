@@ -177,7 +177,10 @@ class WorkspaceLocalComposer:
 
 @dataclass(frozen=True)
 class Bubble:
-    """One message in a composer; bubble_id comes from the row key, not the JSON value."""
+    """One message in a composer; bubble_id comes from the row key, not the JSON value.
+
+    Rendered for UI/export as :class:`models.bubble_display.DisplayBubble`.
+    """
 
     bubble_id: str
     raw: dict[str, Any] = field(default_factory=dict)

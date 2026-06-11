@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Any
 
+from models import Bubble
 from services.workspace_db import (
     build_composer_id_to_workspace_id,
     build_composer_id_to_workspace_id_cached,
@@ -30,7 +31,7 @@ class WorkspaceContext:
     project_name_to_workspace_id: dict[str, str]
     workspace_path_to_id: dict[str, str]
     project_layouts_map: dict[str, list[str]]
-    bubble_map: dict[str, dict[str, Any]]
+    bubble_map: dict[str, Bubble]
 
 
 def _entries(

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
+from models import Bubble, ParseWarningCollector, SchemaError
 from utils.path_helpers import get_workspace_folder_paths
 from utils.workspace_descriptor import read_json_file
 
@@ -34,30 +35,63 @@ def safe_fetchall(
         return []
 
 
-def load_bubble_map(global_db: sqlite3.Connection) -> dict[str, dict[str, Any]]:
-    """Load all ``bubbleId:*`` KV entries into ``{bubble_id: bubble_dict}``.
+def _parse_bubble_kv_row(
+    row_key: str,
+    row_value: str | bytes,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> tuple[str, Bubble] | None:
+    """Parse one ``bubbleId:…`` row; return ``(bubble_id, Bubble)`` or skip."""
+    parts = row_key.split(":")
+    if len(parts) < 3:
+        return None
+    bid = parts[2]
+    try:
+        parsed = json.loads(row_value)
+        bubble = Bubble.from_dict(parsed, bubble_id=bid)
+        return bid, bubble
+    except SchemaError as exc:
+        _logger.warning(
+            "Schema drift in bubble %s: %s (%s)", bid, exc, type(exc).__name__
+        )
+        if parse_warnings is not None:
+            parse_warnings.record_bubble_skipped()
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        if parse_warnings is not None:
+            _logger.warning(
+                "Failed to decode Bubble from %s: %s", row_key, exc
+            )
+            parse_warnings.record_bubble_skipped()
+        else:
+            _logger.debug("Skipping malformed bubbleId row %s: %s", row_key, exc)
+    return None
 
-    Skips rows whose JSON value is not a dict; JSON parse errors are logged at
-    DEBUG level so a single malformed row cannot block the rest.
+
+def load_bubble_map(
+    global_db: sqlite3.Connection,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> dict[str, Bubble]:
+    """Load all ``bubbleId:*`` KV entries into ``{bubble_id: Bubble}``.
+
+    Uses the same :meth:`Bubble.from_dict` validation as search and tabs.
+    When *parse_warnings* is set, skipped rows are recorded for the API.
     """
-    bubble_map: dict[str, dict[str, Any]] = {}
+    bubble_map: dict[str, Bubble] = {}
     try:
         rows = global_db.execute(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            "SELECT key, value FROM cursorDiskKV"
+            " WHERE key LIKE 'bubbleId:%' AND value IS NOT NULL"
         ).fetchall()
     except sqlite3.Error:
         return bubble_map
     for row in rows:
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            b = json.loads(row["value"])
-            if isinstance(b, dict):
-                bubble_map[bid] = b
-        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
+        parsed = _parse_bubble_kv_row(
+            row["key"], row["value"], parse_warnings=parse_warnings
+        )
+        if parsed is not None:
+            bid, bubble = parsed
+            bubble_map[bid] = bubble
     return bubble_map
 
 
@@ -163,14 +197,17 @@ def load_code_block_diff_map(global_db: sqlite3.Connection) -> dict[str, list[di
 
 
 def load_bubbles_for_composer(
-    global_db: sqlite3.Connection, composer_id: str,
-) -> dict[str, dict[str, Any]]:
-    """Load ``bubbleId:{composer_id}:*`` KV entries into ``{bubble_id: bubble_dict}``.
+    global_db: sqlite3.Connection,
+    composer_id: str,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> dict[str, Bubble]:
+    """Load ``bubbleId:{composer_id}:*`` KV entries into ``{bubble_id: Bubble}``.
 
     Scoped alternative to :func:`load_bubble_map` for single-conversation assembly;
     avoids a full global ``bubbleId:%`` scan.
     """
-    bubble_map: dict[str, dict[str, Any]] = {}
+    bubble_map: dict[str, Bubble] = {}
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
@@ -179,16 +216,12 @@ def load_bubbles_for_composer(
     except sqlite3.Error:
         return bubble_map
     for row in rows:
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            b = json.loads(row["value"])
-            if isinstance(b, dict):
-                bubble_map[bid] = b
-        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
+        parsed = _parse_bubble_kv_row(
+            row["key"], row["value"], parse_warnings=parse_warnings
+        )
+        if parsed is not None:
+            bid, bubble = parsed
+            bubble_map[bid] = bubble
     return bubble_map
 
 

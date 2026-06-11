@@ -248,7 +248,7 @@ def determine_project_for_conversation(
     project_name_to_workspace_id: dict[str, str],
     workspace_path_to_id: dict[str, str],
     workspace_entries: list[dict[str, Any]],
-    bubble_map: Mapping[str, Bubble | dict[str, Any]],
+    bubble_map: Mapping[str, Bubble],
     composer_id_to_workspace_id: dict[str, str] | None = None,
     invalid_workspace_ids: set[str] | None = None,
 ) -> str | None:
@@ -261,7 +261,7 @@ def determine_project_for_conversation(
         project_name_to_workspace_id: Basename-to-workspace-folder map.
         workspace_path_to_id: Normalized root path to workspace folder map.
         workspace_entries: Output of :func:`services.workspace_db.collect_workspace_entries`.
-        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` from global KV.
+        bubble_map: ``{bubble_id: Bubble}`` from global KV loaders.
         composer_id_to_workspace_id: Definitive per-workspace composer map; when
             ``None``, layout and path heuristics are used without this shortcut.
         invalid_workspace_ids: Workspace folders marked invalid; mapped IDs in
@@ -380,7 +380,7 @@ def infer_invalid_workspace_aliases(
     project_name_map: dict[str, str],
     workspace_path_map: dict[str, str],
     workspace_entries: list[dict[str, Any]],
-    bubble_map: Mapping[str, Bubble | dict[str, Any]],
+    bubble_map: Mapping[str, Bubble],
     composer_id_to_ws: dict[str, str],
     invalid_workspace_ids: set[str],
 ) -> dict[str, str]:
@@ -396,7 +396,7 @@ def infer_invalid_workspace_aliases(
         project_name_map: Basename map for path resolution.
         workspace_path_map: Normalized path map for path resolution.
         workspace_entries: Workspace folder entries from storage scan.
-        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` for path resolution.
+        bubble_map: ``{bubble_id: Bubble}`` for path resolution.
         composer_id_to_ws: Composer-to-workspace map (may point at invalid IDs).
         invalid_workspace_ids: Workspace folder names to reassign.
 

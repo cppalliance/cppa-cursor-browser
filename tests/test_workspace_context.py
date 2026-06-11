@@ -170,7 +170,9 @@ def test_enrich_populates_bubble_map():
             )
         finally:
             conn.close()
-        assert enriched.bubble_map.get("bid1") is not None
+        loaded = enriched.bubble_map.get("bid1")
+        assert loaded is not None
+        assert loaded.text == "hi"
         assert ctx.bubble_map == {}
 
 
@@ -222,7 +224,9 @@ def test_enrich_populates_both_global_maps():
         finally:
             conn.close()
         assert enriched.project_layouts_map["composer-1"] == ["/tmp/myproject"]
-        assert enriched.bubble_map.get("bid1") is not None
+        loaded = enriched.bubble_map.get("bid1")
+        assert loaded is not None
+        assert loaded.text == "hi"
         assert ctx.project_layouts_map == {}
         assert ctx.bubble_map == {}
 

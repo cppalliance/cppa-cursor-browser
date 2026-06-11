@@ -44,6 +44,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Generator, cast
 
+from models import DisplayBubble
+
 
 # ---------------------------------------------------------------------------
 # Low-level store.db helpers
@@ -233,7 +235,7 @@ def strip_user_info(text: str) -> str:
     return _USER_INFO_RE.sub("", text).strip()
 
 
-def messages_to_bubbles(messages: list[dict[str, Any]], created_at_ms: int) -> list[dict[str, Any]]:
+def messages_to_bubbles(messages: list[dict[str, Any]], created_at_ms: int) -> list[DisplayBubble]:
     """Convert CLI message dicts to the bubble format used by the browser UI.
 
     Each bubble has:
@@ -273,7 +275,7 @@ def messages_to_bubbles(messages: list[dict[str, Any]], created_at_ms: int) -> l
             # only if not already set, to avoid clobbering a keyed entry.
             tool_outputs.setdefault("", content)
 
-    bubbles: list[dict[str, Any]] = []
+    bubbles: list[DisplayBubble] = []
     seq = 0
 
     for msg in messages:
@@ -303,7 +305,7 @@ def messages_to_bubbles(messages: list[dict[str, Any]], created_at_ms: int) -> l
             if not text.strip() and not tool_calls:
                 continue
 
-            bubble: dict[str, Any] = {"type": "ai", "text": text, "timestamp": ts}
+            bubble: DisplayBubble = {"type": "ai", "text": text, "timestamp": ts}
             if tool_calls:
                 # Convert to the format parse_tool_call returns
                 formatted_calls = []

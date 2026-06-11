@@ -32,10 +32,11 @@ __all__ = [
     "search_global_storage",
     "search_legacy_workspaces",
 ]
-from models import Bubble, Composer, ParseWarningCollector, SchemaError, SearchResult
+from models import Composer, ParseWarningCollector, SchemaError, SearchResult
 from services.workspace_db import (
     build_composer_id_to_workspace_id_cached,
     collect_workspace_entries,
+    load_bubble_map,
     open_global_db,
 )
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
@@ -153,38 +154,6 @@ def _build_ws_id_to_name(
     return mapping
 
 
-def _build_search_bubble_map(
-    global_db: sqlite3.Connection,
-    parse_warnings: ParseWarningCollector,
-) -> dict[str, dict[str, Any]]:
-    """Load ``bubbleId:*`` rows from an open global DB connection.
-
-    Returns ``{bubble_id: {"text": str, "raw": dict}}``.  Rows that fail
-    schema validation or JSON decoding are skipped; the skip is recorded in
-    *parse_warnings*.
-    """
-    bubble_map: dict[str, dict[str, Any]] = {}
-    for row in global_db.execute(
-        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-    ):
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
-            bubble_map[bid] = {"text": extract_text_from_bubble(bubble), "raw": bubble.raw}
-        except SchemaError as exc:
-            _logger.warning(
-                "Schema drift in bubble %s: %s (%s)", bid, exc, type(exc).__name__
-            )
-            parse_warnings.record_bubble_skipped()
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            _logger.warning("Failed to decode Bubble from bubbleId:%s: %s", bid, exc)
-            parse_warnings.record_bubble_skipped()
-    return bubble_map
-
-
 # ---------------------------------------------------------------------------
 # Public: per-source search functions
 # ---------------------------------------------------------------------------
@@ -223,7 +192,7 @@ def search_global_storage(
         with open_global_db(workspace_path) as (conn, _db_path):
             if conn is None:
                 return results
-            bubble_map = _build_search_bubble_map(conn, parse_warnings)
+            bubble_map = load_bubble_map(conn, parse_warnings=parse_warnings)
             composer_rows = conn.execute(
                 "SELECT key, value FROM cursorDiskKV"
                 " WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
@@ -276,15 +245,13 @@ def search_global_storage(
                     bid = header.get("bubbleId")
                     if not bid:
                         continue
-                    entry = bubble_map.get(bid)
-                    if not entry:
+                    bubble = bubble_map.get(bid)
+                    if bubble is None:
                         continue
-                    text = entry.get("text") or ""
+                    text = extract_text_from_bubble(bubble)
                     if text:
                         bubble_texts.append(text)
-                    raw_bubble = entry.get("raw")
-                    if raw_bubble:
-                        bubble_meta.append(_json_dump_safe(raw_bubble))
+                    bubble_meta.append(_json_dump_safe(bubble.raw))
 
                 exclusion_text = _build_exclusion_searchable(
                     project_name=project_name,
