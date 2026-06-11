@@ -149,6 +149,11 @@ class Composer:
         return name if isinstance(name, str) and name else None
 
 
+# Issue #100: Cursor persists conversations as ``composerData`` rows; ``Composer``
+# is the validated domain type for a full conversation.
+Conversation = Composer
+
+
 @dataclass(frozen=True)
 class WorkspaceLocalComposer:
     """Summary composer row from per-workspace state.vscdb ItemTable; only composerId is required."""

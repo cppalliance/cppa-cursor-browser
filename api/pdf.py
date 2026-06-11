@@ -8,7 +8,9 @@ import logging
 import re
 from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, request
+
+from api.flask_config import json_response
 
 bp = Blueprint("pdf", __name__)
 _logger = logging.getLogger(__name__)
@@ -158,7 +160,7 @@ def generate_pdf() -> tuple[Response, int] | Response:
                 continue
 
         buf = io.BytesIO()
-        pdf.output(buf)
+        buf.write(bytes(pdf.output()))
         buf.seek(0)
 
         safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
@@ -177,9 +179,7 @@ def generate_pdf() -> tuple[Response, int] | Response:
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": "Failed to generate PDF"}), 500
-
-
+        return json_response({"error": "Failed to generate PDF"}, 500)
 def _render_code_block(pdf: Any, code_text: str) -> None:
     """Render a code block with a dark background."""
     pdf.ln(3)

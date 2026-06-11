@@ -14,9 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, request
 
-from api.flask_config import exclusion_rules
+from api.flask_config import exclusion_rules, json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -72,7 +72,7 @@ def _save_export_state(count: int) -> None:
 def get_export_state() -> Response:
     """Return the last export timestamp."""
     state = _get_export_state()
-    return jsonify(state)
+    return json_response(state)
 
 
 @bp.route("/api/export", methods=["POST"])
@@ -119,8 +119,7 @@ def export_chats() -> tuple[Response, int] | Response:
         # ── Database reading via service layer ────────────────────────────────
         with open_global_db(workspace_path) as (global_db, _):
             if global_db is None:
-                return jsonify({"error": "Cursor global storage not found"}), 404
-
+                return json_response({"error": "Cursor global storage not found"}, 404)
             bubble_map = load_bubble_map(global_db)
             code_block_diff_map = load_code_block_diff_map(global_db)
 
@@ -200,10 +199,9 @@ def export_chats() -> tuple[Response, int] | Response:
 
         count = len(exported)
         if count == 0:
-            return jsonify({"error": "No conversations to export" + (
+            return json_response({"error": "No conversations to export" + (
                 " since last export" if since == "last" else ""
-            )}), 404
-
+            )}, 404)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for entry in exported:
@@ -229,4 +227,4 @@ def export_chats() -> tuple[Response, int] | Response:
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": "Export failed"}), 500
+        return json_response({"error": "Export failed"}, 500)

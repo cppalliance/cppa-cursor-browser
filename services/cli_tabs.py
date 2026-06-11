@@ -4,7 +4,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from flask import Response, jsonify
+from flask import Response
+
+from api.flask_config import json_response
 
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
@@ -24,8 +26,8 @@ def get_cli_workspace_tabs(
 
     Returns:
         ``flask.Response | tuple[flask.Response, int]`` suitable for a Flask route
-        handler. Success returns ``jsonify({"tabs": ...})`` (plain ``Response``,
-        status 200). Errors return ``(jsonify({"error": ...}), status)`` with
+        handler. Success returns ``json_response({"tabs": ...})`` (plain ``Response``,
+        status 200). Errors return ``(json_response({"error": ...}), status)`` with
         404 when the project is missing or 500 on unexpected failure.
     """
     try:
@@ -39,8 +41,7 @@ def get_cli_workspace_tabs(
             None,
         )
         if project is None:
-            return jsonify({"error": "CLI project not found"}), 404
-
+            return json_response({"error": "CLI project not found"}, 404)
         ws_name = project.get("workspace_name") or project_id[:12]
         sessions = project.get("sessions") or []
         if not isinstance(sessions, list):
@@ -138,7 +139,7 @@ def get_cli_workspace_tabs(
             tabs.append(tab)
 
         tabs.sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
-        return jsonify({"tabs": tabs})
+        return json_response({"tabs": tabs})
 
     except Exception as e:
         _logger.error(
@@ -148,4 +149,4 @@ def get_cli_workspace_tabs(
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": "Failed to get CLI workspace tabs"}), 500
+        return json_response({"error": "Failed to get CLI workspace tabs"}, 500)

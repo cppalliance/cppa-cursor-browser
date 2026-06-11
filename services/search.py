@@ -467,6 +467,7 @@ def search_cli_sessions(
     query: str,
     query_lower: str,
     rules: list[Any],
+    parse_warnings: ParseWarningCollector | None = None,
 ) -> list[SearchResult]:
     """Search Cursor CLI agent sessions stored as JSONL + blob files.
 
@@ -549,8 +550,10 @@ def search_cli_sessions(
                     "type": "cli_agent",
                     "source": "cli",
                 })
-    except Exception:
+    except Exception as exc:
         _logger.exception("Error searching CLI sessions")
+        if parse_warnings is not None:
+            parse_warnings.record_source_failure(exc, source="cli_sessions")
 
     return results
 

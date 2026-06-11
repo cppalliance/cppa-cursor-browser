@@ -11,7 +11,9 @@ import os
 import subprocess
 import sys
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, request
+
+from api.flask_config import json_response
 
 from utils.path_validation import WorkspacePathError, validate_workspace_path
 from utils.workspace_path import set_workspace_path_override
@@ -39,7 +41,7 @@ def detect_environment() -> Response:
             except Exception:
                 pass
 
-        return jsonify({
+        return json_response({
             "os": sys.platform,
             "isWSL": is_wsl,
             "isRemote": is_remote,
@@ -52,7 +54,7 @@ def detect_environment() -> Response:
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"os": "unknown", "isWSL": False, "isRemote": False})
+        return json_response({"os": "unknown", "isWSL": False, "isRemote": False})
 
 
 @bp.route("/api/validate-path", methods=["POST"])
@@ -61,14 +63,14 @@ def validate_path() -> tuple[Response, int] | Response:
     try:
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            return jsonify(
+            return json_response(
                 {"valid": False, "error": "invalid JSON body", "workspaceCount": 0}
             )
         raw = body.get("path", "")
         try:
             canonical = validate_workspace_path(raw)
         except WorkspacePathError as e:
-            return jsonify({"valid": False, "error": str(e), "workspaceCount": 0})
+            return json_response({"valid": False, "error": str(e), "workspaceCount": 0})
 
         workspace_count = 0
         for name in os.listdir(canonical):
@@ -78,7 +80,7 @@ def validate_path() -> tuple[Response, int] | Response:
                 if os.path.isfile(db):
                     workspace_count += 1
 
-        return jsonify(
+        return json_response(
             {
                 "valid": workspace_count > 0,
                 "workspaceCount": workspace_count,
@@ -93,9 +95,7 @@ def validate_path() -> tuple[Response, int] | Response:
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"valid": False, "error": "Failed to validate path"}), 500
-
-
+        return json_response({"valid": False, "error": "Failed to validate path"}, 500)
 @bp.route("/api/set-workspace", methods=["POST"])
 def set_workspace() -> tuple[Response, int] | Response:
     # Reject non-dict JSON bodies (array / string / number / null). Without
@@ -105,7 +105,7 @@ def set_workspace() -> tuple[Response, int] | Response:
     # instead of a 400 client error. (CodeRabbit on PR #16.)
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
-        return jsonify({"error": "request body must be a JSON object"}), 400
+        return json_response({"error": "request body must be a JSON object"}, 400)
     raw = body.get("path", "")
     # Validate the supplied path BEFORE storing the override (issue #15).
     # validate_workspace_path collapses `..` traversal AND resolves symlinks
@@ -115,14 +115,14 @@ def set_workspace() -> tuple[Response, int] | Response:
     try:
         canonical = validate_workspace_path(raw)
     except WorkspacePathError as e:
-        return jsonify({"error": str(e)}), 400
+        return json_response({"error": str(e)}, 400)
     except Exception:  # noqa: BLE001 — only here as a fallback
-        return jsonify({"error": "Failed to validate workspace path"}), 500
+        return json_response({"error": "Failed to validate workspace path"}, 500)
     try:
         set_workspace_path_override(canonical)
     except Exception:  # noqa: BLE001 — keep the response shape structured JSON
-        return jsonify({"error": "Failed to set workspace path"}), 500
-    return jsonify({"success": True, "path": canonical})
+        return json_response({"error": "Failed to set workspace path"}, 500)
+    return json_response({"success": True, "path": canonical})
 
 
 @bp.route("/api/get-username")
@@ -144,7 +144,7 @@ def get_username() -> Response:
                 import getpass
                 username = getpass.getuser()
 
-        return jsonify({"username": username})
+        return json_response({"username": username})
 
     except Exception as e:
         _logger.warning(
@@ -153,4 +153,4 @@ def get_username() -> Response:
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"username": "YOUR_USERNAME"})
+        return json_response({"username": "YOUR_USERNAME"})

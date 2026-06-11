@@ -12,7 +12,9 @@ from contextlib import closing
 from datetime import datetime
 from typing import Any
 
-from flask import Blueprint, Response, jsonify
+from flask import Blueprint, Response
+
+from api.flask_config import json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms, warn_workspace_json_read
@@ -149,8 +151,8 @@ def get_logs() -> tuple[Response, int] | Response:
             )
 
         logs.sort(key=lambda log: log.get("timestamp") or 0, reverse=True)
-        return jsonify({"logs": logs})
+        return json_response({"logs": logs})
 
     except Exception:
         _logger.exception("Failed to get logs")
-        return jsonify({"error": "Failed to get logs", "logs": []}), 500
+        return json_response({"error": "Failed to get logs", "logs": []}, 500)

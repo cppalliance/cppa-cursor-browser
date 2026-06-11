@@ -6,7 +6,9 @@ GET /api/search?q=...&type=all|chat|composer
 import logging
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, request
+
+from api.flask_config import json_response
 
 from models import ParseWarningCollector, SearchResult
 from services.search import (
@@ -29,8 +31,7 @@ def search() -> tuple[Response, int] | Response:
         rules = current_app.config.get("EXCLUSION_RULES") or []
 
         if not query:
-            return jsonify({"error": "No search query provided"}), 400
-
+            return json_response({"error": "No search query provided"}, 400)
         workspace_path = resolve_workspace_path()
         parse_warnings = ParseWarningCollector()
         query_lower = query.lower()
@@ -47,12 +48,14 @@ def search() -> tuple[Response, int] | Response:
         )
         if search_type == "all":
             results.extend(
-                search_cli_sessions(get_cli_chats_path(), query, query_lower, rules)
+                search_cli_sessions(
+                    get_cli_chats_path(), query, query_lower, rules, parse_warnings
+                )
             )
 
         payload: dict[str, Any] = {"results": rank_results(results)}
-        return jsonify(parse_warnings.attach_to(payload))
+        return json_response(parse_warnings.attach_to(payload))
 
     except Exception:
         _logger.exception("Search failed")
-        return jsonify({"error": "Search failed", "results": []}), 500
+        return json_response({"error": "Search failed", "results": []}, 500)

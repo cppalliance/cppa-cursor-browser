@@ -11,7 +11,9 @@ import sqlite3
 from contextlib import closing
 from typing import Any
 
-from flask import Blueprint, Response, jsonify
+from flask import Blueprint, Response
+
+from api.flask_config import json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -113,13 +115,11 @@ def list_composers() -> tuple[Response, int] | Response:
                 )
 
         composers.sort(key=lambda pair: to_epoch_ms(pair[0].last_updated_at), reverse=True)
-        return jsonify([c for _, c in composers])
+        return json_response([c for _, c in composers])
 
     except Exception:
         _logger.exception("Failed to get composers")
-        return jsonify({"error": "Failed to get composers"}), 500
-
-
+        return json_response({"error": "Failed to get composers"}, 500)
 @bp.route("/api/composers/<composer_id>")
 def get_composer(composer_id: str) -> tuple[Response, int] | Response:
     try:
@@ -183,7 +183,7 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                             # the composer (CodeRabbit on PR #30).
                             payload = dict(local.raw)
                             payload["conversation"] = payload.get("conversation") or []
-                            return jsonify(payload)
+                            return json_response(payload)
             except SchemaError as e:
                 _logger.warning(
                     "Schema drift in %s: %s (%s)",
@@ -219,15 +219,14 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                             e,
                             type(e).__name__,
                         )
-                        return jsonify({"error": "Composer schema drift"}), 404
+                        return json_response({"error": "Composer schema drift"}, 404)
                     payload = dict(composer.raw)
                     payload["conversation"] = payload.get("conversation") or []
-                    return jsonify(payload)
+                    return json_response(payload)
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 
-        return jsonify({"error": "Composer not found"}), 404
-
+        return json_response({"error": "Composer not found"}, 404)
     except Exception:
         _logger.exception("Failed to get composer")
-        return jsonify({"error": "Failed to get composer"}), 500
+        return json_response({"error": "Failed to get composer"}, 500)
