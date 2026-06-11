@@ -7,7 +7,7 @@ import os
 import sqlite3
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
@@ -18,10 +18,21 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.display_bubble import (
+    bubble_display_timestamp_ms,
+    build_storage_bubble_metadata,
+)
 from utils.text_extract import extract_text_from_bubble
-from utils.tool_parser import parse_tool_call
 from utils.workspace_descriptor import read_json_file
-from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from models import (
+    Bubble,
+    BubbleMetadata,
+    BubbleRole,
+    Composer,
+    DisplayBubble,
+    ParseWarningCollector,
+    SchemaError,
+)
 from models.raw_access import (
     conversation_header_bubble_id,
     message_request_context_project_layouts,
@@ -37,6 +48,7 @@ from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
     collect_workspace_entries,
     global_storage_db_path,
+    load_bubble_map,
     load_bubbles_for_composer,
     load_code_block_diff_map,
     load_code_block_diffs_for_composer,
@@ -44,6 +56,7 @@ from services.workspace_db import (
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
+    safe_fetchall,
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
@@ -82,13 +95,6 @@ def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
         return None
 
 
-def _bubble_entry_timestamp_ms(bubble: Bubble) -> int:
-    raw_ts = bubble.bubble_timestamp_ms()
-    if raw_ts is not None:
-        return to_epoch_ms(raw_ts)
-    return int(datetime.now().timestamp() * 1000)
-
-
 def _composer_tab_timestamp_ms(composer: Composer) -> int:
     if composer.last_updated_at is not None:
         return to_epoch_ms(composer.last_updated_at)
@@ -111,19 +117,19 @@ def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
 def _assemble_tab_from_composer_data(
     composer_id: str,
     composer: Composer,
-    bubble_map: Mapping[str, Bubble | dict[str, Any]],
-    contexts: list[dict],
-    code_block_diffs: list[dict],
+    bubble_map: Mapping[str, Bubble],
+    contexts: list[dict[str, Any]],
+    code_block_diffs: list[dict[str, Any]],
     workspace_display_name: str,
-    rules: list,
+    rules: list[Any],
     parse_warnings: ParseWarningCollector,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Assemble a single tab dict from a validated :class:`Composer`.
 
     Args:
         composer_id: Composer UUID.
         composer: Validated composer model (typed field access on ``.raw``).
-        bubble_map: ``{bubble_id: Bubble | bubble_dict}`` — global or scoped.
+        bubble_map: ``{bubble_id: Bubble}`` — global or scoped.
         contexts: ``messageRequestContext`` entries for *this* composer
             (list of dicts, each with an injected ``contextId`` key and a
             ``bubbleId`` field from the JSON value).
@@ -138,32 +144,19 @@ def _assemble_tab_from_composer_data(
     """
     headers = composer.full_conversation_headers_only
 
-    bubbles: list[dict[str, Any]] = []
+    bubbles: list[DisplayBubble] = []
     for header in headers:
         if not isinstance(header, dict):
             continue
         bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
         if not bubble_id:
             continue
-        bubble_entry = bubble_map.get(bubble_id)
-        if bubble_entry is None:
+        bubble = bubble_map.get(bubble_id)
+        if bubble is None:
             continue
-        if isinstance(bubble_entry, Bubble):
-            bubble = bubble_entry
-        else:
-            try:
-                bubble = Bubble.from_dict(bubble_entry, bubble_id=bubble_id)
-            except SchemaError as e:
-                _logger.warning(
-                    "Failed to parse Bubble from bubbleId:%s: %s",
-                    bubble_id,
-                    e,
-                )
-                parse_warnings.record_bubble_skipped()
-                continue
 
         is_user = header.get("type") == 1
-        msg_type = "user" if is_user else "ai"
+        msg_type: BubbleRole = "user" if is_user else "ai"
         text = extract_text_from_bubble(bubble)
 
         context_text = ""
@@ -207,41 +200,12 @@ def _assemble_tab_from_composer_data(
                         context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
 
         full_text = text + context_text
-        token_count = bubble.token_count
-
-        tool_calls = None
-        tfd = bubble.tool_former_data
-        if isinstance(tfd, dict):
-            tool_call = parse_tool_call(tfd)
-            if isinstance(tool_call, dict):
-                tool_calls = [tool_call]
-
-        thinking = None
-        thinking_duration_ms = None
-        thinking_raw = bubble.thinking
-        if thinking_raw:
-            thinking = (
-                thinking_raw
-                if isinstance(thinking_raw, str)
-                else (
-                    thinking_raw.get("text")
-                    if isinstance(thinking_raw, dict)
-                    else None
-                )
-            )
-            thinking_duration_ms = bubble.thinking_duration_ms
-
+        metadata = build_storage_bubble_metadata(bubble, msg_type)
+        tool_calls = (metadata or {}).get("toolCalls")
+        thinking = (metadata or {}).get("thinking")
         has_content = full_text.strip() or tool_calls or thinking
         if not has_content:
             continue
-
-        ctx_window = bubble.context_window_status_at_creation
-        ctx_pct = None
-        if isinstance(ctx_window, dict):
-            if ctx_window.get("percentageRemainingFloat") is not None:
-                ctx_pct = ctx_window.get("percentageRemainingFloat")
-            elif ctx_window.get("percentageRemaining") is not None:
-                ctx_pct = ctx_window.get("percentageRemaining")
 
         display_text = full_text.strip()
         if not display_text and tool_calls:
@@ -253,55 +217,13 @@ def _assemble_tab_from_composer_data(
         if not display_text and thinking:
             display_text = thinking
 
-        bubble_meta = None
-        model_info = bubble.model_info
-        model_name = model_info.get("modelName")
-        if model_name == "default":
-            model_name = None
-
-        if msg_type == "ai":
-            tc_dict = token_count or {}
-            tool_results = bubble.tool_results
-            in_tok = tc_dict.get("inputTokens") or 0
-            out_tok = tc_dict.get("outputTokens") or 0
-            cached_tok = tc_dict.get("cachedTokens") or 0
-            bubble_meta = {
-                "modelName": model_name,
-                "inputTokens": in_tok if in_tok > 0 else None,
-                "outputTokens": out_tok if out_tok > 0 else None,
-                "cachedTokens": cached_tok if cached_tok > 0 else None,
-                "toolResultsCount": (len(tool_calls) if tool_calls else None) or (len(tool_results) if tool_results else None),
-                "toolResults": tool_results if tool_results else None,
-                "toolCalls": tool_calls,
-                "thinking": thinking,
-                "thinkingDurationMs": thinking_duration_ms,
-                "contextWindowPercent": ctx_pct,
-            }
-        elif msg_type == "user":
-            bubble_meta = {
-                "modelName": model_name,
-                "contextWindowPercent": ctx_pct,
-            }
-            if ctx_window:
-                tokens_used = ctx_window.get("tokensUsed", 0)
-                token_limit = ctx_window.get("tokenLimit", 0)
-                if tokens_used > 0:
-                    bubble_meta["contextTokensUsed"] = tokens_used
-                if token_limit > 0:
-                    bubble_meta["contextTokenLimit"] = token_limit
-
-        if bubble_meta:
-            bubble_meta = {k: v for k, v in bubble_meta.items() if v is not None}
-            if not bubble_meta:
-                bubble_meta = None
-
-        b_entry = {
+        b_entry: DisplayBubble = {
             "type": msg_type,
             "text": display_text,
-            "timestamp": _bubble_entry_timestamp_ms(bubble),
+            "timestamp": bubble_display_timestamp_ms(bubble),
         }
-        if bubble_meta:
-            b_entry["metadata"] = bubble_meta
+        if metadata:
+            b_entry["metadata"] = cast(BubbleMetadata, metadata)
         bubbles.append(b_entry)
 
     if not bubbles:
@@ -344,8 +266,8 @@ def _assemble_tab_from_composer_data(
     total_response_ms = 0
     total_cost = 0.0
     total_tool_calls = 0
-    total_thinking_ms = 0
-    models_set: set = set()
+    total_thinking_ms = 0.0
+    models_set: set[str] = set()
     for b in bubbles:
         m = b.get("metadata") or {}
         if m.get("inputTokens"):
@@ -435,7 +357,11 @@ def _assemble_tab_from_composer_data(
     return tab
 
 
-def _build_matching_ws_ids(workspace_id: str, workspace_path: str, workspace_entries: list) -> set[str]:
+def _build_matching_ws_ids(
+    workspace_id: str,
+    workspace_path: str,
+    workspace_entries: list[dict[str, Any]],
+) -> set[str]:
     """Return the set of workspace folder IDs that share the same project folder as *workspace_id*.
 
     Cursor sometimes creates multiple workspace entries for the same on-disk
@@ -471,10 +397,10 @@ def _build_matching_ws_ids(workspace_id: str, workspace_path: str, workspace_ent
 def list_workspace_tab_summaries(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
+    rules: list[Any],
     *,
     nocache: bool = False,
-) -> tuple[dict, int]:
+) -> tuple[dict[str, Any], int]:
     """Return summary tab list for GET /api/workspaces/<id>/tabs?summary=1.
 
     Does **not** load the global ``bubbleId:%`` index.  Each tab entry contains
@@ -518,13 +444,13 @@ def list_workspace_tab_summaries(
 def _build_workspace_tab_summaries_uncached(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
-    workspace_entries: list,
+    rules: list[Any],
+    workspace_entries: list[dict[str, Any]],
     *,
     nocache: bool,
-) -> tuple[dict, int]:
+) -> tuple[dict[str, Any], int]:
     parse_warnings = ParseWarningCollector()
-    response: dict = {"tabs": []}
+    response: dict[str, Any] = {"tabs": []}
 
     ctx = resolve_workspace_context_cached(
         workspace_path,
@@ -544,17 +470,11 @@ def _build_workspace_tab_summaries_uncached(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
-            try:
-                return global_db.execute(query, params).fetchall()
-            except sqlite3.Error:
-                return []
-
-        project_layouts_map: dict[str, list] = {}
+        project_layouts_map: dict[str, list[str]] = {}
         if invalid_workspace_ids:
             project_layouts_map = load_project_layouts_map(global_db)
 
-        composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+        composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         invalid_workspace_aliases: dict[str, str] = {}
         if invalid_workspace_ids:
@@ -633,11 +553,11 @@ def _build_workspace_tab_summaries_uncached(
                 )):
                     continue
 
-                tab_meta: dict | None = None
+                tab_meta: dict[str, Any] | None = None
                 if _early_model_names:
                     tab_meta = {"modelsUsed": _early_model_names}
 
-                tab_entry: dict = {
+                tab_entry: dict[str, Any] = {
                     "id": composer_id,
                     "title": title,
                     "timestamp": _composer_tab_timestamp_ms(composer),
@@ -664,8 +584,8 @@ def assemble_single_tab(
     workspace_id: str,
     composer_id: str,
     workspace_path: str,
-    rules: list,
-) -> tuple[dict, int]:
+    rules: list[Any],
+) -> tuple[dict[str, Any], int]:
     """Assemble a single conversation tab for GET /api/workspaces/<id>/tabs/<composer_id>.
 
     Loads only the KV rows scoped to *composer_id* (``bubbleId:{id}:%``,
@@ -700,13 +620,8 @@ def assemble_single_tab(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
-            try:
-                return global_db.execute(query, params).fetchall()
-            except sqlite3.Error:
-                return []
-
-        rows = _safe_fetchall(
+        rows = safe_fetchall(
+            global_db,
             "SELECT key, value FROM cursorDiskKV WHERE key = ?",
             (f"composerData:{composer_id}",),
         )
@@ -738,7 +653,7 @@ def assemble_single_tab(
 
         # Verify the conversation belongs to the requested workspace.
         # Always scoped: only load messageRequestContext rows for this composer.
-        project_layouts_map: dict[str, list] = {}
+        project_layouts_map: dict[str, list[str]] = {}
         invalid_workspace_aliases: dict[str, str] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
             global_db, composer_id,
@@ -746,7 +661,7 @@ def assemble_single_tab(
         if invalid_workspace_ids:
             # Alias resolution still needs the composer roster, but project layouts
             # are intentionally limited to this composer (single-tab scope).
-            composer_rows_for_aliases = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+            composer_rows_for_aliases = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=composer_rows_for_aliases,
                 project_layouts_map=project_layouts_map,
@@ -772,7 +687,9 @@ def assemble_single_tab(
             return {"error": "Conversation not found"}, 404
 
         # Scoped loads — only rows for this composer_id.
-        bubble_map = load_bubbles_for_composer(global_db, composer_id)
+        bubble_map = load_bubbles_for_composer(
+            global_db, composer_id, parse_warnings=parse_warnings
+        )
         contexts = load_message_request_context_for_composer(global_db, composer_id)
         code_block_diffs = load_code_block_diffs_for_composer(global_db, composer_id)
 
@@ -790,15 +707,15 @@ def assemble_single_tab(
         if tab is None:
             return {"error": "Conversation not found"}, 404
 
-        response: dict = {"tab": tab}
+        response: dict[str, Any] = {"tab": tab}
         return parse_warnings.attach_to(response), 200
 
 
 def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
-    rules: list,
-) -> tuple[dict, int]:
+    rules: list[Any],
+) -> tuple[dict[str, Any], int]:
     """Build tabs payload for GET /api/workspaces/<id>/tabs (IDE workspaces).
 
     Args:
@@ -814,7 +731,7 @@ def assemble_workspace_tabs(
         ``{"error": "Global storage not found"}``.
     """
     parse_warnings = ParseWarningCollector()
-    response: dict = {"tabs": []}
+    response: dict[str, Any] = {"tabs": []}
 
     ctx = resolve_workspace_context_cached(workspace_path, rules)
     workspace_entries = ctx.workspace_entries
@@ -824,9 +741,8 @@ def assemble_workspace_tabs(
     composer_id_to_ws = ctx.composer_id_to_workspace_id
     matching_ws_ids = _build_matching_ws_ids(workspace_id, workspace_path, workspace_entries)
 
-    bubble_map: dict[str, Bubble] = {}
-    code_block_diff_map: dict[str, list] = {}
-    message_request_context_map: dict[str, list] = {}
+    code_block_diff_map: dict[str, list[dict[str, Any]]] = {}
+    message_request_context_map: dict[str, list[dict[str, Any]]] = {}
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
@@ -834,55 +750,18 @@ def assemble_workspace_tabs(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(query: str, params: tuple = ()) -> list:
-            try:
-                return global_db.execute(query, params).fetchall()
-            except sqlite3.Error:
-                return []
-
-        # Load bubbles
-        for row in _safe_fetchall(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-            " AND value IS NOT NULL"
-        ):
-            parts = row["key"].split(":")
-            if len(parts) >= 3:
-                bid = parts[2]
-                try:
-                    parsed = json.loads(row["value"])
-
-                except (json.JSONDecodeError, TypeError, ValueError) as e:
-                    payload_len, payload_fp = _kv_payload_log_meta(row["value"])
-                    _logger.warning(
-                        "Failed to decode Bubble from %s: %s (payload_len=%d, payload_sha256=%s)",
-                        row["key"],
-                        e,
-                        payload_len,
-                        payload_fp,
-                    )
-                    parse_warnings.record_bubble_skipped()
-                    continue
-                try:
-                    bubble_obj = Bubble.from_dict(parsed, bubble_id=bid)
-                    bubble_map[bid] = bubble_obj
-                except SchemaError as e:
-                    # Drift logged so the operator can chase disappearing
-                    # bubbles instead of guessing. Bad row still skipped so the
-                    # tabs endpoint can't 500 on one malformed bubble.
-                    _logger.warning(
-                        "Failed to parse Bubble from bubbleId:%s: %s",
-                        bid,
-                        e,
-                    )
-                    parse_warnings.record_bubble_skipped()
+        bubble_map = load_bubble_map(global_db, parse_warnings=parse_warnings)
 
         # Load codeBlockDiffs
         code_block_diff_map = load_code_block_diff_map(global_db)
 
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.
-        project_layouts_map: dict[str, list] = {}
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+        project_layouts_map: dict[str, list[str]] = {}
+        for row in safe_fetchall(
+            global_db,
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'",
+        ):
             parts = row["key"].split(":")
             if len(parts) < 2:
                 continue
@@ -915,11 +794,12 @@ def assemble_workspace_tabs(
                         project_layouts_map[chat_id].append(layout["rootPath"])
 
         # Get composer data entries with conversations
-        composer_rows = _safe_fetchall(
+        composer_rows = safe_fetchall(
+            global_db,
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
             " AND value IS NOT NULL"
             " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
+            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'",
         )
 
         invalid_workspace_aliases = infer_invalid_workspace_aliases(

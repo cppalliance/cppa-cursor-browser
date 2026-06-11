@@ -35,7 +35,7 @@ def nocache_enabled(*, request_nocache: bool = False) -> bool:
     )
 
 
-def _rules_digest(rules: list) -> str:
+def _rules_digest(rules: list[Any]) -> str:
     try:
         payload = json.dumps(rules, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
@@ -54,10 +54,10 @@ def _file_mtime_ns(path: str | None) -> int | None:
 
 def fingerprint_workspace_storage(
     workspace_path: str,
-    workspace_entries: list[dict],
+    workspace_entries: list[dict[str, Any]],
     *,
     global_db_path: str | None,
-    rules: list,
+    rules: list[Any],
     cli_chats_path: str | None = None,
 ) -> dict[str, Any]:
     """Build a fingerprint dict for cache invalidation."""
@@ -129,7 +129,9 @@ def _write_cache_file(path: Path | str, payload: dict[str, Any]) -> None:
         _logger.warning("Summary cache write failed for %s: %s", path, e)
 
 
-def get_cached_projects(fingerprint: dict[str, Any]) -> tuple[list[dict], list[dict]] | None:
+def get_cached_projects(
+    fingerprint: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
     data = _read_cache_file(PROJECTS_CACHE_FILE)
     if not data:
         return None
@@ -146,8 +148,8 @@ def get_cached_projects(fingerprint: dict[str, Any]) -> tuple[list[dict], list[d
 
 def set_cached_projects(
     fingerprint: dict[str, Any],
-    projects: list[dict],
-    warnings: list[dict],
+    projects: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
 ) -> None:
     _write_cache_file(
         PROJECTS_CACHE_FILE,
@@ -194,7 +196,7 @@ def _tab_summaries_path(workspace_id: str) -> Path:
 def get_cached_tab_summaries(
     fingerprint: dict[str, Any],
     workspace_id: str,
-) -> tuple[dict, int] | None:
+) -> tuple[dict[str, Any], int] | None:
     data = _read_cache_file(_tab_summaries_path(workspace_id))
     if not data:
         return None
@@ -212,7 +214,7 @@ def get_cached_tab_summaries(
 def set_cached_tab_summaries(
     fingerprint: dict[str, Any],
     workspace_id: str,
-    payload: dict,
+    payload: dict[str, Any],
     status: int,
 ) -> None:
     _write_cache_file(

@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-06-04
-
 ### Added
+- **Strict mypy** — `strict = true` in `pyproject.toml`; core TypedDict models
+  (`SearchResult`, `ConversationSummary`) and full annotations on API routes and
+  `utils/` (#100)
 - **Summary disk cache (Phase 3)** — project list and tab summaries cached under
   `~/.cache/cursor-chat-browser/`, invalidated when global or per-workspace DB
   mtimes change; bypass with `?nocache=1` or `CURSOR_CHAT_BROWSER_NOCACHE=1` (#84)
@@ -40,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for `determine_project_for_conversation` fallback chain (#87, #89)
 
 ### Changed
+- CI typecheck job runs `mypy .` using pyproject config (strict production code;
+  per-module overrides for `scripts/export.py` and `tests.*`)
 - **List-path performance** — skip full `messageRequestContext` scan unless
   invalid workspace aliases are needed; filter `composerData` in SQL; skip
   `Composer.from_dict` on list/summary paths; cache `composer_id_to_ws` mapping (#84)

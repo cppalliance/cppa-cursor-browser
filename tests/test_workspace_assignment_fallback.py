@@ -21,8 +21,21 @@ if REPO_ROOT not in sys.path:
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from models import Bubble, SchemaError
 from services.workspace_resolver import determine_project_for_conversation
 from utils.path_helpers import normalize_file_path
+
+
+def _bubble_map_from_raw(raw: dict) -> dict[str, Bubble]:
+    out: dict[str, Bubble] = {}
+    for bid, val in raw.items():
+        if not isinstance(val, dict):
+            continue
+        try:
+            out[bid] = Bubble.from_dict(val, bubble_id=bid)
+        except SchemaError:
+            continue
+    return out
 
 
 def _write_workspace_json(parent: str, name: str, folder: str) -> dict:
@@ -241,7 +254,11 @@ class TestDetermineProjectBubbleStages(unittest.TestCase):
 
             assigned = _resolve(
                 self._bubble_composer("b-rel"),
-                bubble_map={"b-rel": {"relevantFiles": [file_path]}},
+                bubble_map={
+                    "b-rel": Bubble.from_dict(
+                        {"relevantFiles": [file_path]}, bubble_id="b-rel"
+                    ),
+                },
                 workspace_entries=entries,
             )
             self.assertEqual(assigned, "ws-bubble")
@@ -257,7 +274,10 @@ class TestDetermineProjectBubbleStages(unittest.TestCase):
             assigned = _resolve(
                 self._bubble_composer("b-att"),
                 bubble_map={
-                    "b-att": {"attachedFileCodeChunksUris": [{"path": file_path}]}
+                    "b-att": Bubble.from_dict(
+                        {"attachedFileCodeChunksUris": [{"path": file_path}]},
+                        bubble_id="b-att",
+                    ),
                 },
                 workspace_entries=entries,
             )
@@ -274,11 +294,14 @@ class TestDetermineProjectBubbleStages(unittest.TestCase):
             assigned = _resolve(
                 self._bubble_composer("b-ctx"),
                 bubble_map={
-                    "b-ctx": {
-                        "context": {
-                            "fileSelections": [{"uri": {"path": file_path}}]
-                        }
-                    }
+                    "b-ctx": Bubble.from_dict(
+                        {
+                            "context": {
+                                "fileSelections": [{"uri": {"path": file_path}}]
+                            }
+                        },
+                        bubble_id="b-ctx",
+                    ),
                 },
                 workspace_entries=entries,
             )
@@ -349,7 +372,11 @@ class TestDetermineProjectPathSegmentStage(unittest.TestCase):
 
             assigned = _resolve(
                 {"fullConversationHeadersOnly": [{"bubbleId": "b-seg"}]},
-                bubble_map={"b-seg": {"relevantFiles": [orphan]}},
+                bubble_map={
+                    "b-seg": Bubble.from_dict(
+                        {"relevantFiles": [orphan]}, bubble_id="b-seg"
+                    ),
+                },
                 workspace_entries=entries,
             )
             self.assertEqual(assigned, "ws-bubble-seg")
@@ -434,7 +461,7 @@ class TestDetermineProjectFuzz(unittest.TestCase):
             project_name_to_workspace_id={},
             workspace_path_to_id={},
             workspace_entries=[],
-            bubble_map=bubble_map,
+            bubble_map=_bubble_map_from_raw(bubble_map),
             composer_id_to_workspace_id=None,
             invalid_workspace_ids=None,
         )

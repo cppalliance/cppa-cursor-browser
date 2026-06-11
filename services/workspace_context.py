@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, replace
+from typing import Any
 
+from models import Bubble
 from services.workspace_db import (
     build_composer_id_to_workspace_id,
     build_composer_id_to_workspace_id_cached,
@@ -23,26 +25,26 @@ from services.workspace_resolver import (
 class WorkspaceContext:
     """Precomputed workspace-resolution maps for conversation assignment."""
 
-    workspace_entries: list[dict]
+    workspace_entries: list[dict[str, Any]]
     invalid_workspace_ids: set[str]
     composer_id_to_workspace_id: dict[str, str]
     project_name_to_workspace_id: dict[str, str]
     workspace_path_to_id: dict[str, str]
-    project_layouts_map: dict[str, list]
-    bubble_map: dict[str, dict]
+    project_layouts_map: dict[str, list[str]]
+    bubble_map: dict[str, Bubble]
 
 
 def _entries(
     workspace_path: str,
-    workspace_entries: list[dict] | None,
-) -> list[dict]:
+    workspace_entries: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
     if workspace_entries is not None:
         return workspace_entries
     return collect_workspace_entries(workspace_path)
 
 
 def _assemble_context(
-    entries: list[dict],
+    entries: list[dict[str, Any]],
     *,
     invalid_workspace_ids: set[str],
     workspace_path_to_id: dict[str, str],
@@ -62,7 +64,7 @@ def _assemble_context(
 def resolve_workspace_context(
     workspace_path: str,
     *,
-    workspace_entries: list[dict] | None = None,
+    workspace_entries: list[dict[str, Any]] | None = None,
 ) -> WorkspaceContext:
     """Full workspace maps with an uncached composer→workspace scan (CLI export)."""
     entries = _entries(workspace_path, workspace_entries)
@@ -78,9 +80,9 @@ def resolve_workspace_context(
 
 def resolve_workspace_context_cached(
     workspace_path: str,
-    rules: list,
+    rules: list[Any],
     *,
-    workspace_entries: list[dict] | None = None,
+    workspace_entries: list[dict[str, Any]] | None = None,
     nocache: bool = False,
 ) -> WorkspaceContext:
     """Full workspace maps with a mtime-keyed composer map (listing / tabs)."""
@@ -98,7 +100,7 @@ def resolve_workspace_context_cached(
 def resolve_workspace_context_minimal(
     workspace_path: str,
     *,
-    workspace_entries: list[dict] | None = None,
+    workspace_entries: list[dict[str, Any]] | None = None,
 ) -> WorkspaceContext:
     """Entries, project-name, and composer maps only (HTTP export).
 
@@ -125,7 +127,7 @@ def enrich_workspace_context_from_global_db(
     populate_bubble_map: bool = False,
 ) -> WorkspaceContext:
     """Return *ctx* with global KV maps loaded from an open global DB connection."""
-    updates: dict = {}
+    updates: dict[str, Any] = {}
     if populate_project_layouts:
         updates["project_layouts_map"] = load_project_layouts_map(global_db)
     if populate_bubble_map:

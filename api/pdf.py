@@ -6,8 +6,11 @@ POST /api/generate-pdf
 import io
 import logging
 import re
+from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, request
+
+from api.flask_config import json_response
 
 bp = Blueprint("pdf", __name__)
 _logger = logging.getLogger(__name__)
@@ -43,7 +46,7 @@ def _safe_text(text: str) -> str:
 
 
 @bp.route("/api/generate-pdf", methods=["POST"])
-def generate_pdf():
+def generate_pdf() -> tuple[Response, int] | Response:
     try:
         body = request.get_json(silent=True) or {}
         markdown_text = body.get("markdown", "")
@@ -52,10 +55,10 @@ def generate_pdf():
         from fpdf import FPDF
 
         class PDFDoc(FPDF):
-            def header(self):
+            def header(self) -> None:
                 pass
 
-            def footer(self):
+            def footer(self) -> None:
                 self.set_y(-15)
                 self.set_font("Helvetica", "I", 8)
                 self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
@@ -74,7 +77,7 @@ def generate_pdf():
         # Parse markdown line by line
         lines = markdown_text.split("\n")
         in_code_block = False
-        code_lines = []
+        code_lines: list[str] = []
 
         for line in lines:
             try:
@@ -157,7 +160,7 @@ def generate_pdf():
                 continue
 
         buf = io.BytesIO()
-        pdf.output(buf)
+        buf.write(bytes(pdf.output()))
         buf.seek(0)
 
         safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
@@ -176,10 +179,8 @@ def generate_pdf():
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": "Failed to generate PDF"}), 500
-
-
-def _render_code_block(pdf, code_text: str):
+        return json_response({"error": "Failed to generate PDF"}, 500)
+def _render_code_block(pdf: Any, code_text: str) -> None:
     """Render a code block with a dark background."""
     pdf.ln(3)
     pdf.set_font("Courier", "", 8)

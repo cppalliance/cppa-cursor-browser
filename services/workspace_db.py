@@ -4,11 +4,14 @@ import json
 import logging
 import os
 import sqlite3
+from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
+from models import Bubble, ParseWarningCollector, SchemaError
 from utils.path_helpers import get_workspace_folder_paths
 from utils.workspace_descriptor import read_json_file
 
@@ -20,34 +23,79 @@ from utils.workspace_descriptor import read_json_file
 # corrupt table cannot propagate to callers.
 
 
-def load_bubble_map(global_db) -> dict[str, dict]:
-    """Load all ``bubbleId:*`` KV entries into ``{bubble_id: bubble_dict}``.
+def safe_fetchall(
+    conn: sqlite3.Connection,
+    query: str,
+    params: tuple[Any, ...] = (),
+) -> list[sqlite3.Row]:
+    """Run *query* on *conn*; return rows or ``[]`` on sqlite3.Error."""
+    try:
+        return cast(list[sqlite3.Row], conn.execute(query, params).fetchall())
+    except sqlite3.Error:
+        return []
 
-    Skips rows whose JSON value is not a dict; JSON parse errors are logged at
-    DEBUG level so a single malformed row cannot block the rest.
+
+def _parse_bubble_kv_row(
+    row_key: str,
+    row_value: str | bytes,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> tuple[str, Bubble] | None:
+    """Parse one ``bubbleId:…`` row; return ``(bubble_id, Bubble)`` or skip."""
+    parts = row_key.split(":")
+    if len(parts) < 3:
+        return None
+    bid = parts[2]
+    try:
+        parsed = json.loads(row_value)
+        bubble = Bubble.from_dict(parsed, bubble_id=bid)
+        return bid, bubble
+    except SchemaError as exc:
+        _logger.warning(
+            "Schema drift in bubble %s: %s (%s)", bid, exc, type(exc).__name__
+        )
+        if parse_warnings is not None:
+            parse_warnings.record_bubble_skipped()
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        if parse_warnings is not None:
+            _logger.warning(
+                "Failed to decode Bubble from %s: %s", row_key, exc
+            )
+            parse_warnings.record_bubble_skipped()
+        else:
+            _logger.debug("Skipping malformed bubbleId row %s: %s", row_key, exc)
+    return None
+
+
+def load_bubble_map(
+    global_db: sqlite3.Connection,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> dict[str, Bubble]:
+    """Load all ``bubbleId:*`` KV entries into ``{bubble_id: Bubble}``.
+
+    Uses the same :meth:`Bubble.from_dict` validation as search and tabs.
+    When *parse_warnings* is set, skipped rows are recorded for the API.
     """
-    bubble_map: dict[str, dict] = {}
+    bubble_map: dict[str, Bubble] = {}
     try:
         rows = global_db.execute(
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            "SELECT key, value FROM cursorDiskKV"
+            " WHERE key LIKE 'bubbleId:%' AND value IS NOT NULL"
         ).fetchall()
     except sqlite3.Error:
         return bubble_map
     for row in rows:
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            b = json.loads(row["value"])
-            if isinstance(b, dict):
-                bubble_map[bid] = b
-        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
+        parsed = _parse_bubble_kv_row(
+            row["key"], row["value"], parse_warnings=parse_warnings
+        )
+        if parsed is not None:
+            bid, bubble = parsed
+            bubble_map[bid] = bubble
     return bubble_map
 
 
-def _extract_root_paths_from_context(ctx: dict) -> list[str]:
+def _extract_root_paths_from_context(ctx: dict[str, Any]) -> list[str]:
     """Pull ``rootPath`` strings from a messageRequestContext JSON object."""
     paths: list[str] = []
     layouts = ctx.get("projectLayouts")
@@ -63,7 +111,9 @@ def _extract_root_paths_from_context(ctx: dict) -> list[str]:
     return paths
 
 
-def load_project_layouts_for_composer(global_db, composer_id: str) -> list[str]:
+def load_project_layouts_for_composer(
+    global_db: sqlite3.Connection, composer_id: str,
+) -> list[str]:
     """Scoped MRC load: ``messageRequestContext:{composer_id}:%`` only."""
     paths: list[str] = []
     try:
@@ -87,14 +137,14 @@ def load_project_layouts_for_composer(global_db, composer_id: str) -> list[str]:
     return paths
 
 
-def load_project_layouts_map(global_db) -> dict[str, list]:
+def load_project_layouts_map(global_db: sqlite3.Connection) -> dict[str, list[str]]:
     """Load ``projectLayouts`` from all ``messageRequestContext:*`` KV entries.
 
     Returns ``{composer_id: [root_path_str, ...]}``.  Prefer
     :func:`load_project_layouts_for_composer` on list paths when only a few
     composers need layout fallbacks.
     """
-    layouts_map: dict[str, list] = {}
+    layouts_map: dict[str, list[str]] = {}
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"
@@ -116,13 +166,13 @@ def load_project_layouts_map(global_db) -> dict[str, list]:
     return layouts_map
 
 
-def load_code_block_diff_map(global_db) -> dict[str, list]:
+def load_code_block_diff_map(global_db: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
     """Load ``codeBlockDiff:*`` KV entries into ``{composer_id: [diff_dict]}``.
 
     Each diff dict contains all fields from the raw JSON value plus a
     ``diffId`` key taken from the third path component of the KV key.
     """
-    diff_map: dict[str, list] = {}
+    diff_map: dict[str, list[dict[str, Any]]] = {}
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'"
@@ -146,13 +196,18 @@ def load_code_block_diff_map(global_db) -> dict[str, list]:
     return diff_map
 
 
-def load_bubbles_for_composer(global_db, composer_id: str) -> dict[str, dict]:
-    """Load ``bubbleId:{composer_id}:*`` KV entries into ``{bubble_id: bubble_dict}``.
+def load_bubbles_for_composer(
+    global_db: sqlite3.Connection,
+    composer_id: str,
+    *,
+    parse_warnings: ParseWarningCollector | None = None,
+) -> dict[str, Bubble]:
+    """Load ``bubbleId:{composer_id}:*`` KV entries into ``{bubble_id: Bubble}``.
 
     Scoped alternative to :func:`load_bubble_map` for single-conversation assembly;
     avoids a full global ``bubbleId:%`` scan.
     """
-    bubble_map: dict[str, dict] = {}
+    bubble_map: dict[str, Bubble] = {}
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
@@ -161,29 +216,25 @@ def load_bubbles_for_composer(global_db, composer_id: str) -> dict[str, dict]:
     except sqlite3.Error:
         return bubble_map
     for row in rows:
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            b = json.loads(row["value"])
-            if isinstance(b, dict):
-                bubble_map[bid] = b
-        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-            _logger.debug("Skipping malformed bubbleId row %s: %s", row["key"], e)
+        parsed = _parse_bubble_kv_row(
+            row["key"], row["value"], parse_warnings=parse_warnings
+        )
+        if parsed is not None:
+            bid, bubble = parsed
+            bubble_map[bid] = bubble
     return bubble_map
 
 
 def load_message_request_context_for_composer(
-    global_db, composer_id: str
-) -> list[dict]:
+    global_db: sqlite3.Connection, composer_id: str,
+) -> list[dict[str, Any]]:
     """Load ``messageRequestContext:{composer_id}:*`` KV entries.
 
     Returns a list of context dicts, each with an injected ``contextId`` key
     taken from the third path component of the KV key.  Scoped alternative to
     the global MRC pass inside :func:`load_project_layouts_map`.
     """
-    contexts: list[dict] = []
+    contexts: list[dict[str, Any]] = []
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
@@ -210,15 +261,15 @@ def load_message_request_context_for_composer(
 
 
 def load_code_block_diffs_for_composer(
-    global_db, composer_id: str
-) -> list[dict]:
+    global_db: sqlite3.Connection, composer_id: str,
+) -> list[dict[str, Any]]:
     """Load ``codeBlockDiff:{composer_id}:*`` KV entries.
 
     Returns a list of diff dicts, each with an injected ``diffId`` key.
     Scoped alternative to :func:`load_code_block_diff_map` for single-conversation
     assembly.
     """
-    diffs: list[dict] = []
+    diffs: list[dict[str, Any]] = []
     try:
         rows = global_db.execute(
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
@@ -239,7 +290,7 @@ def load_code_block_diffs_for_composer(
     return diffs
 
 
-def collect_workspace_entries(workspace_path: str) -> list[dict]:
+def collect_workspace_entries(workspace_path: str) -> list[dict[str, Any]]:
     """Scan workspace directory and return entries with workspace.json.
 
     Args:
@@ -249,7 +300,7 @@ def collect_workspace_entries(workspace_path: str) -> list[dict]:
         List of dicts with keys ``name`` (folder id) and ``workspaceJsonPath``.
         Returns an empty list if ``workspace_path`` is missing or unreadable.
     """
-    entries = []
+    entries: list[dict[str, Any]] = []
     try:
         for name in os.listdir(workspace_path):
             full = os.path.join(workspace_path, name)
@@ -265,7 +316,7 @@ def collect_workspace_entries(workspace_path: str) -> list[dict]:
     return entries
 
 
-def collect_invalid_workspace_ids(workspace_entries: list[dict]) -> set[str]:
+def collect_invalid_workspace_ids(workspace_entries: list[dict[str, Any]]) -> set[str]:
     """Return workspace IDs whose descriptors have no resolvable folder paths.
 
     Args:
@@ -305,7 +356,9 @@ def global_storage_db_path(workspace_path: str) -> str:
     return os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
 
-def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: list) -> dict:
+def build_composer_id_to_workspace_id(
+    workspace_path: str, workspace_entries: list[dict[str, Any]],
+) -> dict[str, str]:
     """Build mapping from composer ID to workspace folder name.
 
     Reads ``composer.composerData`` from each workspace's ``state.vscdb``.
@@ -318,7 +371,7 @@ def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: li
     Returns:
         Dict mapping ``composerId`` strings to workspace folder names.
     """
-    mapping: dict = {}
+    mapping: dict[str, str] = {}
     for entry in workspace_entries:
         db_path = os.path.join(workspace_path, entry["name"], "state.vscdb")
         if not os.path.isfile(db_path):
@@ -327,7 +380,7 @@ def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: li
         # Path.as_uri() percent-encodes reserved chars; ``f"file:{path}"``
         # breaks sqlite URI parsing on paths with spaces, ``#``, etc.
         db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-        row: tuple | None = None
+        row: tuple[Any, ...] | None = None
         try:
             with closing(sqlite3.connect(db_uri, uri=True)) as conn:
                 row = conn.execute(
@@ -355,11 +408,11 @@ def build_composer_id_to_workspace_id(workspace_path: str, workspace_entries: li
 
 def build_composer_id_to_workspace_id_cached(
     workspace_path: str,
-    workspace_entries: list,
-    rules: list,
+    workspace_entries: list[dict[str, Any]],
+    rules: list[Any],
     *,
     nocache: bool = False,
-) -> dict:
+) -> dict[str, str]:
     """Like :func:`build_composer_id_to_workspace_id` with optional disk cache."""
     from services.summary_cache import (
         fingerprint_workspace_storage,
@@ -389,7 +442,9 @@ def build_composer_id_to_workspace_id_cached(
 
 
 @contextmanager
-def open_global_db(workspace_path: str):
+def open_global_db(
+    workspace_path: str,
+) -> Iterator[tuple[sqlite3.Connection | None, str]]:
     """Open Cursor global storage SQLite database read-only.
 
     Args:

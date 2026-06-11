@@ -132,11 +132,9 @@ jobs:
         run: dist\CursorChatBrowser\CursorChatBrowser.exe --help
 
   # ── Typecheck: mypy ───────────────────────────────────────────────────────
-  # Codebase already has type hints across most of the surface (~70+ typed
-  # functions). Mypy runs with --ignore-missing-imports for untyped
-  # third-party deps; strict-optional is enabled (mypy default). The
-  # transitional `continue-on-error: true` was removed in #29 once mypy
-  # reached zero errors on this repo — type failures now block merges.
+  # strict = true in pyproject.toml (issue #100). Per-module overrides skip
+  # scripts/export.py and tests/ until those surfaces are fully annotated.
+  # Type failures block merges — no continue-on-error.
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest
@@ -151,15 +149,14 @@ jobs:
       - name: Install runtime deps + mypy
         # Install from the pinned lock file for deterministic resolution,
         # then add mypy (dev-only; not in requirements-lock.txt).
+        # Flask 3.1+ ships inline types — do not install types-Flask (conflicts).
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-lock.txt
           python -m pip install 'mypy>=1.10,<2'
 
       - name: Run mypy
-        # No `continue-on-error` — mypy now exits zero on this repo (closes #29),
-        # so type errors must fail the job from here on.
-        run: mypy --ignore-missing-imports --pretty .
+        run: mypy .
 
   # ── Secret scan: gitleaks ─────────────────────────────────────────────────
   # Catches accidentally committed credentials. Runs over full git history

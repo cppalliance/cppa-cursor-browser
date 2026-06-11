@@ -14,7 +14,7 @@ class HasBubbleRaw(Protocol):
     def raw(self) -> dict[str, Any]: ...
 
 
-def extract_text_from_rich_text(children: list) -> str:
+def extract_text_from_rich_text(children: list[Any]) -> str:
     """Recursively extract text from a Lexical rich-text tree."""
     if not isinstance(children, list):
         return ""
@@ -72,7 +72,7 @@ def slug(s: str) -> str:
     return s[:80] or "untitled"
 
 
-def format_tool_action(action: dict) -> str:
+def format_tool_action(action: dict[str, Any]) -> str:
     """Format a tool action / codeBlockDiff into readable text."""
     if not action:
         return ""

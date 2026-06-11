@@ -12,10 +12,11 @@ import sqlite3
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, request
 
-from api.flask_config import exclusion_rules
+from api.flask_config import exclusion_rules, json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -38,13 +39,13 @@ def _get_state_dir() -> str:
     return os.path.join(str(Path.home()), ".cursor-chat-browser")
 
 
-def _get_export_state() -> dict:
+def _get_export_state() -> dict[str, Any]:
     """Read the export state file."""
     state_path = os.path.join(_get_state_dir(), "export_state.json")
     if os.path.isfile(state_path):
         try:
             with open(state_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return cast(dict[str, Any], json.load(f))
         except (json.JSONDecodeError, ValueError, OSError) as e:
             _logger.warning(
                 "Could not read export state from %s: %s",
@@ -54,7 +55,7 @@ def _get_export_state() -> dict:
     return {}
 
 
-def _save_export_state(count: int):
+def _save_export_state(count: int) -> None:
     """Save export state after an export."""
     state_dir = _get_state_dir()
     os.makedirs(state_dir, exist_ok=True)
@@ -68,14 +69,14 @@ def _save_export_state(count: int):
 
 
 @bp.route("/api/export/state")
-def get_export_state():
+def get_export_state() -> Response:
     """Return the last export timestamp."""
     state = _get_export_state()
-    return jsonify(state)
+    return json_response(state)
 
 
 @bp.route("/api/export", methods=["POST"])
-def export_chats():
+def export_chats() -> tuple[Response, int] | Response:
     """Export chats as a zip archive.
 
     Exclusion rules (``EXCLUSION_RULES`` app config key) are evaluated against
@@ -112,14 +113,13 @@ def export_chats():
                 ws_id_to_slug[e["name"]] = slug(display)
 
         today = datetime.now().strftime("%Y-%m-%d")
-        exported = []
+        exported: list[dict[str, Any]] = []
         rules = exclusion_rules()
 
         # ── Database reading via service layer ────────────────────────────────
         with open_global_db(workspace_path) as (global_db, _):
             if global_db is None:
-                return jsonify({"error": "Cursor global storage not found"}), 404
-
+                return json_response({"error": "Cursor global storage not found"}, 404)
             bubble_map = load_bubble_map(global_db)
             code_block_diff_map = load_code_block_diff_map(global_db)
 
@@ -199,10 +199,9 @@ def export_chats():
 
         count = len(exported)
         if count == 0:
-            return jsonify({"error": "No conversations to export" + (
+            return json_response({"error": "No conversations to export" + (
                 " since last export" if since == "last" else ""
-            )}), 404
-
+            )}, 404)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for entry in exported:
@@ -228,4 +227,4 @@ def export_chats():
             type(e).__name__,
             exc_info=True,
         )
-        return jsonify({"error": "Export failed"}), 500
+        return json_response({"error": "Export failed"}, 500)

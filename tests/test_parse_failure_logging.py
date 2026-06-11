@@ -126,7 +126,7 @@ class TestParseFailureLogging(unittest.TestCase):
                     ("bubbleId:cmp-ok:b-json", "{not valid json"),
                 )
                 conn.commit()
-            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+            with self.assertLogs("services.workspace_db", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
                     _payload, _status = assemble_workspace_tabs("global", ws_root, rules=[])
 
@@ -176,7 +176,7 @@ class TestParseFailureLogging(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = _seed_tabs_with_drifted_bubble(tmp)
-            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+            with self.assertLogs("services.workspace_db", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
                     payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
 

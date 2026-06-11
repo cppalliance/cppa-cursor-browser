@@ -13,7 +13,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from models.conversation import Bubble, Composer
-from services.workspace_tabs import _bubble_entry_timestamp_ms
+from utils.display_bubble import bubble_display_timestamp_ms
 from models.raw_access import (
     composer_newly_created_files,
     conversation_header_bubble_id,
@@ -110,10 +110,10 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         bubble = Bubble.from_dict({"createdAt": 0}, bubble_id="b-zero")
         sentinel_now_ms = 9_999_000_000_000
         with patch(
-            "services.workspace_tabs.datetime",
+            "utils.display_bubble.datetime",
         ) as mock_datetime:
             mock_datetime.now.return_value.timestamp.return_value = sentinel_now_ms / 1000
-            ts = _bubble_entry_timestamp_ms(bubble)
+            ts = bubble_display_timestamp_ms(bubble)
         self.assertEqual(ts, 0)
         self.assertNotEqual(ts, sentinel_now_ms)
 
@@ -121,10 +121,10 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         bubble = Bubble.from_dict({"text": "hi"}, bubble_id="b-none")
         sentinel_now_ms = 1_700_000_000_000
         with patch(
-            "services.workspace_tabs.datetime",
+            "utils.display_bubble.datetime",
         ) as mock_datetime:
             mock_datetime.now.return_value.timestamp.return_value = sentinel_now_ms / 1000
-            ts = _bubble_entry_timestamp_ms(bubble)
+            ts = bubble_display_timestamp_ms(bubble)
         self.assertEqual(ts, sentinel_now_ms)
 
     def test_dict_bridge_newly_created_files_matches_composer_property(self) -> None:

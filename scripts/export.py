@@ -52,7 +52,7 @@ from utils.cursor_md_exporter import (  # noqa: E402
     cursor_cli_session_to_markdown,
     cursor_ide_chat_to_markdown,
 )
-from models import ExportEntry, SchemaError  # noqa: E402
+from models import Bubble, ExportEntry, SchemaError  # noqa: E402
 from services.workspace_context import (  # noqa: E402
     enrich_workspace_context_from_global_db,
     resolve_workspace_context,
@@ -221,7 +221,7 @@ def main():
 
     # ── Database reading via service layer ────────────────────────────────────
     project_layouts_map: dict = {}
-    bubble_map: dict = {}
+    bubble_map: dict[str, Bubble] = {}
     code_block_diff_map: dict = {}
     ide_composer_rows: list = []
     invalid_workspace_aliases: dict = {}

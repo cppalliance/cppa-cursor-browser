@@ -19,11 +19,18 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from models import Bubble, BubbleRole, DisplayBubble
 from utils.cli_chat_reader import traverse_blobs, messages_to_bubbles
+from utils.display_bubble import (
+    annotate_response_times,
+    build_display_bubble_from_storage,
+    display_bubble_metadata,
+    display_bubble_tool_calls,
+)
 from utils.path_helpers import to_epoch_ms
-from utils.text_extract import extract_text_from_bubble, slug
-from utils.tool_parser import parse_tool_call
+from utils.text_extract import slug
 
 
 # ── CLI session exporter ─────────────────────────────────────────────────────
@@ -31,9 +38,9 @@ from utils.tool_parser import parse_tool_call
 
 def cursor_cli_session_to_markdown(
     db_path: str | Path,
-    session_meta: dict | None = None,
-    workspace_info: dict | None = None,
-    bubbles: list[dict] | None = None,
+    session_meta: dict[str, Any] | None = None,
+    workspace_info: dict[str, Any] | None = None,
+    bubbles: list[DisplayBubble] | None = None,
     title_override: str | None = None,
 ) -> str:
     """Generate a complete Markdown document from a Cursor CLI store.db session.
@@ -191,11 +198,11 @@ def cursor_cli_session_to_markdown(
 
 
 def cursor_ide_chat_to_markdown(
-    composer_data: dict,
+    composer_data: dict[str, Any],
     composer_id: str,
-    bubble_map: dict,
-    code_block_diff_map: dict | None = None,
-    workspace_info: dict | None = None,
+    bubble_map: dict[str, Bubble],
+    code_block_diff_map: dict[str, Any] | None = None,
+    workspace_info: dict[str, Any] | None = None,
 ) -> str:
     """Generate a complete Markdown document from a Cursor IDE composer session.
 
@@ -207,8 +214,8 @@ def cursor_ide_chat_to_markdown(
         The composer UUID — used as ``log_id`` in frontmatter and as the key
         into ``code_block_diff_map``.
     bubble_map:
-        Global ``{bubble_id: bubble_dict}`` map loaded from
-        ``cursorDiskKV`` (see ``services.workspace_db.load_bubble_map``).
+        Global ``{bubble_id: Bubble}`` map from
+        :func:`services.workspace_db.load_bubble_map`.
     code_block_diff_map:
         Optional ``{composer_id: [diff_dict]}`` map.  When ``None`` no code
         edit bubbles are appended.
@@ -235,59 +242,15 @@ def cursor_ide_chat_to_markdown(
     headers = cd.get("fullConversationHeadersOnly") or []
 
     # ── Build bubble list ─────────────────────────────────────────────────────
-    bubbles: list[dict] = []
+    bubbles: list[DisplayBubble] = []
     for h in headers:
-        b = bubble_map.get(h.get("bubbleId"))
-        if not b:
+        storage = bubble_map.get(h.get("bubbleId"))
+        if storage is None:
             continue
-        text = extract_text_from_bubble(b)
-        has_tool = isinstance(b.get("toolFormerData"), dict)
-        has_thinking = bool(b.get("thinking"))
-        if not text.strip() and not has_tool and not has_thinking:
-            continue
-        if not text.strip() and has_tool:
-            text = f"**Tool: {b['toolFormerData'].get('name', 'unknown')}**"
-
-        btype = "user" if h.get("type") == 1 else "ai"
-
-        thinking = None
-        thinking_duration_ms = None
-        if b.get("thinking"):
-            thinking = (
-                b["thinking"] if isinstance(b["thinking"], str)
-                else (b["thinking"].get("text") if isinstance(b["thinking"], dict) else None)
-            )
-            thinking_duration_ms = b.get("thinkingDurationMs")
-
-        tool_info = parse_tool_call(b["toolFormerData"]) if has_tool else None
-
-        model_info = (b.get("modelInfo") or {}).get("modelName")
-        if model_info == "default":
-            model_info = None
-
-        ctx_window = b.get("contextWindowStatusAtCreation") or {}
-        ctx_tokens_used = ctx_window.get("tokensUsed", 0)
-        ctx_token_limit = ctx_window.get("tokenLimit", 0)
-        ctx_pct_remaining = (
-            ctx_window.get("percentageRemainingFloat") or ctx_window.get("percentageRemaining")
-        )
-
-        bubbles.append({
-            "type": btype,
-            "text": text,
-            "timestamp": (
-                to_epoch_ms(b.get("createdAt"))
-                or to_epoch_ms(b.get("timestamp"))
-                or int(datetime.now().timestamp() * 1000)
-            ),
-            "tool": tool_info,
-            "thinking": thinking,
-            "thinkingDurationMs": thinking_duration_ms,
-            "model": model_info,
-            "contextTokensUsed": ctx_tokens_used if ctx_tokens_used > 0 else None,
-            "contextTokenLimit": ctx_token_limit if ctx_token_limit > 0 else None,
-            "contextPctRemaining": round(ctx_pct_remaining, 1) if ctx_pct_remaining else None,
-        })
+        role: BubbleRole = "user" if h.get("type") == 1 else "ai"
+        entry = build_display_bubble_from_storage(storage, role)
+        if entry is not None:
+            bubbles.append(entry)
 
     # Append code-block diffs as synthetic AI bubbles.
     diff_ts = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or int(datetime.now().timestamp() * 1000)
@@ -299,30 +262,29 @@ def cursor_ide_chat_to_markdown(
         })
 
     bubbles.sort(key=lambda bub: bub.get("timestamp") or 0)
-
-    # ── Compute response times ────────────────────────────────────────────────
-    last_user_ts = None
-    for bub in bubbles:
-        if bub["type"] == "user":
-            last_user_ts = bub.get("timestamp")
-        elif bub["type"] == "ai" and last_user_ts:
-            bts = bub.get("timestamp")
-            if bts and bts > last_user_ts:
-                bub["responseTimeMs"] = bts - last_user_ts
+    annotate_response_times(bubbles)
 
     # ── Session-level aggregates ──────────────────────────────────────────────
-    total_response_ms = sum(bub.get("responseTimeMs", 0) for bub in bubbles)
-    total_thinking_ms = sum(bub.get("thinkingDurationMs", 0) or 0 for bub in bubbles)
-    total_tool_calls = sum(1 for bub in bubbles if bub.get("tool"))
-    max_ctx_used = max((bub.get("contextTokensUsed") or 0) for bub in bubbles) if bubbles else 0
-    ctx_limit = max((bub.get("contextTokenLimit") or 0) for bub in bubbles) if bubbles else 0
+    total_response_ms = sum(
+        display_bubble_metadata(bub).get("responseTimeMs") or 0 for bub in bubbles
+    )
+    total_thinking_ms = sum(
+        display_bubble_metadata(bub).get("thinkingDurationMs") or 0 for bub in bubbles
+    )
+    total_tool_calls = sum(len(display_bubble_tool_calls(bub)) for bub in bubbles)
+    max_ctx_used = max(
+        (display_bubble_metadata(bub).get("contextTokensUsed") or 0) for bub in bubbles
+    ) if bubbles else 0
+    ctx_limit = max(
+        (display_bubble_metadata(bub).get("contextTokenLimit") or 0) for bub in bubbles
+    ) if bubbles else 0
     lines_added = cd.get("totalLinesAdded", 0)
     lines_removed = cd.get("totalLinesRemoved", 0)
 
     tool_breakdown: dict[str, int] = {}
     for bub in bubbles:
-        if bub.get("tool"):
-            tn = bub["tool"].get("name", "unknown")
+        for tool in display_bubble_tool_calls(bub):
+            tn = tool.get("name", "unknown")
             tool_breakdown[tn] = tool_breakdown.get(tn, 0) + 1
 
     ts_vals = [bub["timestamp"] for bub in bubbles if bub.get("timestamp")]
@@ -338,29 +300,27 @@ def cursor_ide_chat_to_markdown(
         "searches": 0, "web": 0,
     }
     for bub in bubbles:
-        if not bub.get("tool"):
-            continue
-        t = bub["tool"]
-        tn = t.get("name", "")
-        status = t.get("status") or ""
-        raw_input = str(t.get("input") or "").strip()
-        first_line = raw_input.split("\n")[0] if raw_input else ""
-        if tn == "read_file_v2" and first_line:
-            files_read_list.append(first_line)
-            tool_result_stats["file_reads"] += 1
-        elif tn == "edit_file_v2" and first_line:
-            files_written_list.append(first_line)
-            tool_result_stats["file_edits"] += 1
-        elif tn == "run_terminal_command_v2" and raw_input:
-            commands_run_list.append(raw_input)
-            if status in ("error", "failed"):
-                tool_result_stats["terminal_error"] += 1
-            else:
-                tool_result_stats["terminal_success"] += 1
-        elif tn in ("ripgrep_raw_search", "glob_file_search", "semantic_search_full"):
-            tool_result_stats["searches"] += 1
-        elif tn in ("web_search", "web_fetch"):
-            tool_result_stats["web"] += 1
+        for t in display_bubble_tool_calls(bub):
+            tn = t.get("name", "")
+            status = t.get("status") or ""
+            raw_input = str(t.get("input") or "").strip()
+            first_line = raw_input.split("\n")[0] if raw_input else ""
+            if tn == "read_file_v2" and first_line:
+                files_read_list.append(first_line)
+                tool_result_stats["file_reads"] += 1
+            elif tn == "edit_file_v2" and first_line:
+                files_written_list.append(first_line)
+                tool_result_stats["file_edits"] += 1
+            elif tn == "run_terminal_command_v2" and raw_input:
+                commands_run_list.append(raw_input)
+                if status in ("error", "failed"):
+                    tool_result_stats["terminal_error"] += 1
+                else:
+                    tool_result_stats["terminal_success"] += 1
+            elif tn in ("ripgrep_raw_search", "glob_file_search", "semantic_search_full"):
+                tool_result_stats["searches"] += 1
+            elif tn in ("web_search", "web_fetch"):
+                tool_result_stats["web"] += 1
 
     # ── Frontmatter ───────────────────────────────────────────────────────────
     fm_lines = ["---"]
@@ -382,7 +342,9 @@ def cursor_ide_chat_to_markdown(
         fm_lines.append("tool_call_breakdown:")
         for tn, cnt in sorted(tool_breakdown.items(), key=lambda x: -x[1]):
             fm_lines.append(f"  {json.dumps(tn, ensure_ascii=False)}: {cnt}")
-    total_think = sum(1 for bub in bubbles if bub.get("thinking"))
+    total_think = sum(
+        1 for bub in bubbles if display_bubble_metadata(bub).get("thinking")
+    )
     if total_think:
         fm_lines.append(f"thinking_count: {total_think}")
     if wall_clock_sec is not None:
@@ -457,36 +419,39 @@ def cursor_ide_chat_to_markdown(
     # ── Body ──────────────────────────────────────────────────────────────────
     body = ""
     for bub in bubbles:
-        role = "User" if bub["type"] == "user" else "Assistant"
-        body += f"### {role}\n\n"
+        role_label = "User" if bub["type"] == "user" else "Assistant"
+        body += f"### {role_label}\n\n"
+        meta = display_bubble_metadata(bub)
         bub_meta: list[str] = []
-        if bub.get("model"):
-            bub_meta.append(f"Model: {bub['model']}")
-        if bub.get("responseTimeMs"):
-            bub_meta.append(f"Response: {bub['responseTimeMs'] / 1000:.1f}s")
-        if bub.get("thinkingDurationMs"):
-            bub_meta.append(f"Thinking: {bub['thinkingDurationMs'] / 1000:.1f}s")
-        if bub.get("contextTokensUsed") and bub.get("contextTokenLimit"):
-            pct = bub["contextTokensUsed"] / bub["contextTokenLimit"] * 100
+        if meta.get("modelName"):
+            bub_meta.append(f"Model: {meta['modelName']}")
+        response_ms = meta.get("responseTimeMs")
+        if response_ms:
+            bub_meta.append(f"Response: {response_ms / 1000:.1f}s")
+        thinking_ms = meta.get("thinkingDurationMs")
+        if thinking_ms:
+            bub_meta.append(f"Thinking: {thinking_ms / 1000:.1f}s")
+        ctx_used = meta.get("contextTokensUsed")
+        ctx_limit_bub = meta.get("contextTokenLimit")
+        if ctx_used and ctx_limit_bub:
+            pct = ctx_used / ctx_limit_bub * 100
             bub_meta.append(
-                f"Context: {bub['contextTokensUsed']:,} / {bub['contextTokenLimit']:,}"
+                f"Context: {ctx_used:,} / {ctx_limit_bub:,}"
                 f" tokens ({pct:.0f}% used)"
             )
-        elif bub.get("contextPctRemaining") is not None:
-            bub_meta.append(f"Context: {bub['contextPctRemaining']}% remaining")
+        elif meta.get("contextWindowPercent") is not None:
+            remaining = meta["contextWindowPercent"]
+            bub_meta.append(f"Context: {remaining}% remaining")
         if bub_meta:
             body += f"_{' | '.join(bub_meta)}_\n\n"
         if bub.get("timestamp"):
             body += f"_{datetime.fromtimestamp(bub['timestamp'] / 1000).isoformat()}_\n\n"
-        if bub.get("thinking"):
-            dur_str = (
-                f" ({bub['thinkingDurationMs'] / 1000:.1f}s)"
-                if bub.get("thinkingDurationMs") else ""
-            )
-            body += f"<details><summary>Thinking{dur_str}</summary>\n\n{bub['thinking']}\n\n</details>\n\n"
+        thinking_text = meta.get("thinking")
+        if thinking_text:
+            dur_str = f" ({thinking_ms / 1000:.1f}s)" if thinking_ms else ""
+            body += f"<details><summary>Thinking{dur_str}</summary>\n\n{thinking_text}\n\n</details>\n\n"
         body += bub["text"] + "\n\n"
-        if bub.get("tool"):
-            t = bub["tool"]
+        for t in display_bubble_tool_calls(bub):
             tool_summary = t.get("summary") or t.get("name") or "unknown"
             tool_status = t.get("status") or ""
             status_str = f" ({tool_status})" if tool_status else ""

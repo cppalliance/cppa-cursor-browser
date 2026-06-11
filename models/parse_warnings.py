@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -10,7 +11,7 @@ class ParseWarningCollector:
     composers_skipped: int = 0
     bubbles_skipped: int = 0
     composers_processing_failed: int = 0
-    source_failures: list[dict] = field(default_factory=list)
+    source_failures: list[dict[str, Any]] = field(default_factory=list)
 
     def record_composer_skipped(self, count: int = 1) -> None:
         if count > 0:
@@ -25,7 +26,7 @@ class ParseWarningCollector:
         if count > 0:
             self.composers_processing_failed += count
 
-    def record_source_failure(self, exc: BaseException, source: str) -> None:
+    def record_source_failure(self, exc: Exception, source: str) -> None:
         """Record a whole-source failure (e.g. the global storage DB is unreadable).
 
         Distinct from per-item parse skips: signals that an entire data source
@@ -48,9 +49,9 @@ class ParseWarningCollector:
             or bool(self.source_failures)
         )
 
-    def to_api_list(self) -> list[dict]:
+    def to_api_list(self) -> list[dict[str, Any]]:
         """Structured warnings for JSON API responses (issue #67)."""
-        warnings: list[dict] = []
+        warnings: list[dict[str, Any]] = []
         if self.composers_skipped:
             n = self.composers_skipped
             noun = "conversation" if n == 1 else "conversations"
@@ -89,7 +90,7 @@ class ParseWarningCollector:
             })
         return warnings
 
-    def attach_to(self, payload: dict) -> dict:
+    def attach_to(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add ``warnings`` to a dict response when any failures were recorded."""
         if self.has_warnings:
             payload = {**payload, "warnings": self.to_api_list()}

@@ -4,10 +4,11 @@ import json
 import os
 import re
 import sys
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 
-def read_json_file(path: str):
+def read_json_file(path: str) -> Any:
     """Read a workspace.json with Cursor indirection applied."""
     return _resolve_workspace_descriptor(path)
 
@@ -31,7 +32,7 @@ def _uri_or_path_to_fs_path(value: str, base_dir: str | None = None) -> str:
     return os.path.normpath(expanded)
 
 
-def _resolve_workspace_descriptor(path: str, depth: int = 0):
+def _resolve_workspace_descriptor(path: str, depth: int = 0) -> Any:
     """Read a workspace descriptor, following {"workspace": ...} indirection and normalising relative folder paths."""
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)

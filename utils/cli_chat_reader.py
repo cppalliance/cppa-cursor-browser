@@ -42,21 +42,23 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
-from typing import Generator
+from typing import Any, Generator, cast
+
+from models import DisplayBubble
 
 
 # ---------------------------------------------------------------------------
 # Low-level store.db helpers
 # ---------------------------------------------------------------------------
 
-def _read_meta(db_path: str) -> dict:
+def _read_meta(db_path: str) -> dict[str, Any]:
     """Read and decode the session metadata row from a ``store.db``."""
     # `closing(...)` guarantees .close() on scope exit (issue #17).
     with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
         try:
             row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
             if row and row[0]:
-                return json.loads(bytes.fromhex(row[0]).decode("utf-8"))
+                return cast(dict[str, Any], json.loads(bytes.fromhex(row[0]).decode("utf-8")))
         except Exception:
             pass
     return {}
@@ -79,7 +81,7 @@ def extract_blob_refs(data: bytes) -> list[str]:
     return refs
 
 
-def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
+def classify_blob_data(data: bytes) -> tuple[dict[str, Any] | None, list[str]]:
     """Classify a blob payload as a JSON message or a binary chain node.
 
     Returns ``(message_dict, [])`` when *data* decodes to a dict with a
@@ -96,7 +98,7 @@ def classify_blob_data(data: bytes) -> tuple[dict | None, list[str]]:
     return None, extract_blob_refs(data)
 
 
-def traverse_blobs(db_path: str) -> list[dict]:
+def traverse_blobs(db_path: str) -> list[dict[str, Any]]:
     """Reconstruct the conversation from a ``store.db`` blob graph.
 
     Starting from ``latestRootBlobId``, performs BFS over the blob DAG:
@@ -129,7 +131,7 @@ def traverse_blobs(db_path: str) -> list[dict]:
         root_id: str = meta.latest_root_blob_id
 
         # Load all blobs, classifying each as JSON or binary
-        json_blobs: dict[str, dict] = {}
+        json_blobs: dict[str, dict[str, Any]] = {}
         chain_blobs: dict[str, list[str]] = {}
 
         for blob_id, data in conn.execute("SELECT id, data FROM blobs"):
@@ -147,7 +149,7 @@ def traverse_blobs(db_path: str) -> list[dict]:
 
     visited: set[str] = set()
     queue: deque[str] = deque([root_id])
-    messages: list[dict] = []
+    messages: list[dict[str, Any]] = []
 
     while queue:
         bid = queue.popleft()
@@ -175,7 +177,7 @@ _USER_QUERY_RE = re.compile(r"<user_query>(.*?)</user_query>", re.DOTALL)
 _WORKSPACE_PATH_RE = re.compile(r"Workspace Path:\s*(.+?)(?:\n|$)")
 
 
-def content_to_text(content) -> str:
+def content_to_text(content: str | list[Any] | Any) -> str:
     """Flatten Vercel AI SDK content (string or typed-part array) to plain text."""
     if isinstance(content, str):
         return content
@@ -192,11 +194,11 @@ def content_to_text(content) -> str:
     return ""
 
 
-def extract_tool_calls(content) -> list[dict]:
+def extract_tool_calls(content: str | list[Any] | Any) -> list[dict[str, Any]]:
     """Extract tool-call parts from assistant message content."""
     if not isinstance(content, list):
         return []
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
     for part in content:
         if isinstance(part, dict) and part.get("type") == "tool-call":
             calls.append({
@@ -207,7 +209,7 @@ def extract_tool_calls(content) -> list[dict]:
     return calls
 
 
-def extract_workspace_path(messages: list[dict]) -> str | None:
+def extract_workspace_path(messages: list[dict[str, Any]]) -> str | None:
     """Extract the workspace path from the ``<user_info>`` preamble in the
     first user message that contains one."""
     for msg in messages:
@@ -233,7 +235,7 @@ def strip_user_info(text: str) -> str:
     return _USER_INFO_RE.sub("", text).strip()
 
 
-def messages_to_bubbles(messages: list[dict], created_at_ms: int) -> list[dict]:
+def messages_to_bubbles(messages: list[dict[str, Any]], created_at_ms: int) -> list[DisplayBubble]:
     """Convert CLI message dicts to the bubble format used by the browser UI.
 
     Each bubble has:
@@ -273,7 +275,7 @@ def messages_to_bubbles(messages: list[dict], created_at_ms: int) -> list[dict]:
             # only if not already set, to avoid clobbering a keyed entry.
             tool_outputs.setdefault("", content)
 
-    bubbles: list[dict] = []
+    bubbles: list[DisplayBubble] = []
     seq = 0
 
     for msg in messages:
@@ -303,7 +305,7 @@ def messages_to_bubbles(messages: list[dict], created_at_ms: int) -> list[dict]:
             if not text.strip() and not tool_calls:
                 continue
 
-            bubble: dict = {"type": "ai", "text": text, "timestamp": ts}
+            bubble: DisplayBubble = {"type": "ai", "text": text, "timestamp": ts}
             if tool_calls:
                 # Convert to the format parse_tool_call returns
                 formatted_calls = []
@@ -360,7 +362,7 @@ def messages_to_bubbles(messages: list[dict], created_at_ms: int) -> list[dict]:
 # Project / session enumeration
 # ---------------------------------------------------------------------------
 
-def iter_sessions(chats_path: str) -> Generator[dict, None, None]:
+def iter_sessions(chats_path: str) -> Generator[dict[str, Any], None, None]:
     """Yield one dict per CLI session under ``chats_path``.
 
     Each dict contains:
@@ -390,7 +392,7 @@ def iter_sessions(chats_path: str) -> Generator[dict, None, None]:
             }
 
 
-def list_cli_projects(chats_path: str) -> list[dict]:
+def list_cli_projects(chats_path: str) -> list[dict[str, Any]]:
     """Return one dict per CLI project (unique ``project_id``).
 
     Each dict:
@@ -401,7 +403,7 @@ def list_cli_projects(chats_path: str) -> list[dict]:
     from the first user message found, and ``workspace_name`` is the last
     path segment of ``workspace_path``.
     """
-    projects: dict[str, dict] = {}
+    projects: dict[str, dict[str, Any]] = {}
 
     for session in iter_sessions(chats_path):
         pid = session["project_id"]
@@ -450,7 +452,7 @@ def list_cli_projects(chats_path: str) -> list[dict]:
 # Aggregate statistics for a project's sessions
 # ---------------------------------------------------------------------------
 
-def aggregate_session_stats(session: dict) -> dict:
+def aggregate_session_stats(session: dict[str, Any]) -> dict[str, Any]:
     """Return aggregate statistics for one CLI session.
 
     Reads and converts blobs, then counts tool calls and computes wall-clock

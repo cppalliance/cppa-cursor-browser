@@ -98,11 +98,14 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
 
     def test_search_endpoint_calls_bubble_from_dict(self):
         from app import create_app
-        import services.search as search_mod
+        import services.workspace_db as workspace_db_mod
+        from models import Bubble
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with patch.object(search_mod.Bubble, "from_dict", wraps=search_mod.Bubble.from_dict) as spy:
+        with patch.object(
+            workspace_db_mod.Bubble, "from_dict", wraps=Bubble.from_dict
+        ) as spy:
             client = app.test_client()
             response = client.get("/api/search?q=sentinel-wired")
             self.assertEqual(response.status_code, 200)
@@ -149,7 +152,7 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with self.assertLogs("services.search", level="WARNING") as logs:
+        with self.assertLogs("services.workspace_db", level="WARNING") as logs:
             client = app.test_client()
             response = client.get("/api/search?q=sentinel-wired")
             self.assertEqual(response.status_code, 200)

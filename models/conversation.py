@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from models.errors import SchemaError
 from models.from_dict_validation import (
@@ -126,7 +126,7 @@ class Composer:
                     type(value).__name__,
                 )
             return 0
-        return value
+        return cast(int | float, value)
 
     @property
     def total_lines_added(self) -> int | float:
@@ -147,6 +147,11 @@ class Composer:
     def model_name_from_config(self) -> str | None:
         name = self.model_config.get("modelName")
         return name if isinstance(name, str) and name else None
+
+
+# Issue #100: Cursor persists conversations as ``composerData`` rows; ``Composer``
+# is the validated domain type for a full conversation.
+Conversation = Composer
 
 
 @dataclass(frozen=True)
@@ -172,7 +177,10 @@ class WorkspaceLocalComposer:
 
 @dataclass(frozen=True)
 class Bubble:
-    """One message in a composer; bubble_id comes from the row key, not the JSON value."""
+    """One message in a composer; bubble_id comes from the row key, not the JSON value.
+
+    Rendered for UI/export as :class:`models.bubble_display.DisplayBubble`.
+    """
 
     bubble_id: str
     raw: dict[str, Any] = field(default_factory=dict)
@@ -313,7 +321,7 @@ class Bubble:
                 type(value).__name__,
             )
             return None
-        return value
+        return cast(int | float, value)
 
     @property
     def context_window_status_at_creation(self) -> dict[str, Any]:

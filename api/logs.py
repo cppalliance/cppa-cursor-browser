@@ -10,8 +10,11 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime
+from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, Response
+
+from api.flask_config import json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms, warn_workspace_json_read
@@ -26,7 +29,7 @@ def _extract_chat_id_from_bubble_key(key: str) -> str | None:
 
 
 @bp.route("/api/logs")
-def get_logs():
+def get_logs() -> tuple[Response, int] | Response:
     try:
         workspace_path = resolve_workspace_path()
         logs = []
@@ -40,7 +43,7 @@ def get_logs():
                     conn.row_factory = sqlite3.Row
                     rows = conn.execute("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'").fetchall()
 
-                chat_map: dict[str, list] = {}
+                chat_map: dict[str, list[Any]] = {}
                 for row in rows:
                     chat_id = _extract_chat_id_from_bubble_key(row["key"])
                     if not chat_id:
@@ -148,8 +151,8 @@ def get_logs():
             )
 
         logs.sort(key=lambda log: log.get("timestamp") or 0, reverse=True)
-        return jsonify({"logs": logs})
+        return json_response({"logs": logs})
 
     except Exception:
         _logger.exception("Failed to get logs")
-        return jsonify({"error": "Failed to get logs", "logs": []}), 500
+        return json_response({"error": "Failed to get logs", "logs": []}, 500)

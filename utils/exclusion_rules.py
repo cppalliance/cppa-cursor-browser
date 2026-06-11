@@ -31,6 +31,11 @@ from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
+RuleToken = str | tuple[str, str]
+RuleTokens = list[RuleToken]
+RuleClause = list[tuple[str, str]]
+RuleClauses = list[RuleClause]
+
 # Default path when no --exclude-rules is given: ~/.cursor-chat-browser/exclusion-rules.txt
 DEFAULT_EXCLUSION_RULES_FILENAME = "exclusion-rules.txt"
 
@@ -65,7 +70,7 @@ def resolve_exclusion_rules_path(cli_path: str | None) -> str | None:
     return None
 
 
-def tokenize_rule(line: str) -> list:
+def tokenize_rule(line: str) -> RuleTokens:
     """
     Tokenize a rule line into terms and operators.
 
@@ -73,7 +78,7 @@ def tokenize_rule(line: str) -> list:
     the string ``"OR"``, or a ``(kind, value)`` tuple where *kind* is
     ``"word"`` or ``"phrase"``.
     """
-    tokens: list[str | tuple[str, str]] = []
+    tokens: RuleTokens = []
     rest = line.strip()
     while rest:
         # Skip whitespace
@@ -111,7 +116,7 @@ def tokenize_rule(line: str) -> list:
     return tokens
 
 
-def _term_matches(term: tuple, text: str) -> bool:
+def _term_matches(term: tuple[str, str], text: str) -> bool:
     """
     Return True if *term* matches anywhere in *text* (case-insensitive).
 
@@ -130,7 +135,7 @@ def _term_matches(term: tuple, text: str) -> bool:
     return value.lower() in text.lower()
 
 
-def _rule_matches(tokens: list, text: str) -> bool:
+def _rule_matches(tokens: RuleTokens, text: str) -> bool:
     """
     Evaluate a tokenized rule against *text*.
 
@@ -141,8 +146,8 @@ def _rule_matches(tokens: list, text: str) -> bool:
     if not tokens:
         return False
     # Split by OR into clauses; each clause is the AND of its terms
-    clauses: list[list] = []
-    current: list = []
+    clauses: RuleClauses = []
+    current: RuleClause = []
     for t in tokens:
         if t == "OR":
             if current:
@@ -151,7 +156,7 @@ def _rule_matches(tokens: list, text: str) -> bool:
         elif t == "AND":
             # Explicit AND: terms are already collected sequentially, skip token
             continue
-        else:
+        elif isinstance(t, tuple):
             current.append(t)
     if current:
         clauses.append(current)
@@ -167,7 +172,7 @@ def _rule_matches(tokens: list, text: str) -> bool:
     return False
 
 
-def load_rules(path: str | None) -> list[list]:
+def load_rules(path: str | None) -> list[RuleTokens]:
     """
     Load and parse the exclusion rule file at *path*.
 
@@ -198,7 +203,7 @@ def load_rules(path: str | None) -> list[list]:
     return rules
 
 
-def is_excluded_by_rules(rules: list[list], searchable_text: str) -> bool:
+def is_excluded_by_rules(rules: list[RuleTokens], searchable_text: str) -> bool:
     """
     Return ``True`` if *searchable_text* matches any exclusion rule.
 

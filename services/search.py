@@ -24,6 +24,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 __all__ = [
     "rank_results",
@@ -31,10 +32,11 @@ __all__ = [
     "search_global_storage",
     "search_legacy_workspaces",
 ]
-from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from models import Composer, ParseWarningCollector, SchemaError, SearchResult
 from services.workspace_db import (
-    build_composer_id_to_workspace_id,
+    build_composer_id_to_workspace_id_cached,
     collect_workspace_entries,
+    load_bubble_map,
     open_global_db,
 )
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
@@ -48,13 +50,16 @@ from utils.text_extract import extract_text_from_bubble
 
 _logger = logging.getLogger(__name__)
 
+# Missing/unparseable timestamps sort last in rank_results() (treated as 0.0 s).
+_UNKNOWN_SEARCH_TIMESTAMP: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Private helpers — pure functions / small utilities
 # ---------------------------------------------------------------------------
 
 
-def _json_dump_safe(value) -> str:
+def _json_dump_safe(value: object) -> str:
     """Best-effort JSON serialisation for exclusion-rule matching."""
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -89,6 +94,8 @@ def _extract_snippet(text: str, query: str, query_lower: str) -> str:
 
     Returns an empty string if there is no match.
     """
+    if not query_lower:
+        return ""
     idx = text.lower().find(query_lower)
     if idx == -1:
         return ""
@@ -126,7 +133,7 @@ def _find_match(
 
 
 def _build_ws_id_to_name(
-    workspace_entries: list[dict],
+    workspace_entries: list[dict[str, Any]],
 ) -> dict[str, str]:
     """Map workspace folder IDs to human-readable display names.
 
@@ -147,38 +154,6 @@ def _build_ws_id_to_name(
     return mapping
 
 
-def _build_search_bubble_map(
-    global_db,
-    parse_warnings: ParseWarningCollector,
-) -> dict[str, dict]:
-    """Load ``bubbleId:*`` rows from an open global DB connection.
-
-    Returns ``{bubble_id: {"text": str, "raw": dict}}``.  Rows that fail
-    schema validation or JSON decoding are skipped; the skip is recorded in
-    *parse_warnings*.
-    """
-    bubble_map: dict[str, dict] = {}
-    for row in global_db.execute(
-        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-    ):
-        parts = row["key"].split(":")
-        if len(parts) < 3:
-            continue
-        bid = parts[2]
-        try:
-            bubble = Bubble.from_dict(json.loads(row["value"]), bubble_id=bid)
-            bubble_map[bid] = {"text": extract_text_from_bubble(bubble), "raw": bubble.raw}
-        except SchemaError as exc:
-            _logger.warning(
-                "Schema drift in bubble %s: %s (%s)", bid, exc, type(exc).__name__
-            )
-            parse_warnings.record_bubble_skipped()
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            _logger.warning("Failed to decode Bubble from bubbleId:%s: %s", bid, exc)
-            parse_warnings.record_bubble_skipped()
-    return bubble_map
-
-
 # ---------------------------------------------------------------------------
 # Public: per-source search functions
 # ---------------------------------------------------------------------------
@@ -188,9 +163,9 @@ def search_global_storage(
     workspace_path: str,
     query: str,
     query_lower: str,
-    rules: list,
+    rules: list[Any],
     parse_warnings: ParseWarningCollector,
-) -> list[dict]:
+) -> list[SearchResult]:
     """Search composer conversations stored in the global ``cursorDiskKV`` table.
 
     This is the primary data source for current Cursor versions.
@@ -206,18 +181,18 @@ def search_global_storage(
         List of search result dicts with keys ``workspaceId``, ``workspaceFolder``,
         ``chatId``, ``chatTitle``, ``timestamp``, ``matchingText``, ``type``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     try:
         workspace_entries = collect_workspace_entries(workspace_path)
         ws_id_to_name = _build_ws_id_to_name(workspace_entries)
-        composer_id_to_ws = build_composer_id_to_workspace_id(
-            workspace_path, workspace_entries
+        composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+            workspace_path, workspace_entries, rules
         )
 
         with open_global_db(workspace_path) as (conn, _db_path):
             if conn is None:
                 return results
-            bubble_map = _build_search_bubble_map(conn, parse_warnings)
+            bubble_map = load_bubble_map(conn, parse_warnings=parse_warnings)
             composer_rows = conn.execute(
                 "SELECT key, value FROM cursorDiskKV"
                 " WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
@@ -270,15 +245,13 @@ def search_global_storage(
                     bid = header.get("bubbleId")
                     if not bid:
                         continue
-                    entry = bubble_map.get(bid)
-                    if not entry:
+                    bubble = bubble_map.get(bid)
+                    if bubble is None:
                         continue
-                    text = entry.get("text") or ""
+                    text = extract_text_from_bubble(bubble)
                     if text:
                         bubble_texts.append(text)
-                    raw_bubble = entry.get("raw")
-                    if raw_bubble:
-                        bubble_meta.append(_json_dump_safe(raw_bubble))
+                    bubble_meta.append(_json_dump_safe(bubble.raw))
 
                 exclusion_text = _build_exclusion_searchable(
                     project_name=project_name,
@@ -290,7 +263,6 @@ def search_global_storage(
                         _json_dump_safe(cd.get("conversationSummary")),
                         _json_dump_safe(cd.get("usage")),
                         _json_dump_safe(cd.get("requestMetadata")),
-                        _json_dump_safe(cd),
                         "\n".join(bubble_meta),
                     ],
                 )
@@ -321,7 +293,7 @@ def search_global_storage(
                     "timestamp": (
                         to_epoch_ms(composer.last_updated_at)
                         or to_epoch_ms(composer.created_at)
-                        or int(datetime.now().timestamp() * 1000)
+                        or _UNKNOWN_SEARCH_TIMESTAMP
                     ),
                     "matchingText": matching_text,
                     "type": "composer",
@@ -346,8 +318,8 @@ def search_legacy_workspaces(
     query: str,
     query_lower: str,
     search_type: str,
-    rules: list,
-) -> list[dict]:
+    rules: list[Any],
+) -> list[SearchResult]:
     """Search legacy per-workspace ItemTable chat data.
 
     Iterates per-workspace ``state.vscdb`` files looking for the
@@ -364,7 +336,7 @@ def search_legacy_workspaces(
     Returns:
         List of search result dicts with ``type`` set to ``"chat"``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     if search_type not in ("all", "chat"):
         return results
 
@@ -402,6 +374,7 @@ def search_legacy_workspaces(
                 data = json.loads(chat_row[0])
                 for tab in (data.get("tabs") or []):
                     ct = tab.get("chatTitle") or ""
+                    tab_id = str(tab.get("tabId") or "")
 
                     tab_model_names: list[str] | None = None
                     tab_meta = tab.get("metadata")
@@ -438,16 +411,21 @@ def search_legacy_workspaces(
 
                     results.append({
                         "workspaceId": name,
-                        "workspaceFolder": workspace_folder,
-                        "chatId": tab.get("tabId"),
-                        "chatTitle": ct or f"Chat {(tab.get('tabId') or '')[:8]}",
-                        "timestamp": tab.get("lastSendTime") or 0,
+                        "workspaceFolder": workspace_name,
+                        "chatId": tab_id,
+                        "chatTitle": ct or f"Chat {tab_id[:8]}",
+                        "timestamp": to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP,
                         "matchingText": matching_text,
                         "type": "chat",
                     })
 
             except Exception as exc:
-                _logger.warning("Failed to search legacy workspace %s: %s", name, exc)
+                _logger.warning(
+                    "Failed to search legacy workspace %s: %s",
+                    name,
+                    exc,
+                    exc_info=True,
+                )
 
     except Exception as exc:
         _logger.warning(
@@ -461,8 +439,9 @@ def search_cli_sessions(
     cli_chats_path: str,
     query: str,
     query_lower: str,
-    rules: list,
-) -> list[dict]:
+    rules: list[Any],
+    parse_warnings: ParseWarningCollector | None = None,
+) -> list[SearchResult]:
     """Search Cursor CLI agent sessions stored as JSONL + blob files.
 
     Reads from ``~/.cursor/chats/`` (or the path returned by
@@ -478,7 +457,7 @@ def search_cli_sessions(
         List of search result dicts with ``type`` set to ``"cli_agent"`` and
         ``source`` set to ``"cli"``.
     """
-    results: list[dict] = []
+    results: list[SearchResult] = []
     try:
         cli_projects = list_cli_projects(cli_chats_path)
         for cp in cli_projects:
@@ -486,9 +465,7 @@ def search_cli_sessions(
             for session in cp["sessions"]:
                 meta = session.get("meta", {})
                 session_id = session["session_id"]
-                created_ms: int = (
-                    meta.get("createdAt") or int(datetime.now().timestamp() * 1000)
-                )
+                created_ms: int = to_epoch_ms(meta.get("createdAt"))
                 session_name: str = meta.get("name") or f"Session {session_id[:8]}"
 
                 try:
@@ -500,6 +477,14 @@ def search_cli_sessions(
                         exc,
                     )
                     continue
+
+                if not messages and meta:
+                    _logger.warning(
+                        "CLI session %s has meta but traverse_blobs returned no "
+                        "messages from %s",
+                        session_id,
+                        session["db_path"],
+                    )
 
                 bubbles = messages_to_bubbles(messages, created_ms)
                 if not bubbles:
@@ -538,7 +523,7 @@ def search_cli_sessions(
 
                 results.append({
                     "workspaceId": f"cli:{cp['project_id']}",
-                    "workspaceFolder": cp.get("workspace_path"),
+                    "workspaceFolder": ws_name,
                     "chatId": session_id,
                     "chatTitle": title,
                     "timestamp": created_ms,
@@ -546,8 +531,10 @@ def search_cli_sessions(
                     "type": "cli_agent",
                     "source": "cli",
                 })
-    except Exception:
+    except Exception as exc:
         _logger.exception("Error searching CLI sessions")
+        if parse_warnings is not None:
+            parse_warnings.record_source_failure(exc, source="cli_sessions")
 
     return results
 
@@ -557,7 +544,7 @@ def search_cli_sessions(
 # ---------------------------------------------------------------------------
 
 
-def rank_results(results: list[dict]) -> list[dict]:
+def rank_results(results: list[SearchResult]) -> list[SearchResult]:
     """Sort *results* by timestamp descending.
 
     All three source types use epoch-millisecond integers, except
@@ -565,14 +552,18 @@ def rank_results(results: list[dict]) -> list[dict]:
     ``lastSendTime`` field.  ISO strings are converted to epoch-ms so
     cross-source comparisons are made in the same unit.
     """
-    def _ts(r: dict) -> float:
+    def _ts(r: SearchResult) -> float:
         t = r.get("timestamp", 0)
+        if t is None:
+            return 0.0
         if isinstance(t, str):
             try:
                 # .timestamp() -> epoch-seconds; x1000 -> epoch-ms to match ints
                 return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000
             except Exception:
                 return 0.0
+        if isinstance(t, bool) or not isinstance(t, (int, float)):
+            return 0.0
         return float(t) if t else 0.0
 
     return sorted(results, key=_ts, reverse=True)
