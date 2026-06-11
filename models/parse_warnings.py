@@ -26,7 +26,7 @@ class ParseWarningCollector:
         if count > 0:
             self.composers_processing_failed += count
 
-    def record_source_failure(self, exc: BaseException, source: str) -> None:
+    def record_source_failure(self, exc: Exception, source: str) -> None:
         """Record a whole-source failure (e.g. the global storage DB is unreadable).
 
         Distinct from per-item parse skips: signals that an entire data source
