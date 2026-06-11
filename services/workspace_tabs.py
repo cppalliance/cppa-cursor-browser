@@ -7,7 +7,7 @@ import os
 import sqlite3
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ from services.workspace_db import (
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
+    safe_fetchall,
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
@@ -548,22 +549,11 @@ def _build_workspace_tab_summaries_uncached(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(
-            query: str, params: tuple[Any, ...] = (),
-        ) -> list[sqlite3.Row]:
-            try:
-                return cast(
-                    list[sqlite3.Row],
-                    global_db.execute(query, params).fetchall(),
-                )
-            except sqlite3.Error:
-                return []
-
         project_layouts_map: dict[str, list[str]] = {}
         if invalid_workspace_ids:
             project_layouts_map = load_project_layouts_map(global_db)
 
-        composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+        composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         invalid_workspace_aliases: dict[str, str] = {}
         if invalid_workspace_ids:
@@ -709,18 +699,8 @@ def assemble_single_tab(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(
-            query: str, params: tuple[Any, ...] = (),
-        ) -> list[sqlite3.Row]:
-            try:
-                return cast(
-                    list[sqlite3.Row],
-                    global_db.execute(query, params).fetchall(),
-                )
-            except sqlite3.Error:
-                return []
-
-        rows = _safe_fetchall(
+        rows = safe_fetchall(
+            global_db,
             "SELECT key, value FROM cursorDiskKV WHERE key = ?",
             (f"composerData:{composer_id}",),
         )
@@ -760,7 +740,7 @@ def assemble_single_tab(
         if invalid_workspace_ids:
             # Alias resolution still needs the composer roster, but project layouts
             # are intentionally limited to this composer (single-tab scope).
-            composer_rows_for_aliases = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+            composer_rows_for_aliases = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=composer_rows_for_aliases,
                 project_layouts_map=project_layouts_map,
@@ -848,21 +828,11 @@ def assemble_workspace_tabs(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        def _safe_fetchall(
-            query: str, params: tuple[Any, ...] = (),
-        ) -> list[sqlite3.Row]:
-            try:
-                return cast(
-                    list[sqlite3.Row],
-                    global_db.execute(query, params).fetchall(),
-                )
-            except sqlite3.Error:
-                return []
-
         # Load bubbles
-        for row in _safe_fetchall(
+        for row in safe_fetchall(
+            global_db,
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-            " AND value IS NOT NULL"
+            " AND value IS NOT NULL",
         ):
             parts = row["key"].split(":")
             if len(parts) >= 3:
@@ -901,7 +871,10 @@ def assemble_workspace_tabs(
         # Load messageRequestContext rows once; build both
         # message_request_context_map and project_layouts_map from the same pass.
         project_layouts_map: dict[str, list[str]] = {}
-        for row in _safe_fetchall("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'"):
+        for row in safe_fetchall(
+            global_db,
+            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'messageRequestContext:%'",
+        ):
             parts = row["key"].split(":")
             if len(parts) < 2:
                 continue
@@ -934,11 +907,12 @@ def assemble_workspace_tabs(
                         project_layouts_map[chat_id].append(layout["rootPath"])
 
         # Get composer data entries with conversations
-        composer_rows = _safe_fetchall(
+        composer_rows = safe_fetchall(
+            global_db,
             "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
             " AND value IS NOT NULL"
             " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
+            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'",
         )
 
         invalid_workspace_aliases = infer_invalid_workspace_aliases(

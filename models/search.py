@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 
 class ConversationSummary(TypedDict, total=False):
@@ -21,11 +21,11 @@ class _SearchResultRequired(TypedDict):
     chatTitle: str
     timestamp: int | str
     matchingText: str
-    type: str  # "composer" | "chat" | "cli_agent"
+    type: Literal["composer", "chat", "cli_agent"]
 
 
 class _SearchResultOptional(TypedDict, total=False):
-    source: str  # "cli" for CLI agent sessions
+    source: Literal["cli"]
 
 
 class SearchResult(_SearchResultRequired, _SearchResultOptional):

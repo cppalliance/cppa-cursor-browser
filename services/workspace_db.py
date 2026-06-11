@@ -7,7 +7,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _logger = logging.getLogger(__name__)
 
@@ -20,6 +20,18 @@ from utils.workspace_descriptor import read_json_file
 # be set to sqlite3.Row by the caller, as open_global_db does) and returns
 # a populated dict.  sqlite3.Error is caught internally so a missing or
 # corrupt table cannot propagate to callers.
+
+
+def safe_fetchall(
+    conn: sqlite3.Connection,
+    query: str,
+    params: tuple[Any, ...] = (),
+) -> list[sqlite3.Row]:
+    """Run *query* on *conn*; return rows or ``[]`` on sqlite3.Error."""
+    try:
+        return cast(list[sqlite3.Row], conn.execute(query, params).fetchall())
+    except sqlite3.Error:
+        return []
 
 
 def load_bubble_map(global_db: sqlite3.Connection) -> dict[str, dict[str, Any]]:

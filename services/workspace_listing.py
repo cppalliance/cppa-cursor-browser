@@ -5,7 +5,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ from services.workspace_db import (
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
+    safe_fetchall,
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
@@ -138,19 +139,8 @@ def _build_workspace_projects_uncached(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db:
-            def _safe_fetchall(
-                query: str, params: tuple[Any, ...] = (),
-            ) -> list[sqlite3.Row]:
-                try:
-                    return cast(
-                        list[sqlite3.Row],
-                        global_db.execute(query, params).fetchall(),
-                    )
-                except sqlite3.Error:
-                    return []
-
             try:
-                composer_rows = _safe_fetchall(COMPOSER_ROWS_WITH_HEADERS_SQL)
+                composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
                 project_layouts_map: dict[str, list[str]] = {}
                 if invalid_workspace_ids:

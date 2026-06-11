@@ -403,6 +403,7 @@ def search_legacy_workspaces(
                 data = json.loads(chat_row[0])
                 for tab in (data.get("tabs") or []):
                     ct = tab.get("chatTitle") or ""
+                    tab_id = str(tab.get("tabId") or "")
 
                     tab_model_names: list[str] | None = None
                     tab_meta = tab.get("metadata")
@@ -440,9 +441,9 @@ def search_legacy_workspaces(
                     results.append({
                         "workspaceId": name,
                         "workspaceFolder": workspace_folder,
-                        "chatId": tab.get("tabId"),
-                        "chatTitle": ct or f"Chat {(tab.get('tabId') or '')[:8]}",
-                        "timestamp": tab.get("lastSendTime") or 0,
+                        "chatId": tab_id,
+                        "chatTitle": ct or f"Chat {tab_id[:8]}",
+                        "timestamp": tab.get("lastSendTime") or datetime.now().isoformat(),
                         "matchingText": matching_text,
                         "type": "chat",
                     })
@@ -568,12 +569,18 @@ def rank_results(results: list[SearchResult]) -> list[SearchResult]:
     """
     def _ts(r: SearchResult) -> float:
         t = r.get("timestamp", 0)
+        if t is None:
+            return 0.0
         if isinstance(t, str):
             try:
                 # .timestamp() -> epoch-seconds; x1000 -> epoch-ms to match ints
                 return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000
             except Exception:
                 return 0.0
+        if isinstance(t, bool) or not isinstance(t, (int, float)):
+            return 0.0
+        if t > 1e12:
+            return float(t) / 1000.0
         return float(t) if t else 0.0
 
     return sorted(results, key=_ts, reverse=True)

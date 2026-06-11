@@ -36,9 +36,12 @@ def search() -> tuple[Response, int] | Response:
         query_lower = query.lower()
 
         results: list[SearchResult] = []
-        results.extend(
-            search_global_storage(workspace_path, query, query_lower, rules, parse_warnings)
-        )
+        if search_type != "chat":
+            results.extend(
+                search_global_storage(
+                    workspace_path, query, query_lower, rules, parse_warnings
+                )
+            )
         results.extend(
             search_legacy_workspaces(workspace_path, query, query_lower, search_type, rules)
         )
