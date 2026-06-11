@@ -114,7 +114,7 @@ jobs:
         # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage and
         # exercise Flask routes via app.test_client(). Only listed files — not
         # `pytest tests/` — to avoid re-collecting unittest.TestCase classes above.
-        run: python -m pytest tests/test_api_endpoints.py tests/test_pdf_export.py -v --tb=short
+        run: python -m pytest tests/test_api_endpoints.py tests/test_pdf_export.py tests/test_search_helpers.py -v --tb=short
 
       # ── PyInstaller desktop build (Windows only, once per workflow) ────────
       # Closes #44. Builds the onedir bundle and smoke-tests --help so the
