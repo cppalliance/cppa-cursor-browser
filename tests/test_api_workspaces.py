@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from tests._fixture_ids import HAPPY_COMPOSER_ID, HAPPY_WORKSPACE_ID
-from tests.conftest import client_with_rules
+from tests._helpers import client_with_rules
 
 
 def _assert_project_shape(project: dict) -> None:
@@ -103,6 +103,12 @@ class TestGetWorkspaceTabs:
         tab = next(t for t in body["tabs"] if t["id"] == HAPPY_COMPOSER_ID)
         assert isinstance(tab["messageCount"], int)
         assert "bubbles" not in tab
+
+    def test_summary_query_global_workspace(self, client):
+        response = client.get("/api/workspaces/global/tabs?summary=1")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert "tabs" in body and isinstance(body["tabs"], list)
 
 
 class TestGetWorkspaceTab:

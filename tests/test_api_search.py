@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from tests._fixture_ids import HAPPY_COMPOSER_ID, HAPPY_WORKSPACE_ID
-from tests.conftest import client_with_rules
+from tests._helpers import client_with_rules
 
 
 def _assert_search_result_shape(hit: dict) -> None:

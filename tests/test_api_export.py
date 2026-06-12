@@ -134,6 +134,8 @@ class TestExportEdgeCases:
     def test_since_last_after_export_returns_404_when_nothing_new(
         self, client, export_state_dir
     ):
+        # Relies on the seeded composer's lastUpdatedAt (May 2024 in conftest)
+        # being older than the export state's lastExportTime set by the first call.
         first = _post_export(client, {"since": "all"})
         assert first.status_code == 200
 
