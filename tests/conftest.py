@@ -23,7 +23,6 @@ from tests._fixture_ids import (  # noqa: E402,F401  (re-export for legacy impor
     HAPPY_WORKSPACE_ID,
 )
 
-
 def _make_global_state_db(path: str) -> None:
     """globalStorage/state.vscdb with one composerData + one bubbleId row."""
     # contextlib.closing guarantees conn.close() even if an exec/commit raises

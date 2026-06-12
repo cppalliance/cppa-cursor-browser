@@ -114,7 +114,7 @@ jobs:
         # Pytest fixtures (tests/conftest.py) build a temp workspaceStorage and
         # exercise Flask routes via app.test_client(). Only listed files — not
         # `pytest tests/` — to avoid re-collecting unittest.TestCase classes above.
-        run: python -m pytest tests/test_api_endpoints.py tests/test_pdf_export.py tests/test_search_helpers.py -v --tb=short
+        run: python -m pytest tests/test_api_search.py tests/test_api_workspaces.py tests/test_api_export.py tests/test_pdf_export.py tests/test_search_helpers.py -v --tb=short
 
       # ── PyInstaller desktop build (Windows only, once per workflow) ────────
       # Closes #44. Builds the onedir bundle and smoke-tests --help so the
@@ -149,7 +149,9 @@ jobs:
       - name: Install runtime deps + mypy
         # Install from the pinned lock file for deterministic resolution,
         # then add mypy (dev-only; not in requirements-lock.txt).
-        # Flask 3.1+ ships inline types — do not install types-Flask (conflicts).
+        # Flask 3.1+ includes inline type hints — do not add or install types-Flask
+        # (it will conflict with our pip installs). Preventative guidance for future
+        # maintainers editing the steps below.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-lock.txt

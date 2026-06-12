@@ -12,7 +12,7 @@ import sqlite3
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, Response, request
 
@@ -45,7 +45,14 @@ def _get_export_state() -> dict[str, Any]:
     if os.path.isfile(state_path):
         try:
             with open(state_path, "r", encoding="utf-8") as f:
-                return cast(dict[str, Any], json.load(f))
+                parsed = json.load(f)
+            if isinstance(parsed, dict):
+                return parsed
+            _logger.warning(
+                "Export state in %s is not a JSON object (got %s); ignoring",
+                state_path,
+                type(parsed).__name__,
+            )
         except (json.JSONDecodeError, ValueError, OSError) as e:
             _logger.warning(
                 "Could not read export state from %s: %s",
