@@ -98,12 +98,6 @@ pretty = true
 # Anchored regexes — unanchored `venv/` would match any path segment containing "venv/".
 exclude = ["^venv/", "^\\.venv/", "^build/", "^dist/"]
 
-# Standalone CLI export script (~985 LOC) duplicates utils/ helpers; typed
-# incrementally — issue #100 allows per-module override until consolidated.
-[[tool.mypy.overrides]]
-module = "scripts.export"
-ignore_errors = true
-
 # Test modules use unittest/pytest patterns that are not worth strict-checking
 # alongside production code; route handlers and utils are fully strict.
 [[tool.mypy.overrides]]
