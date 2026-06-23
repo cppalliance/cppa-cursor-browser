@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
   const q = params.get('q');
   const t = params.get('type') || 'all';
-  const allHistory = params.get('all_history') === '1';
+  const allHistory = params.get('all_history') === '1' || params.get('all_history') === 'true';
   document.getElementById('all-history').checked = allHistory;
   if (q) {
     document.getElementById('search-input').value = q;

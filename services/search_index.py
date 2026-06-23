@@ -17,7 +17,8 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,7 @@ __all__ = [
     "ensure_search_index",
     "index_is_usable",
     "index_search_enabled",
+    "query_all_composer_bubble_texts",
     "query_composer_bubble_hits",
     "query_composer_title_hits",
     "query_composer_rows_in_window",
@@ -152,6 +154,20 @@ def _open_index_db(*, readonly: bool = True) -> sqlite3.Connection | None:
         return None
 
 
+@contextmanager
+def _index_db_conn(*, readonly: bool = True) -> Iterator[sqlite3.Connection | None]:
+    conn = _open_index_db(readonly=readonly)
+    try:
+        yield conn
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+class _IndexBuildSkipped(Exception):
+    """Raised when index build cannot read the source global database."""
+
+
 def _read_stored_fingerprint(conn: sqlite3.Connection) -> dict[str, Any] | None:
     try:
         row = conn.execute(
@@ -226,7 +242,7 @@ def build_search_index(
     with _index_build_lock:
         active_path = _resolve_active_index_db_path()
         if not force and active_path is not None:
-            with closing(_open_index_db(readonly=True)) as existing:
+            with _index_db_conn(readonly=True) as existing:
                 if existing is not None:
                     stored = _read_stored_fingerprint(existing)
                     if stored is not None and _fingerprints_match(stored, fingerprint):
@@ -244,7 +260,7 @@ def build_search_index(
 
                 with open_global_db(workspace_path) as (src_conn, _):
                     if src_conn is None:
-                        return False
+                        raise _IndexBuildSkipped()
                     composer_rows = src_conn.execute(
                         COMPOSER_ROWS_WITH_HEADERS_SQL
                     ).fetchall()
@@ -319,6 +335,13 @@ def build_search_index(
                 new_path.name,
             )
             return True
+        except _IndexBuildSkipped:
+            if new_path.is_file():
+                try:
+                    new_path.unlink()
+                except OSError:
+                    pass
+            return False
         except Exception:
             _logger.exception("Search index rebuild failed")
             if new_path.is_file():
@@ -337,7 +360,7 @@ def ensure_search_index(workspace_path: str, rules: list[Any]) -> None:
         build_search_index(workspace_path, rules)
         return
     fingerprint = _storage_fingerprint(workspace_path, rules)
-    with closing(_open_index_db(readonly=True)) as conn:
+    with _index_db_conn(readonly=True) as conn:
         if conn is None:
             build_search_index(workspace_path, rules)
             return
@@ -387,14 +410,24 @@ def query_composer_bubble_hits(
     if not fts_q:
         return {}
 
-    with closing(_open_index_db(readonly=True)) as conn:
+    with _index_db_conn(readonly=True) as conn:
         if conn is None:
             return {}
         try:
-            rows = conn.execute(
-                "SELECT composer_id, text FROM bubbles_fts WHERE bubbles_fts MATCH ?",
-                (fts_q,),
-            ).fetchall()
+            if since_ms is None:
+                rows = conn.execute(
+                    "SELECT composer_id, text FROM bubbles_fts WHERE bubbles_fts MATCH ?",
+                    (fts_q,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT b.composer_id, b.text"
+                    " FROM bubbles_fts b"
+                    " JOIN composers c ON c.composer_id = b.composer_id"
+                    " WHERE bubbles_fts MATCH ?"
+                    " AND (c.updated_ms >= ? OR c.updated_ms <= 0)",
+                    (fts_q, since_ms),
+                ).fetchall()
         except sqlite3.Error as exc:
             _logger.debug("FTS query failed (%s); index may be rebuilding", exc)
             return {}
@@ -421,7 +454,7 @@ def query_composer_title_hits(
         return []
 
     pattern = f"%{query_lower}%"
-    with closing(_open_index_db(readonly=True)) as conn:
+    with _index_db_conn(readonly=True) as conn:
         if conn is None:
             return []
         try:
@@ -447,11 +480,29 @@ def query_composer_title_hits(
             return []
 
 
+def query_all_composer_bubble_texts(composer_id: str) -> list[str]:
+    """All indexed bubble texts for one composer (exclusion-rule checks)."""
+    if not composer_id or not index_search_enabled():
+        return []
+
+    with _index_db_conn(readonly=True) as conn:
+        if conn is None:
+            return []
+        try:
+            rows = conn.execute(
+                "SELECT text FROM bubbles_fts WHERE composer_id = ?",
+                (composer_id,),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
+        return [row["text"] for row in rows if row["text"]]
+
+
 def query_composer_rows_in_window(
     since_ms: int | None,
 ) -> dict[str, sqlite3.Row]:
     """All indexed composers, optionally filtered by ``since_ms``."""
-    with closing(_open_index_db(readonly=True)) as conn:
+    with _index_db_conn(readonly=True) as conn:
         if conn is None:
             return {}
         try:
@@ -477,7 +528,7 @@ def index_is_usable(workspace_path: str, rules: list[Any]) -> bool:
     if not index_search_enabled() or _resolve_active_index_db_path() is None:
         return False
     fingerprint = _storage_fingerprint(workspace_path, rules)
-    with closing(_open_index_db(readonly=True)) as conn:
+    with _index_db_conn(readonly=True) as conn:
         if conn is None:
             return False
         stored = _read_stored_fingerprint(conn)

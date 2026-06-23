@@ -24,14 +24,19 @@ from utils.workspace_path import get_cli_chats_path, resolve_workspace_path
 bp = Blueprint("search", __name__)
 _logger = logging.getLogger(__name__)
 
+_MAX_SEARCH_SINCE_DAYS = 36_500  # ~100 years; avoids timedelta overflow on bad input
+
 
 def _parse_since_days_param(raw: str | None) -> int | None:
     if raw is None or not str(raw).strip():
         return None
     try:
-        return int(raw)
+        days = int(raw)
     except ValueError:
         return None
+    if days <= 0 or days > _MAX_SEARCH_SINCE_DAYS:
+        return None
+    return days
 
 
 @bp.route("/api/search")

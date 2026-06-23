@@ -27,7 +27,7 @@ from tests._fixture_ids import (  # noqa: E402,F401  (re-export for legacy impor
 @pytest.fixture(autouse=True)
 def _disable_search_index_unless_index_tests(request, monkeypatch):
     """Avoid background index builds during the main test suite."""
-    if request.module.__name__.endswith("test_search_index"):
+    if "test_search_index" in request.module.__name__:
         return
     monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
 

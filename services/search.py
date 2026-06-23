@@ -52,6 +52,7 @@ from services.workspace_db import (
 from services.workspace_resolver import infer_invalid_workspace_aliases
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.text_extract import extract_text_from_bubble
 from utils.path_helpers import (
     get_workspace_display_name,
     to_epoch_ms,
@@ -79,6 +80,8 @@ def resolve_search_since_ms(
     if all_history:
         return None
     days = since_days if since_days is not None else DEFAULT_SEARCH_WINDOW_DAYS
+    if days > 36_500:
+        days = 36_500
     if days <= 0:
         return None
     ref = now or datetime.now(timezone.utc)
@@ -152,16 +155,68 @@ def _quick_bubble_text(raw_value: object) -> str:
     """Extract searchable text from a bubble KV value without full model validation."""
     try:
         if isinstance(raw_value, (bytes, bytearray)):
-            raw_value = raw_value.decode("utf-8", errors="replace")
-        obj = json.loads(raw_value)
+            text_value = raw_value.decode("utf-8", errors="replace")
+        elif isinstance(raw_value, str):
+            text_value = raw_value
+        else:
+            return ""
+        obj = json.loads(text_value)
         if isinstance(obj, dict):
-            for key in ("text", "rawText", "content"):
-                val = obj.get(key)
-                if isinstance(val, str) and val:
-                    return val
+            text = extract_text_from_bubble(obj)
+            if text:
+                return text
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
     return ""
+
+
+def _model_config_from_composer_dict(cd: dict[str, Any]) -> dict[str, Any]:
+    raw = cd.get("modelConfig")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _all_bubble_texts_for_composer(
+    conn: sqlite3.Connection,
+    composer_id: str,
+) -> list[str]:
+    """Load all bubble texts for one composer (exclusion-rule checks)."""
+    texts: list[str] = []
+    try:
+        rows = conn.execute(
+            "SELECT value FROM cursorDiskKV"
+            " WHERE key LIKE ? AND value IS NOT NULL",
+            (f"bubbleId:{composer_id}:%",),
+        ).fetchall()
+    except sqlite3.Error:
+        return texts
+    for row in rows:
+        text = _quick_bubble_text(row["value"])
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _composer_exclusion_text(
+    *,
+    project_name: str,
+    title: str,
+    model_names: list[str] | None,
+    model_config: dict[str, Any],
+    cd: dict[str, Any],
+    all_bubble_texts: list[str],
+) -> str:
+    return _build_exclusion_searchable(
+        project_name=project_name,
+        chat_title=title,
+        model_names=model_names,
+        content_parts=all_bubble_texts or None,
+        metadata_parts=[
+            _json_dump_safe(model_config),
+            _json_dump_safe(cd.get("conversationSummary")),
+            _json_dump_safe(cd.get("usage")),
+            _json_dump_safe(cd.get("requestMetadata")),
+        ],
+    )
 
 
 def _index_bubble_texts_matching_query(
@@ -217,28 +272,6 @@ def _composer_row_raw_text(row: sqlite3.Row) -> str:
     if isinstance(raw, (bytes, bytearray)):
         return raw.decode("utf-8", errors="replace")
     return str(raw)
-
-
-def _light_composer_exclusion_text(
-    *,
-    project_name: str,
-    title: str,
-    model_names: list[str] | None,
-    model_config: dict[str, Any],
-    cd: dict[str, Any],
-) -> str:
-    """Exclusion text from title/metadata only (no bubble scan)."""
-    return _build_exclusion_searchable(
-        project_name=project_name,
-        chat_title=title,
-        model_names=model_names,
-        metadata_parts=[
-            _json_dump_safe(model_config),
-            _json_dump_safe(cd.get("conversationSummary")),
-            _json_dump_safe(cd.get("usage")),
-            _json_dump_safe(cd.get("requestMetadata")),
-        ],
-    )
 
 
 def _extract_snippet(text: str, query: str, query_lower: str) -> str:
@@ -444,6 +477,7 @@ def _search_global_storage_via_index(
 ) -> list[SearchResult] | None:
     """Search using local FTS index. Returns ``None`` to fall back to live scan."""
     from services.search_index import (
+        query_all_composer_bubble_texts,
         query_composer_bubble_hits,
         query_composer_rows_in_window,
         query_composer_title_hits,
@@ -486,13 +520,16 @@ def _search_global_storage_via_index(
                 candidate_ids.add(composer_id)
 
         for composer_id in candidate_ids:
-            row = composers_in_window.get(composer_id) if since_ms is not None else search_pool.get(composer_id)
-            if row is None:
-                row = query_composer_rows_in_window(None).get(composer_id)
-            if row is None:
+            composer_row: sqlite3.Row | None = (
+                composers_in_window.get(composer_id) if since_ms is not None
+                else search_pool.get(composer_id)
+            )
+            if composer_row is None:
+                composer_row = query_composer_rows_in_window(None).get(composer_id)
+            if composer_row is None:
                 continue
 
-            raw_text = row["raw_json"] or ""
+            raw_text = composer_row["raw_json"] or ""
             try:
                 cd = json.loads(raw_text)
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -512,7 +549,7 @@ def _search_global_storage_via_index(
                 if not headers:
                     continue
 
-                title = row["title"] or cd.get("name") or ""
+                title = composer_row["title"] or cd.get("name") or ""
                 if not isinstance(title, str):
                     title = str(title) if title else ""
 
@@ -525,7 +562,7 @@ def _search_global_storage_via_index(
                 ws_name = ws_id_to_name.get(ws_id)
                 project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
 
-                model_config = cd.get("modelConfig") if isinstance(cd.get("modelConfig"), dict) else {}
+                model_config = _model_config_from_composer_dict(cd)
                 model_name = model_config.get("modelName")
                 model_names = (
                     [str(model_name)] if model_name and model_name != "default" else None
@@ -536,15 +573,6 @@ def _search_global_storage_via_index(
                 bubble_texts: list[str] = []
 
                 if title_match:
-                    exclusion_text = _light_composer_exclusion_text(
-                        project_name=project_name,
-                        title=title,
-                        model_names=model_names,
-                        model_config=model_config,
-                        cd=cd,
-                    )
-                    if is_excluded_by_rules(rules, exclusion_text):
-                        continue
                     has_match, matching_text = True, title
                 else:
                     has_match, matching_text = _find_match(title, [], query_lower, query)
@@ -560,20 +588,20 @@ def _search_global_storage_via_index(
                     if not has_match:
                         continue
 
-                    exclusion_text = _build_exclusion_searchable(
-                        project_name=project_name,
-                        chat_title=title,
-                        model_names=model_names,
-                        content_parts=bubble_texts or None,
-                        metadata_parts=[
-                            _json_dump_safe(model_config),
-                            _json_dump_safe(cd.get("conversationSummary")),
-                            _json_dump_safe(cd.get("usage")),
-                            _json_dump_safe(cd.get("requestMetadata")),
-                        ],
-                    )
-                    if is_excluded_by_rules(rules, exclusion_text):
-                        continue
+                all_bubble_texts = query_all_composer_bubble_texts(composer_id)
+                exclusion_text = _composer_exclusion_text(
+                    project_name=project_name,
+                    title=title,
+                    model_names=model_names,
+                    model_config=model_config,
+                    cd=cd,
+                    all_bubble_texts=all_bubble_texts,
+                )
+                if is_excluded_by_rules(rules, exclusion_text):
+                    continue
+
+                if not title_match:
+                    bubble_texts = bubble_texts or bubble_texts_by_composer.get(composer_id, [])
 
                 if not title:
                     for text in bubble_texts:
@@ -709,7 +737,7 @@ def _search_global_storage_live_scan(
                     ws_name = ws_id_to_name.get(ws_id)
                     project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
 
-                    model_config = cd.get("modelConfig") if isinstance(cd.get("modelConfig"), dict) else {}
+                    model_config = _model_config_from_composer_dict(cd)
                     model_name = model_config.get("modelName")
                     model_names = (
                         [str(model_name)] if model_name and model_name != "default" else None
@@ -719,15 +747,6 @@ def _search_global_storage_live_scan(
                     bubble_texts: list[str] = []
 
                     if title_match:
-                        exclusion_text = _light_composer_exclusion_text(
-                            project_name=project_name,
-                            title=title,
-                            model_names=model_names,
-                            model_config=model_config,
-                            cd=cd,
-                        )
-                        if is_excluded_by_rules(rules, exclusion_text):
-                            continue
                         has_match, matching_text = True, title
                     else:
                         has_match, matching_text = _find_match(
@@ -745,20 +764,20 @@ def _search_global_storage_live_scan(
                         if not has_match:
                             continue
 
-                        exclusion_text = _build_exclusion_searchable(
-                            project_name=project_name,
-                            chat_title=title,
-                            model_names=model_names,
-                            content_parts=bubble_texts or None,
-                            metadata_parts=[
-                                _json_dump_safe(model_config),
-                                _json_dump_safe(cd.get("conversationSummary")),
-                                _json_dump_safe(cd.get("usage")),
-                                _json_dump_safe(cd.get("requestMetadata")),
-                            ],
-                        )
-                        if is_excluded_by_rules(rules, exclusion_text):
-                            continue
+                    all_bubble_texts = _all_bubble_texts_for_composer(conn, composer_id)
+                    exclusion_text = _composer_exclusion_text(
+                        project_name=project_name,
+                        title=title,
+                        model_names=model_names,
+                        model_config=model_config,
+                        cd=cd,
+                        all_bubble_texts=all_bubble_texts,
+                    )
+                    if is_excluded_by_rules(rules, exclusion_text):
+                        continue
+
+                    if not title_match:
+                        bubble_texts = bubble_texts or bubble_texts_by_composer.get(composer_id, [])
 
                     if not title:
                         for text in bubble_texts:
@@ -965,7 +984,12 @@ def search_cli_sessions(
                 meta = session.get("meta", {})
                 session_id = session["session_id"]
                 created_ms: int = to_epoch_ms(meta.get("createdAt"))
-                if not _timestamp_in_search_window(created_ms, since_ms):
+                try:
+                    session_ts = int(os.path.getmtime(session["db_path"]) * 1000)
+                except OSError:
+                    session_ts = 0
+                effective_ms = max(created_ms or 0, session_ts)
+                if not _timestamp_in_search_window(effective_ms, since_ms):
                     continue
                 session_name: str = meta.get("name") or f"Session {session_id[:8]}"
                 title_match = bool(session_name and query_lower in session_name.lower())
@@ -982,7 +1006,7 @@ def search_cli_sessions(
                         "workspaceFolder": ws_name,
                         "chatId": session_id,
                         "chatTitle": session_name,
-                        "timestamp": created_ms,
+                        "timestamp": effective_ms,
                         "matchingText": session_name,
                         "type": "cli_agent",
                         "source": "cli",
@@ -1007,7 +1031,7 @@ def search_cli_sessions(
                         session["db_path"],
                     )
 
-                bubbles = messages_to_bubbles(messages, created_ms)
+                bubbles = messages_to_bubbles(messages, effective_ms)
                 if not bubbles:
                     continue
 
@@ -1047,7 +1071,7 @@ def search_cli_sessions(
                     "workspaceFolder": ws_name,
                     "chatId": session_id,
                     "chatTitle": title,
-                    "timestamp": created_ms,
+                    "timestamp": effective_ms,
                     "matchingText": matching_text,
                     "type": "cli_agent",
                     "source": "cli",

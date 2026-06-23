@@ -134,7 +134,9 @@ class TestSearchIndexBuild:
 class TestSearchGlobalStorageUsesIndex:
     def test_search_global_storage_uses_index(self, indexed_storage):
         patches = _index_patches(indexed_storage["cache_dir"])
-        with patches[0], patches[1], patches[2]:
+        with patches[0], patches[1], patches[2], patch(
+            "services.search._search_global_storage_live_scan",
+        ) as live_scan:
             results = search_global_storage(
                 indexed_storage["ws_root"],
                 indexed_storage["term"],
@@ -144,3 +146,4 @@ class TestSearchGlobalStorageUsesIndex:
                 since_ms=None,
             )
             assert any(r["chatId"] == indexed_storage["composer_id"] for r in results)
+            live_scan.assert_not_called()

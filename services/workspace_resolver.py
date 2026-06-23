@@ -145,6 +145,8 @@ def _composer_ids_from_workspace_db(workspace_path: str, workspace_id: str) -> l
         data = json.loads(row[0])
     except (json.JSONDecodeError, ValueError):
         return []
+    if not isinstance(data, dict):
+        return []
     for c in (data.get("allComposers") or []):
         cid = c.get("composerId") if isinstance(c, dict) else None
         if cid:

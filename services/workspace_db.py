@@ -5,7 +5,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -418,9 +418,10 @@ def build_composer_id_to_workspace_id(
             pool.submit(_composer_ids_for_workspace_entry, workspace_path, entry)
             for entry in workspace_entries
         ]
-        for fut in as_completed(futures):
+        for _entry, fut in zip(workspace_entries, futures):
             for cid, ws_name in fut.result():
-                mapping[cid] = ws_name
+                if cid not in mapping:
+                    mapping[cid] = ws_name
     return mapping
 
 

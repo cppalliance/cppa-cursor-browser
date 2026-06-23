@@ -26,7 +26,7 @@ from services.workspace_db import (
 from utils.workspace_path import resolve_workspace_path
 
 
-def profile_window(since_ms, label: str) -> None:
+def profile_window(since_ms: int | None, label: str) -> None:
     query = "export"
     q = query.lower()
     wp = resolve_workspace_path()
@@ -71,7 +71,11 @@ def profile_window(since_ms, label: str) -> None:
 
         t0 = time.perf_counter()
         idx = _index_bubble_texts_matching_query(conn, q, composer_ids=window_ids)
-        mode = "scoped" if window_ids is not None and len(window_ids) <= 500 else "full_scan"
+        mode = (
+            "full_scan_python_filter"
+            if window_ids is not None and len(window_ids) <= 500
+            else "full_scan"
+        )
         print(
             f"  bubble_index ({len(idx)} hits, {mode}): "
             f"{time.perf_counter() - t0:.2f}s"

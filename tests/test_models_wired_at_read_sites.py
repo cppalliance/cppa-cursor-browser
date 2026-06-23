@@ -99,20 +99,25 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
     def test_search_endpoint_finds_bubble_text(self):
         """Search uses a lightweight bubble text extractor (not Bubble.from_dict)."""
         from app import create_app
+        import models.conversation as conversation_mod
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        client = app.test_client()
-        response = client.get("/api/search?q=sentinel-wired&all_history=1")
-        self.assertEqual(response.status_code, 200)
-        results = response.get_json().get("results", [])
-        self.assertGreaterEqual(
-            len(results), 1,
-            msg="/api/search must find bubble text via the lightweight search path",
-        )
-        self.assertTrue(
-            any("sentinel-wired" in (r.get("matchingText") or "").lower() for r in results),
-        )
+        with patch.object(
+            conversation_mod.Bubble, "from_dict", wraps=conversation_mod.Bubble.from_dict,
+        ) as bubble_spy:
+            client = app.test_client()
+            response = client.get("/api/search?q=sentinel-wired&all_history=1")
+            self.assertEqual(response.status_code, 200)
+            results = response.get_json().get("results", [])
+            self.assertGreaterEqual(
+                len(results), 1,
+                msg="/api/search must find bubble text via the lightweight search path",
+            )
+            self.assertTrue(
+                any("sentinel-wired" in (r.get("matchingText") or "").lower() for r in results),
+            )
+            bubble_spy.assert_not_called()
 
     def test_workspace_tabs_endpoint_calls_bubble_from_dict(self):
         from app import create_app

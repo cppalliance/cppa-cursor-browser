@@ -29,6 +29,7 @@ def main() -> None:
     q = query.lower()
     wp = resolve_workspace_path()
     since = resolve_search_since_ms(all_history=False)
+    assert since is not None
     print(
         f"since_ms={since} "
         f"({datetime.fromtimestamp(since / 1000, tz=timezone.utc).isoformat()})"
@@ -58,7 +59,7 @@ def main() -> None:
 
     print(f"composers total={total} in_30d_window={in_window} unknown_ts={unknown_ts}")
     print(f"bubble_rows={bubble_count}")
-    print(f"scoped_bubble_scan={in_window <= 500}")
+    print(f"below_bubble_threshold={in_window <= 500}")
 
     pw = ParseWarningCollector()
     for label, since_ms in [("30d", since), ("all", None)]:
