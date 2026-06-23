@@ -93,7 +93,9 @@ def export_chats() -> tuple[Response, int] | Response:
     exclusion rules file.
     """
     try:
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return json_response({"error": "request body must be a JSON object"}, 400)
         since: Literal["all", "last"] = (
             "last" if body.get("since") == "last" else "all"
         )

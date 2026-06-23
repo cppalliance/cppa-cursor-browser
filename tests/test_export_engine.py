@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +19,17 @@ from services.export_engine import (  # noqa: E402
 )
 
 
-class TestCollectExportEntriesNocache(unittest.TestCase):
+class _TempExportPathsMixin:
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_ws = os.path.join(self._tmp.name, "ws")
+        self.tmp_out = os.path.join(self._tmp.name, "out")
+        os.makedirs(self.tmp_ws, exist_ok=True)
+        os.makedirs(self.tmp_out, exist_ok=True)
+
+
+class TestCollectExportEntriesNocache(_TempExportPathsMixin, unittest.TestCase):
     def test_nocache_env_passed_to_prepare_workspace_orchestration(self):
         with patch.dict(os.environ, {"CURSOR_CHAT_BROWSER_NOCACHE": "1"}):
             with patch(
@@ -30,11 +41,11 @@ class TestCollectExportEntriesNocache(unittest.TestCase):
                     return_value=None,
                 ):
                     collect_export_entries(
-                        workspace_path="/tmp/ws",
+                        workspace_path=self.tmp_ws,
                         exclusion_rules=[],
                         since="all",
                         last_export_ms=0,
-                        out_dir="/tmp/out",
+                        out_dir=self.tmp_out,
                         include_composer=False,
                         include_cli=False,
                     )
@@ -42,7 +53,10 @@ class TestCollectExportEntriesNocache(unittest.TestCase):
         self.assertTrue(mock_prepare.call_args.kwargs["nocache"])
 
 
-class TestCollectExportEntriesCorruptComposer(unittest.TestCase):
+class TestCollectExportEntriesCorruptComposer(
+    _TempExportPathsMixin,
+    unittest.TestCase,
+):
     def test_non_dict_composer_row_is_skipped(self):
         ctx = MagicMock()
         ctx.project_name_to_workspace_id = {}
@@ -50,7 +64,7 @@ class TestCollectExportEntriesCorruptComposer(unittest.TestCase):
         ctx.composer_id_to_workspace_id = {}
         ctx.invalid_workspace_ids = set()
         orch = WorkspaceOrchestration(
-            workspace_path="/tmp/ws",
+            workspace_path=self.tmp_ws,
             workspace_entries=[],
             fingerprint={},
             ctx=ctx,
@@ -80,11 +94,11 @@ class TestCollectExportEntriesCorruptComposer(unittest.TestCase):
                 return_value=db_data,
             ):
                 exported = collect_export_entries(
-                    workspace_path="/tmp/ws",
+                    workspace_path=self.tmp_ws,
                     exclusion_rules=[],
                     since="all",
                     last_export_ms=0,
-                    out_dir="/tmp/out",
+                    out_dir=self.tmp_out,
                     include_cli=False,
                 )
         self.assertEqual(exported, [])

@@ -91,6 +91,15 @@ class TestExportHappyPath:
 
 
 class TestExportErrorResponses:
+    def test_non_dict_json_body_returns_400(self, client, export_state_dir):
+        response = client.post(
+            "/api/export",
+            json=["not", "an", "object"],
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        assert response.get_json().get("error") == "request body must be a JSON object"
+
     def test_missing_global_storage_returns_404(self, empty_workspace_client):
         response = _post_export(empty_workspace_client)
         assert response.status_code == 404
