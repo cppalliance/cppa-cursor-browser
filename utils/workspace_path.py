@@ -9,7 +9,8 @@ import threading
 
 from .path_helpers import expand_tilde_path
 
-# Module-level override set via POST /api/set-workspace (or --base-dir).
+# Module-level override set via POST /api/set-workspace.
+# CLI ``--base-dir`` passes resolve_workspace_path(override=...) instead.
 # Reads and writes are serialized by _workspace_path_lock so threaded WSGI
 # workers (gunicorn --threads, waitress, etc.) always see the latest override
 # from another thread and resolve_workspace_path's snapshot+expand stays consistent.

@@ -230,10 +230,17 @@ def _collect_ide_export_entries(
     ctx = orch.ctx
     exported: list[CollectedExportEntry] = []
     for row in db_data.ide_composer_rows:
-        composer_id = row["key"].split(":")[1]
+        row_key = row["key"]
+        if ":" not in row_key:
+            _logger.debug(
+                "Skipping composer row with malformed key %r",
+                row_key,
+            )
+            continue
+        composer_id = row_key.split(":", 1)[1]
         try:
             cd = json.loads(row["value"])
-        except (json.JSONDecodeError, ValueError) as parse_err:
+        except (json.JSONDecodeError, TypeError, ValueError) as parse_err:
             _logger.debug(
                 "Skipping corrupt composerData row %s: %s",
                 composer_id,
@@ -383,9 +390,11 @@ def _collect_cli_export_entries(
             continue
 
         for session in cp["sessions"]:
-            meta = session.get("meta", {})
+            raw_meta = session.get("meta")
+            meta = raw_meta if isinstance(raw_meta, dict) else {}
             session_id = session["session_id"]
-            created_ms: int = meta.get("createdAt") or int(
+            created_raw = meta.get("createdAt")
+            created_ms = to_epoch_ms(created_raw) if created_raw else int(
                 datetime.now().timestamp() * 1000,
             )
             session_name = meta.get("name") or f"Session {session_id[:8]}"
