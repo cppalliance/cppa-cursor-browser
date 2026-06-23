@@ -19,17 +19,14 @@ from utils.path_helpers import (
 )
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, ParseWarningCollector
+from services.export_engine import WorkspaceOrchestration, prepare_workspace_orchestration
 from services.summary_cache import (
-    fingerprint_workspace_storage,
     get_cached_projects,
     nocache_enabled,
     set_cached_projects,
 )
-from services.workspace_context import resolve_workspace_context_cached
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
-    collect_workspace_entries,
-    global_storage_db_path,
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
@@ -93,43 +90,31 @@ def list_workspace_projects(
         parse-error dicts (``type``, ``count``, ``detail``) from
         :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
     """
-    workspace_entries = collect_workspace_entries(workspace_path)
-    gdb = global_storage_db_path(workspace_path)
-    cli_path = get_cli_chats_path()
-    fingerprint = fingerprint_workspace_storage(
-        workspace_path,
-        workspace_entries,
-        global_db_path=gdb if os.path.isfile(gdb) else None,
-        rules=rules,
-        cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+    effective_nocache = nocache_enabled(request_nocache=nocache)
+    orch = prepare_workspace_orchestration(
+        workspace_path, rules, nocache=effective_nocache,
     )
-    if not nocache_enabled(request_nocache=nocache):
-        cached = get_cached_projects(fingerprint)
+    if not effective_nocache:
+        cached = get_cached_projects(orch.fingerprint)
         if cached is not None:
             return cached
 
     projects, warnings = _build_workspace_projects_uncached(
-        workspace_path, rules, workspace_entries, nocache=nocache,
+        workspace_path, rules, orch,
     )
-    if not nocache_enabled(request_nocache=nocache):
-        set_cached_projects(fingerprint, projects, warnings)
+    if not effective_nocache:
+        set_cached_projects(orch.fingerprint, projects, warnings)
     return projects, warnings
 
 
 def _build_workspace_projects_uncached(
     workspace_path: str,
     rules: list[Any],
-    workspace_entries: list[dict[str, Any]],
-    *,
-    nocache: bool,
+    orch: WorkspaceOrchestration,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parse_warnings = ParseWarningCollector()
-    ctx = resolve_workspace_context_cached(
-        workspace_path,
-        rules,
-        workspace_entries=workspace_entries,
-        nocache=nocache,
-    )
+    ctx = orch.ctx
+    workspace_entries = orch.workspace_entries
     invalid_workspace_ids = ctx.invalid_workspace_ids
     project_name_map = ctx.project_name_to_workspace_id
     workspace_path_map = ctx.workspace_path_to_id
