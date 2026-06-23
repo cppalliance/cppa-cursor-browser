@@ -24,19 +24,21 @@ class TestExportBaseDirOverride(unittest.TestCase):
             "exclusion_rules_path": None,
             "base_dir": "/custom/workspace",
         }
-        with patch.object(export_script, "parse_args", return_value=opts):
-            with patch.object(
+        with (
+            patch.object(export_script, "parse_args", return_value=opts),
+            patch.object(
                 export_script,
                 "collect_export_entries",
                 return_value=[],
-            ) as mock_collect:
-                with patch.object(
-                    export_script,
-                    "resolve_workspace_path",
-                    return_value="/resolved/workspace",
-                ) as mock_resolve:
-                    with self.assertRaises(SystemExit) as ctx:
-                        export_script.main()
+            ) as mock_collect,
+            patch.object(
+                export_script,
+                "resolve_workspace_path",
+                return_value="/resolved/workspace",
+            ) as mock_resolve,
+            self.assertRaises(SystemExit) as ctx,
+        ):
+            export_script.main()
         self.assertEqual(ctx.exception.code, 0)
         mock_resolve.assert_called_once_with(override="/custom/workspace")
         mock_collect.assert_called_once()
@@ -58,15 +60,17 @@ class TestExportBaseDirOverride(unittest.TestCase):
         prior = os.environ.get("WORKSPACE_PATH")
         os.environ["WORKSPACE_PATH"] = sentinel
         try:
-            with patch.object(export_script, "parse_args", return_value=opts):
-                with patch.object(export_script, "collect_export_entries", return_value=[]):
-                    with patch.object(
-                        export_script,
-                        "resolve_workspace_path",
-                        return_value="/resolved/workspace",
-                    ):
-                        with self.assertRaises(SystemExit):
-                            export_script.main()
+            with (
+                patch.object(export_script, "parse_args", return_value=opts),
+                patch.object(export_script, "collect_export_entries", return_value=[]),
+                patch.object(
+                    export_script,
+                    "resolve_workspace_path",
+                    return_value="/resolved/workspace",
+                ),
+                self.assertRaises(SystemExit),
+            ):
+                export_script.main()
             self.assertEqual(os.environ.get("WORKSPACE_PATH"), sentinel)
         finally:
             if prior is None:
