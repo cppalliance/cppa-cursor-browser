@@ -8,9 +8,10 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from models import Bubble
+from models.export import CollectedExportEntry
 from services.summary_cache import fingerprint_workspace_storage, nocache_enabled
 from services.workspace_context import (
     WorkspaceContext,
@@ -49,16 +50,32 @@ _logger = logging.getLogger(__name__)
 SinceMode = Literal["all", "last"]
 
 
-class ExportEntry(TypedDict):
-    """One exportable conversation with rendered markdown."""
-
-    id: str
-    rel_path: str
-    content: str
-    out_path: str
-    updatedAt: int
-    title: str
-    workspace: str
+def read_last_export_ms(
+    since: SinceMode,
+    *,
+    state_path: str | None = None,
+    state: dict[str, Any] | None = None,
+) -> int:
+    """Return last-export epoch ms for ``since=last``; 0 for a full export."""
+    if since != "last":
+        return 0
+    ts: Any = None
+    if state is not None:
+        ts = state.get("lastExportTime")
+    elif state_path is not None and os.path.isfile(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                st = json.load(f)
+            if isinstance(st, dict):
+                ts = st.get("lastExportTime")
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            _logger.warning(
+                "Could not read last export timestamp; defaulting to full export: %s",
+                e,
+            )
+    if ts:
+        return to_epoch_ms(ts)
+    return 0
 
 
 @dataclass(frozen=True)
@@ -209,9 +226,9 @@ def _collect_ide_export_entries(
     last_export_ms: int,
     today: str,
     out_dir: str,
-) -> list[ExportEntry]:
+) -> list[CollectedExportEntry]:
     ctx = orch.ctx
-    exported: list[ExportEntry] = []
+    exported: list[CollectedExportEntry] = []
     for row in db_data.ide_composer_rows:
         composer_id = row["key"].split(":")[1]
         try:
@@ -239,6 +256,8 @@ def _collect_ide_export_entries(
         updated_at = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(
             cd.get("createdAt"),
         )
+        # Intentional behavior change vs legacy CLI: fall back to createdAt when
+        # lastUpdatedAt is absent (affects timestamps, filenames, and --since last).
         if since == "last" and updated_at <= last_export_ms:
             continue
 
@@ -325,7 +344,7 @@ def _collect_ide_export_entries(
             workspace_info={"ws_slug": ws_slug, "ws_display_name": ws_display_name},
         )
 
-        rel_path = os.path.join(today, ws_slug, "chat", filename)
+        rel_path = os.path.relpath(out_path, out_dir)
         exported.append({
             "id": composer_id,
             "rel_path": rel_path,
@@ -345,8 +364,8 @@ def _collect_cli_export_entries(
     last_export_ms: int,
     today: str,
     out_dir: str,
-) -> list[ExportEntry]:
-    exported: list[ExportEntry] = []
+) -> list[CollectedExportEntry]:
+    exported: list[CollectedExportEntry] = []
     try:
         cli_projects = list_cli_projects(get_cli_chats_path())
     except Exception as e:  # noqa: BLE001 — log and skip CLI enumeration on any failure
@@ -446,7 +465,7 @@ def _collect_cli_export_entries(
                 bubbles=bubbles,
                 title_override=title,
             )
-            rel_path = os.path.join(today, ws_slug_cli, "cli", filename)
+            rel_path = os.path.relpath(out_path, out_dir)
             exported.append({
                 "id": session_id,
                 "rel_path": rel_path,
@@ -469,14 +488,14 @@ def collect_export_entries(
     include_composer: bool = True,
     include_cli: bool = True,
     nocache: bool = False,
-) -> list[ExportEntry]:
+) -> list[CollectedExportEntry]:
     """Collect exportable conversations (IDE + CLI) via shared orchestration."""
     effective_nocache = nocache_enabled(request_nocache=nocache)
     orch = prepare_workspace_orchestration(
         workspace_path, exclusion_rules, nocache=effective_nocache,
     )
     today = datetime.now().strftime("%Y-%m-%d")
-    exported: list[ExportEntry] = []
+    exported: list[CollectedExportEntry] = []
 
     if include_composer:
         db_data = load_global_db_export_data(orch)

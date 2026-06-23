@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 from models.from_dict_validation import require_dict, require_non_empty_str_fields
+
+
+class CollectedExportEntry(TypedDict):
+    """One exportable conversation with rendered markdown (engine/CLI collection)."""
+
+    id: str
+    rel_path: str
+    content: str
+    out_path: str
+    updatedAt: int
+    title: str
+    workspace: str
 
 
 @dataclass(frozen=True)

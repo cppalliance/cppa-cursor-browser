@@ -31,12 +31,11 @@ if __name__ == "__main__":
         sys.path.insert(0, str(_project_root))
 
 from models import ExportEntry, SchemaError  # noqa: E402
-from services.export_engine import collect_export_entries  # noqa: E402
+from services.export_engine import collect_export_entries, read_last_export_ms  # noqa: E402
 from utils.exclusion_rules import (  # noqa: E402
     load_rules,
     resolve_exclusion_rules_path,
 )
-from utils.path_helpers import to_epoch_ms  # noqa: E402
 from utils.workspace_path import resolve_workspace_path  # noqa: E402
 
 _logger = logging.getLogger(__name__)
@@ -168,23 +167,6 @@ def parse_args() -> ExportCliOptions:
     }
 
 
-def _read_last_export_ms(state_path: str, since: Literal["all", "last"]) -> int:
-    if since != "last" or not os.path.isfile(state_path):
-        return 0
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            st = json.load(f)
-        ts = st.get("lastExportTime")
-        if ts:
-            return to_epoch_ms(ts)
-    except (json.JSONDecodeError, ValueError, OSError) as e:
-        _logger.warning(
-            "Could not read last export timestamp; defaulting to full export: %s",
-            e,
-        )
-    return 0
-
-
 def main() -> None:
     configure_cli_logging()
     opts = parse_args()
@@ -198,7 +180,7 @@ def main() -> None:
 
     state_dir = get_global_state_dir()
     state_path = os.path.join(state_dir, "export_state.json")
-    last_export = _read_last_export_ms(state_path, since)
+    last_export = read_last_export_ms(since, state_path=state_path)
 
     exported = collect_export_entries(
         workspace_path=workspace_path,

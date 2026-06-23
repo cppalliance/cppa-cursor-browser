@@ -18,9 +18,8 @@ from typing import Any, Literal
 from flask import Blueprint, Response, request
 
 from api.flask_config import exclusion_rules, json_response
-from services.export_engine import collect_export_entries
+from services.export_engine import collect_export_entries, read_last_export_ms
 from services.workspace_db import global_storage_db_path
-from utils.path_helpers import to_epoch_ms
 from utils.workspace_path import resolve_workspace_path
 
 bp = Blueprint("export_api", __name__)
@@ -67,15 +66,6 @@ def _save_export_state(count: int) -> None:
         json.dump(state, f, indent=2)
 
 
-def _read_last_export_ms(since: Literal["all", "last"]) -> int:
-    if since != "last":
-        return 0
-    ts = _get_export_state().get("lastExportTime")
-    if ts:
-        return to_epoch_ms(ts)
-    return 0
-
-
 @bp.route("/api/export/state")
 def get_export_state() -> Response:
     """Return the last export timestamp."""
@@ -109,7 +99,7 @@ def export_chats() -> tuple[Response, int] | Response:
             workspace_path=workspace_path,
             exclusion_rules=exclusion_rules(),
             since=since,
-            last_export_ms=_read_last_export_ms(since),
+            last_export_ms=read_last_export_ms(since, state=_get_export_state()),
             out_dir="",
             include_composer=True,
             include_cli=False,
