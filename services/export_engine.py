@@ -88,7 +88,7 @@ def json_dump_safe(value: object) -> str:
     """Best-effort JSON serialization for exclusion matching."""
     try:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort fallback when value is not JSON-serializable
         return str(value) if value is not None else ""
 
 
@@ -224,8 +224,16 @@ def _collect_ide_export_entries(
             )
             continue
 
+        if not isinstance(cd, dict):
+            _logger.debug(
+                "Skipping corrupt composerData row %s: expected object, got %s",
+                composer_id,
+                type(cd).__name__,
+            )
+            continue
+
         headers = cd.get("fullConversationHeadersOnly") or []
-        if not headers:
+        if not isinstance(headers, list) or not headers:
             continue
 
         updated_at = to_epoch_ms(cd.get("lastUpdatedAt"))
@@ -270,7 +278,12 @@ def _collect_ide_export_entries(
         bubble_texts: list[str] = []
         bubble_meta_parts: list[str] = []
         for h in headers:
-            b = db_data.bubble_map.get(h.get("bubbleId"))
+            if not isinstance(h, dict):
+                continue
+            bubble_id = h.get("bubbleId")
+            if not isinstance(bubble_id, str):
+                continue
+            b = db_data.bubble_map.get(bubble_id)
             if not b:
                 continue
             text = extract_text_from_bubble(b)
@@ -337,7 +350,7 @@ def _collect_cli_export_entries(
     exported: list[ExportEntry] = []
     try:
         cli_projects = list_cli_projects(get_cli_chats_path())
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — log and skip CLI enumeration on any failure
         _logger.warning(
             "Could not enumerate CLI chats: %s (%s) — skipping",
             e,
@@ -375,7 +388,7 @@ def _collect_cli_export_entries(
             try:
                 messages = traverse_blobs(session["db_path"])
                 bubbles = messages_to_bubbles(messages, created_ms)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — log and skip session on read/parse failure
                 _logger.warning(
                     "Could not read CLI session %s: %s (%s)",
                     session_id,
@@ -403,7 +416,7 @@ def _collect_cli_export_entries(
 
             bubble_texts = [b["text"] for b in bubbles if b.get("text")]
             tool_call_texts = [
-                tc.get("input", "") or tc.get("summary", "")
+                json_dump_safe(tc.get("input", "") or tc.get("summary", ""))
                 for b in bubbles
                 for tc in (b.get("metadata") or {}).get("toolCalls") or []
             ]

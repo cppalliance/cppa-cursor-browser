@@ -176,9 +176,7 @@ def _read_last_export_ms(state_path: str, since: Literal["all", "last"]) -> int:
             st = json.load(f)
         ts = st.get("lastExportTime")
         if ts:
-            return int(
-                datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000,
-            )
+            return to_epoch_ms(ts)
     except (json.JSONDecodeError, ValueError, OSError) as e:
         _logger.warning(
             "Could not read last export timestamp; defaulting to full export: %s",

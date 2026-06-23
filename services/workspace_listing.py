@@ -90,8 +90,11 @@ def list_workspace_projects(
         parse-error dicts (``type``, ``count``, ``detail``) from
         :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
     """
-    orch = prepare_workspace_orchestration(workspace_path, rules, nocache=nocache)
-    if not nocache_enabled(request_nocache=nocache):
+    effective_nocache = nocache_enabled(request_nocache=nocache)
+    orch = prepare_workspace_orchestration(
+        workspace_path, rules, nocache=effective_nocache,
+    )
+    if not effective_nocache:
         cached = get_cached_projects(orch.fingerprint)
         if cached is not None:
             return cached
@@ -99,7 +102,7 @@ def list_workspace_projects(
     projects, warnings = _build_workspace_projects_uncached(
         workspace_path, rules, orch,
     )
-    if not nocache_enabled(request_nocache=nocache):
+    if not effective_nocache:
         set_cached_projects(orch.fingerprint, projects, warnings)
     return projects, warnings
 
