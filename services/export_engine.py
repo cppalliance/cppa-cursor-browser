@@ -253,11 +253,7 @@ def _collect_ide_export_entries(
         if not isinstance(headers, list) or not headers:
             continue
 
-        updated_at = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(
-            cd.get("createdAt"),
-        )
-        # Intentional behavior change vs legacy CLI: fall back to createdAt when
-        # lastUpdatedAt is absent (affects timestamps, filenames, and --since last).
+        updated_at = to_epoch_ms(cd.get("lastUpdatedAt"))
         if since == "last" and updated_at <= last_export_ms:
             continue
 

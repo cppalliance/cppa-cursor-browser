@@ -182,22 +182,26 @@ class TestCollectIdeExportEntries(_TempExportPathsMixin, unittest.TestCase):
                     out_dir=self.tmp_out,
                 )
 
-    def test_created_at_fallback_when_last_updated_missing(self):
+    def test_last_updated_at_only_no_created_at_fallback(self):
         created_ms = 1739200000000
-        exported = self._collect({
-            "name": "Created-only chat",
-            "modelConfig": {},
-            "fullConversationHeadersOnly": [{"bubbleId": "bubble-1", "type": 1}],
-            "createdAt": created_ms,
-        })
+        fixed_now = datetime(2026, 6, 22, 12, 0, 0)
+        with patch("services.export_engine.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_now
+            mock_dt.fromtimestamp = datetime.fromtimestamp
+            exported = self._collect({
+                "name": "Created-only chat",
+                "modelConfig": {},
+                "fullConversationHeadersOnly": [{"bubbleId": "bubble-1", "type": 1}],
+                "createdAt": created_ms,
+            })
         self.assertEqual(len(exported), 1)
         entry = exported[0]
-        self.assertEqual(entry["updatedAt"], created_ms)
-        ts_str = datetime.fromtimestamp(created_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S")
+        self.assertEqual(entry["updatedAt"], 0)
+        ts_str = fixed_now.strftime("%Y-%m-%dT%H-%M-%S")
         self.assertIn(ts_str, entry["rel_path"])
-        self.assertEqual(
+        self.assertNotIn(
+            datetime.fromtimestamp(created_ms / 1000).strftime("%Y-%m-%dT%H-%M-%S"),
             entry["rel_path"],
-            os.path.relpath(entry["out_path"], self.tmp_out),
         )
 
     def test_display_name_falls_back_to_slug_of_workspace_id_prefix(self):

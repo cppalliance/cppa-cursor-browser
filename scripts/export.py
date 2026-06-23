@@ -179,6 +179,7 @@ def main() -> None:
     workspace_path = resolve_workspace_path(override=opts.get("base_dir"))
 
     state_dir = get_global_state_dir()
+    os.makedirs(state_dir, exist_ok=True)
     state_path = os.path.join(state_dir, "export_state.json")
     last_export = read_last_export_ms(since, state_path=state_path)
 
@@ -253,7 +254,6 @@ def main() -> None:
         "exportedCount": count,
         "exportDir": out_dir,
     }
-    os.makedirs(state_dir, exist_ok=True)
     with open(os.path.join(state_dir, "export_state.json"), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
