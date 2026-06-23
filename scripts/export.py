@@ -194,10 +194,7 @@ def main() -> None:
     exclusion_rules = load_rules(
         resolve_exclusion_rules_path(opts.get("exclusion_rules_path")),
     )
-    base_dir = opts.get("base_dir")
-    if base_dir:
-        os.environ["WORKSPACE_PATH"] = base_dir
-    workspace_path = resolve_workspace_path()
+    workspace_path = resolve_workspace_path(override=opts.get("base_dir"))
 
     state_dir = get_global_state_dir()
     state_path = os.path.join(state_dir, "export_state.json")

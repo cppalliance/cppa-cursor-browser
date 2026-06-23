@@ -115,7 +115,7 @@ class TestExportErrorResponses:
 
     def test_internal_failure_returns_500(self, client, export_state_dir):
         with patch(
-            "api.export_api.resolve_workspace_context_minimal",
+            "api.export_api.collect_export_entries",
             side_effect=RuntimeError("simulated export failure"),
         ):
             response = _post_export(client)

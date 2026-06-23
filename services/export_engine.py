@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal, TypedDict
 
 from models import Bubble
-from services.summary_cache import fingerprint_workspace_storage
+from services.summary_cache import fingerprint_workspace_storage, nocache_enabled
 from services.workspace_context import (
     WorkspaceContext,
     enrich_workspace_context_from_global_db,
@@ -236,11 +236,9 @@ def _collect_ide_export_entries(
         if not isinstance(headers, list) or not headers:
             continue
 
-        updated_at = to_epoch_ms(cd.get("lastUpdatedAt"))
-        if updated_at is None:
-            updated_at = to_epoch_ms(cd.get("createdAt"))
-        if updated_at is None:
-            updated_at = 0
+        updated_at = to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(
+            cd.get("createdAt"),
+        )
         if since == "last" and updated_at <= last_export_ms:
             continue
 
@@ -271,7 +269,8 @@ def _collect_ide_export_entries(
             else (orch.workspace_id_to_display_name.get(ws_id) or ws_slug)
         )
         title = cd.get("name") or f"Chat {composer_id[:8]}"
-        model_config = cd.get("modelConfig") or {}
+        raw_model_config = cd.get("modelConfig")
+        model_config = raw_model_config if isinstance(raw_model_config, dict) else {}
         model_name = model_config.get("modelName")
         model_names = [model_name] if model_name and model_name != "default" else None
 
@@ -468,11 +467,13 @@ def collect_export_entries(
     last_export_ms: int,
     out_dir: str,
     include_composer: bool = True,
+    include_cli: bool = True,
     nocache: bool = False,
 ) -> list[ExportEntry]:
     """Collect exportable conversations (IDE + CLI) via shared orchestration."""
+    effective_nocache = nocache_enabled(request_nocache=nocache)
     orch = prepare_workspace_orchestration(
-        workspace_path, exclusion_rules, nocache=nocache,
+        workspace_path, exclusion_rules, nocache=effective_nocache,
     )
     today = datetime.now().strftime("%Y-%m-%d")
     exported: list[ExportEntry] = []
@@ -492,13 +493,14 @@ def collect_export_entries(
                 ),
             )
 
-    exported.extend(
-        _collect_cli_export_entries(
-            exclusion_rules=exclusion_rules,
-            since=since,
-            last_export_ms=last_export_ms,
-            today=today,
-            out_dir=out_dir,
-        ),
-    )
+    if include_cli:
+        exported.extend(
+            _collect_cli_export_entries(
+                exclusion_rules=exclusion_rules,
+                since=since,
+                last_export_ms=last_export_ms,
+                today=today,
+                out_dir=out_dir,
+            ),
+        )
     return exported

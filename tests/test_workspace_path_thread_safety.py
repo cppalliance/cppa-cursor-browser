@@ -112,6 +112,11 @@ class TestWorkspacePathThreadSafety(unittest.TestCase):
 
         self.assertEqual(errors, [], "\n".join(errors[:20]))
 
+    def test_explicit_override_takes_precedence_over_module_override(self):
+        set_workspace_path_override(self.path_a)
+        self.assertEqual(resolve_workspace_path(override=self.path_b), self.path_b)
+        self.assertEqual(resolve_workspace_path(), self.path_a)
+
 
 if __name__ == "__main__":
     unittest.main()

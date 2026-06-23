@@ -64,17 +64,20 @@ def get_default_workspace_path() -> str:
         return os.path.join(home, "workspaceStorage")
 
 
-def resolve_workspace_path() -> str:
-    """Return the effective workspace path (override > env var > default).
+def resolve_workspace_path(*, override: str | None = None) -> str:
+    """Return the effective workspace path (call override > module > env > default).
 
-    Override comes from POST /api/set-workspace (validated). ``WORKSPACE_PATH``
-    is only tilde-expanded — trusted-operator escape hatch, not the same checks
-    as the API (issue #15).
+    *override* is for one-shot callers (e.g. CLI ``--base-dir``) and does not
+    mutate ``WORKSPACE_PATH``. Module override comes from POST /api/set-workspace
+    (validated). ``WORKSPACE_PATH`` is only tilde-expanded — trusted-operator
+    escape hatch, not the same checks as the API (issue #15).
     """
-    with _workspace_path_lock:
-        override = _workspace_path_override
     if override:
         return expand_tilde_path(override)
+    with _workspace_path_lock:
+        module_override = _workspace_path_override
+    if module_override:
+        return expand_tilde_path(module_override)
     env_path = os.environ.get("WORKSPACE_PATH", "").strip()
     if env_path:
         return expand_tilde_path(env_path)
