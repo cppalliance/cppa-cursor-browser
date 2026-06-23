@@ -137,7 +137,10 @@ def test_summary_and_full_tabs_share_assignment(tmp_path):
     assert full_status == 200
     summary_ids = {t["id"] for t in summary["tabs"]}
     full_ids = {t["id"] for t in full["tabs"]}
+    assert summary_ids
+    assert full_ids
     assert summary_ids == full_ids
+    assert HAPPY_COMPOSER_ID in summary_ids
 
 
 def test_single_tab_null_composer_placeholder_returns_404(tmp_path):

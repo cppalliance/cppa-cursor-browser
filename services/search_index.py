@@ -269,7 +269,6 @@ def build_search_index(
                     ).fetchall()
                     for row in composer_rows:
                         composer_id = row["key"].split(":")[1]
-                        indexed_composer_ids.add(composer_id)
                         raw_text = _composer_row_raw_text(row)
                         try:
                             cd = json.loads(raw_text)
@@ -293,6 +292,7 @@ def build_search_index(
                             ),
                         )
                         composer_count += 1
+                        indexed_composer_ids.add(composer_id)
 
                     bubble_rows = src_conn.execute(
                         "SELECT key, value FROM cursorDiskKV"
