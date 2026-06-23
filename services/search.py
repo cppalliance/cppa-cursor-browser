@@ -76,7 +76,11 @@ def resolve_search_since_ms(
     since_days: int | None = None,
     now: datetime | None = None,
 ) -> int | None:
-    """Return epoch-ms cutoff for search, or ``None`` to search all history."""
+    """Return epoch-ms cutoff for search, or ``None`` to search all history.
+
+    Composers with no parseable timestamp (``updated_ms <= 0``) remain
+    searchable when a window is active; see ``_INCLUDE_UNKNOWN_TIMESTAMPS_IN_WINDOW``.
+    """
     if all_history:
         return None
     days = since_days if since_days is not None else DEFAULT_SEARCH_WINDOW_DAYS
@@ -348,6 +352,7 @@ class _SearchWorkspaceAssigner:
     invalid_workspace_aliases: dict[str, str]
 
     def workspace_for_composer(self, composer: Composer) -> str:
+        # Deliberately omit global bubble index (same as list/summary paths).
         return assign_composer_workspace(
             composer,
             project_layouts_map=self.ctx.project_layouts_map,
@@ -477,7 +482,7 @@ def _search_global_storage_via_index(
 ) -> list[SearchResult] | None:
     """Search using local FTS index. Returns ``None`` to fall back to live scan."""
     from services.search_index import (
-        query_all_composer_bubble_texts,
+        query_all_bubble_texts_for_composer_ids,
         query_composer_bubble_hits,
         query_composer_rows_in_window,
         query_composer_title_hits,
@@ -519,6 +524,8 @@ def _search_global_storage_via_index(
             raw_lower = (row["raw_json"] or "").lower()
             if query_lower in raw_lower:
                 candidate_ids.add(composer_id)
+
+        all_bubbles_by_composer = query_all_bubble_texts_for_composer_ids(candidate_ids)
 
         for composer_id in candidate_ids:
             composer_row = search_pool.get(composer_id)
@@ -584,7 +591,7 @@ def _search_global_storage_via_index(
                     if not has_match:
                         continue
 
-                all_bubble_texts = query_all_composer_bubble_texts(composer_id)
+                all_bubble_texts = all_bubbles_by_composer.get(composer_id, [])
                 exclusion_text = _composer_exclusion_text(
                     project_name=project_name,
                     title=title,

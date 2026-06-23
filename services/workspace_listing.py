@@ -151,6 +151,7 @@ def _build_workspace_projects_uncached(
                             project_name_map=project_name_map,
                             workspace_path_map=workspace_path_map,
                             workspace_entries=workspace_entries,
+                            # Empty bubble map matches summary assignment (#95 perf tradeoff).
                             bubble_map=bubble_map,
                             composer_id_to_ws=composer_id_to_ws,
                             invalid_workspace_ids=invalid_workspace_ids,

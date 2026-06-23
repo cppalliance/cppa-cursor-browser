@@ -109,7 +109,7 @@ def matching_workspace_ids_for_folder(
         first_folder = folders[0] if folders else None
         if first_folder:
             target_folder = normalize_file_path(first_folder)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
         warn_workspace_json_read(_logger, workspace_id, e)
     if not target_folder:
         return matching
@@ -120,7 +120,7 @@ def matching_workspace_ids_for_folder(
             f2 = folders2[0] if folders2 else None
             if f2 and normalize_file_path(f2) == target_folder:
                 matching.add(entry["name"])
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             warn_workspace_json_read(_logger, entry["name"], e)
     return matching
 
@@ -433,7 +433,7 @@ def infer_invalid_workspace_aliases(
             continue
         try:
             cd = json.loads(row["value"])
-        except Exception as e:
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
             _logger.warning(
                 "Failed to decode Composer from composerData:%s: %s",
                 cid,

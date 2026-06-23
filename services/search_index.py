@@ -47,6 +47,7 @@ __all__ = [
     "ensure_search_index",
     "index_is_usable",
     "index_search_enabled",
+    "query_all_bubble_texts_for_composer_ids",
     "query_all_composer_bubble_texts",
     "query_composer_bubble_hits",
     "query_composer_title_hits",
@@ -258,6 +259,7 @@ def build_search_index(
                 _create_schema(conn)
                 composer_count = 0
                 bubble_count = 0
+                indexed_composer_ids: set[str] = set()
 
                 with open_global_db(workspace_path) as (src_conn, _):
                     if src_conn is None:
@@ -267,6 +269,7 @@ def build_search_index(
                     ).fetchall()
                     for row in composer_rows:
                         composer_id = row["key"].split(":")[1]
+                        indexed_composer_ids.add(composer_id)
                         raw_text = _composer_row_raw_text(row)
                         try:
                             cd = json.loads(raw_text)
@@ -300,6 +303,8 @@ def build_search_index(
                         if len(parts) < 2 or not parts[1]:
                             continue
                         composer_id = parts[1]
+                        if composer_id not in indexed_composer_ids:
+                            continue
                         text = _quick_bubble_text(row["value"])
                         if not text:
                             continue
@@ -485,18 +490,38 @@ def query_all_composer_bubble_texts(composer_id: str) -> list[str]:
     """All indexed bubble texts for one composer (exclusion-rule checks)."""
     if not composer_id or not index_search_enabled():
         return []
+    by_id = query_all_bubble_texts_for_composer_ids({composer_id})
+    return by_id.get(composer_id, [])
 
+
+def query_all_bubble_texts_for_composer_ids(
+    composer_ids: set[str] | frozenset[str],
+) -> dict[str, list[str]]:
+    """Batch-load all indexed bubble texts for exclusion-rule checks."""
+    if not composer_ids or not index_search_enabled():
+        return {}
+
+    ids = list(composer_ids)
+    result: dict[str, list[str]] = {}
     with _index_db_conn(readonly=True) as conn:
         if conn is None:
-            return []
+            return {}
         try:
-            rows = conn.execute(
-                "SELECT text FROM bubbles_fts WHERE composer_id = ?",
-                (composer_id,),
-            ).fetchall()
+            for offset in range(0, len(ids), 500):
+                chunk = ids[offset : offset + 500]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    "SELECT composer_id, text FROM bubbles_fts"
+                    f" WHERE composer_id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    text = row["text"]
+                    if text:
+                        result.setdefault(row["composer_id"], []).append(text)
         except sqlite3.Error:
-            return []
-        return [row["text"] for row in rows if row["text"]]
+            return {}
+    return result
 
 
 def query_composer_rows_in_window(

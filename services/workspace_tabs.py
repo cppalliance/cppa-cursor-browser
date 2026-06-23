@@ -67,7 +67,6 @@ from services.workspace_db import (
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
-    determine_project_for_conversation,
     infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
     matching_workspace_ids_for_folder,
@@ -576,38 +575,18 @@ def assemble_single_tab(
             return {"error": "Conversation not found"}, 404
 
         row = rows[0]
-        try:
-            parsed = json.loads(row["value"])
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            payload_len, payload_fp = _kv_payload_log_meta(row["value"])
-            _logger.warning(
-                "Failed to decode Composer from composerData:%s: %s (payload_len=%d, payload_sha256=%s)",
-                composer_id,
-                e,
-                payload_len,
-                payload_fp,
-            )
-            return {"error": "Failed to parse conversation"}, 500
-        try:
-            composer = Composer.from_dict(parsed, composer_id=composer_id)
-        except SchemaError as e:
-            _logger.warning(
-                "Failed to parse Composer from composerData:%s: %s",
-                composer_id,
-                e,
-            )
-            return {"error": "Failed to parse conversation"}, 500
+        composer = parse_composer_data_row(
+            row["key"], row["value"], parse_warnings=parse_warnings,
+        )
+        if composer is None:
+            return {"error": "Conversation not found"}, 404
 
-        # Verify the conversation belongs to the requested workspace.
-        # Always scoped: only load messageRequestContext rows for this composer.
         project_layouts_map: dict[str, list[str]] = {}
         invalid_workspace_aliases: dict[str, str] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
             global_db, composer_id,
         )
         if invalid_workspace_ids:
-            # Alias resolution still needs the composer roster, but project layouts
-            # are intentionally limited to this composer (single-tab scope).
             composer_rows_for_aliases = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=composer_rows_for_aliases,
@@ -620,23 +599,24 @@ def assemble_single_tab(
                 invalid_workspace_ids=invalid_workspace_ids,
             )
 
-        pid = determine_project_for_conversation(
-            composer, composer_id, project_layouts_map,
-            project_name_map, workspace_path_map,
-            workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
+        bubble_map = load_bubbles_for_composer(
+            global_db, composer_id, parse_warnings=parse_warnings,
         )
-        mapped_ws = composer_id_to_ws.get(composer_id)
-        if not pid and mapped_ws in invalid_workspace_ids:
-            pid = invalid_workspace_aliases.get(mapped_ws)
-        assigned = pid if pid else "global"
+        assigned = assign_composer_workspace(
+            composer,
+            project_layouts_map=project_layouts_map,
+            project_name_map=project_name_map,
+            workspace_path_map=workspace_path_map,
+            workspace_entries=workspace_entries,
+            bubble_map=bubble_map,
+            composer_id_to_ws=composer_id_to_ws,
+            invalid_workspace_ids=invalid_workspace_ids,
+            invalid_workspace_aliases=invalid_workspace_aliases,
+        )
 
         if assigned not in matching_ws_ids:
             return {"error": "Conversation not found"}, 404
 
-        # Scoped loads — only rows for this composer_id.
-        bubble_map = load_bubbles_for_composer(
-            global_db, composer_id, parse_warnings=parse_warnings
-        )
         contexts = load_message_request_context_for_composer(global_db, composer_id)
         code_block_diffs = load_code_block_diffs_for_composer(global_db, composer_id)
 
@@ -743,16 +723,18 @@ def assemble_workspace_tabs(
         # Get composer data entries with conversations
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases = infer_invalid_workspace_aliases(
-            composer_rows=composer_rows,
-            project_layouts_map=project_layouts_map,
-            project_name_map=project_name_map,
-            workspace_path_map=workspace_path_map,
-            workspace_entries=workspace_entries,
-            bubble_map=bubble_map,
-            composer_id_to_ws=composer_id_to_ws,
-            invalid_workspace_ids=invalid_workspace_ids,
-        )
+        invalid_workspace_aliases: dict[str, str] = {}
+        if invalid_workspace_ids:
+            invalid_workspace_aliases = infer_invalid_workspace_aliases(
+                composer_rows=composer_rows,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map=bubble_map,
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+            )
 
         for row in composer_rows:
             composer = parse_composer_data_row(
@@ -762,16 +744,18 @@ def assemble_workspace_tabs(
                 continue
             composer_id = composer.composer_id
             try:
-                # Determine project
-                pid = determine_project_for_conversation(
-                    composer, composer_id, project_layouts_map,
-                    project_name_map, workspace_path_map,
-                    workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
+                assigned = assign_composer_workspace(
+                    composer,
+                    project_layouts_map=project_layouts_map,
+                    project_name_map=project_name_map,
+                    workspace_path_map=workspace_path_map,
+                    workspace_entries=workspace_entries,
+                    # Assignment matches summary path; bubble_map used only for tab body.
+                    bubble_map={},
+                    composer_id_to_ws=composer_id_to_ws,
+                    invalid_workspace_ids=invalid_workspace_ids,
+                    invalid_workspace_aliases=invalid_workspace_aliases,
                 )
-                mapped_ws = composer_id_to_ws.get(composer_id)
-                if not pid and mapped_ws in invalid_workspace_ids:
-                    pid = invalid_workspace_aliases.get(mapped_ws)
-                assigned = pid if pid else "global"
 
                 if assigned not in matching_ws_ids:
                     continue

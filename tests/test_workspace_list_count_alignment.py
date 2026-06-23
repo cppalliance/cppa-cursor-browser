@@ -13,7 +13,11 @@ from models import ParseWarningCollector
 from services.workspace_composer_scan import parse_composer_data_row
 from services.workspace_db import build_composer_id_to_workspace_id, collect_workspace_entries
 from services.workspace_listing import list_workspace_projects
-from services.workspace_tabs import list_workspace_tab_summaries
+from services.workspace_tabs import (
+    assemble_single_tab,
+    assemble_workspace_tabs,
+    list_workspace_tab_summaries,
+)
 from tests._fixture_ids import HAPPY_COMPOSER_ID, HAPPY_WORKSPACE_ID
 
 
@@ -107,6 +111,45 @@ def test_parallel_composer_registry_covers_all_workspaces(tmp_path):
     assert len(mapping) == len(ids)
     for i, ws_id in enumerate(ids):
         assert mapping[f"cmp-{i}"] == ws_id
+
+
+def test_summary_and_full_tabs_share_assignment(tmp_path):
+    """Summary and full /tabs agree on which composers belong after assignment."""
+    ws_root = _layout(tmp_path)
+    global_db = os.path.join(tmp_path, "globalStorage", "state.vscdb")
+    with contextlib.closing(sqlite3.connect(global_db)) as conn:
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                f"bubbleId:{HAPPY_COMPOSER_ID}:b1",
+                json.dumps({"type": "user", "text": "hello", "bubbleId": "b1"}),
+            ),
+        )
+        conn.commit()
+
+    summary, summary_status = list_workspace_tab_summaries(
+        HAPPY_WORKSPACE_ID, ws_root, rules=[], nocache=True,
+    )
+    full, full_status = assemble_workspace_tabs(
+        HAPPY_WORKSPACE_ID, ws_root, rules=[],
+    )
+    assert summary_status == 200
+    assert full_status == 200
+    summary_ids = {t["id"] for t in summary["tabs"]}
+    full_ids = {t["id"] for t in full["tabs"]}
+    assert summary_ids == full_ids
+
+
+def test_single_tab_null_composer_placeholder_returns_404(tmp_path):
+    ws_root = _layout(
+        tmp_path,
+        extra_rows=[("composerData:empty-state-draft", None)],
+    )
+    payload, status = assemble_single_tab(
+        "global", "empty-state-draft", ws_root, rules=[],
+    )
+    assert status == 404
+    assert "error" in payload
 
 
 def test_excluded_model_dropped_from_list_and_summary(tmp_path):
