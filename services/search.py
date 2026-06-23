@@ -502,6 +502,8 @@ def _search_global_storage_via_index(
         if since_ms is not None and not composers_in_window:
             return results
 
+        search_pool = composers_in_window
+
         window_ids = set(composers_in_window.keys()) if since_ms is not None else None
         bubble_texts_by_composer = query_composer_bubble_hits(
             query_lower,
@@ -513,19 +515,13 @@ def _search_global_storage_via_index(
         for row in query_composer_title_hits(query_lower, since_ms=since_ms):
             candidate_ids.add(row["composer_id"])
 
-        search_pool = composers_in_window if since_ms is not None else query_composer_rows_in_window(None)
         for composer_id, row in search_pool.items():
             raw_lower = (row["raw_json"] or "").lower()
             if query_lower in raw_lower:
                 candidate_ids.add(composer_id)
 
         for composer_id in candidate_ids:
-            composer_row: sqlite3.Row | None = (
-                composers_in_window.get(composer_id) if since_ms is not None
-                else search_pool.get(composer_id)
-            )
-            if composer_row is None:
-                composer_row = query_composer_rows_in_window(None).get(composer_id)
+            composer_row = search_pool.get(composer_id)
             if composer_row is None:
                 continue
 
@@ -888,6 +884,10 @@ def search_legacy_workspaces(
                     ct = tab.get("chatTitle") or ""
                     tab_id = str(tab.get("tabId") or "")
 
+                    tab_ts = to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP
+                    if not _timestamp_in_search_window(tab_ts, since_ms):
+                        continue
+
                     tab_model_names: list[str] | None = None
                     tab_meta = tab.get("metadata")
                     if isinstance(tab_meta, dict):
@@ -919,10 +919,6 @@ def search_legacy_workspaces(
                         ct, tab_bubble_texts, query_lower, query
                     )
                     if not has_match:
-                        continue
-
-                    tab_ts = to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP
-                    if not _timestamp_in_search_window(tab_ts, since_ms):
                         continue
 
                     results.append({

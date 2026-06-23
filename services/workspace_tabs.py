@@ -741,13 +741,7 @@ def assemble_workspace_tabs(
                         project_layouts_map[chat_id].append(layout["rootPath"])
 
         # Get composer data entries with conversations
-        composer_rows = safe_fetchall(
-            global_db,
-            "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-            " AND value IS NOT NULL"
-            " AND value LIKE '%fullConversationHeadersOnly%'"
-            " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'",
-        )
+        composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         invalid_workspace_aliases = infer_invalid_workspace_aliases(
             composer_rows=composer_rows,
@@ -761,34 +755,12 @@ def assemble_workspace_tabs(
         )
 
         for row in composer_rows:
-            composer_id = row["key"].split(":")[1]
-            try:
-                parsed = json.loads(row["value"])
-            except (json.JSONDecodeError, TypeError, ValueError) as e:
-                payload_len, payload_fp = _kv_payload_log_meta(row["value"])
-                _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s (key=%s, payload_len=%d, payload_sha256=%s)",
-                    composer_id,
-                    e,
-                    row["key"],
-                    payload_len,
-                    payload_fp,
-                )
-                parse_warnings.record_composer_skipped()
+            composer = parse_composer_data_row(
+                row["key"], row["value"], parse_warnings=parse_warnings,
+            )
+            if composer is None:
                 continue
-            try:
-                composer = Composer.from_dict(parsed, composer_id=composer_id)
-            except SchemaError as e:
-                # Drift skipped + logged so the two primary conversation
-                # paths (list_workspaces + get_workspace_tabs) agree on what
-                # counts as a valid composer.
-                _logger.warning(
-                    "Failed to parse Composer from composerData:%s: %s",
-                    composer_id,
-                    e,
-                )
-                parse_warnings.record_composer_skipped()
-                continue
+            composer_id = composer.composer_id
             try:
                 # Determine project
                 pid = determine_project_for_conversation(

@@ -156,7 +156,7 @@ class TestParseFailureLogging(unittest.TestCase):
                     ("composerData:cmp-json", bad_composer_value),
                 )
                 conn.commit()
-            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+            with self.assertLogs("services.workspace_composer_scan", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
                     _payload, _status = assemble_workspace_tabs("global", ws_root, rules=[])
 

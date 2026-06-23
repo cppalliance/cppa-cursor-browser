@@ -29,12 +29,12 @@ def parse_composer_data_row(
     Returns ``None`` for null/placeholder payloads (e.g. ``empty-state-draft``)
     without emitting decode warnings. Logs and records skips for malformed JSON.
     """
+    if not row_key.startswith("composerData:"):
+        return None
     if raw_value is None:
         return None
     if not isinstance(raw_value, (str, bytes, bytearray)):
         parse_warnings.record_composer_skipped()
-        return None
-    if not row_key.startswith("composerData:"):
         return None
     composer_id = row_key.split(":", 1)[1]
     if not composer_id:

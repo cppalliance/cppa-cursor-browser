@@ -43,6 +43,7 @@ from utils.workspace_path import get_cli_chats_path
 
 __all__ = [
     "SEARCH_INDEX_FILE",
+    "SEARCH_INDEX_POINTER_FILE",
     "ensure_search_index",
     "index_is_usable",
     "index_search_enabled",
