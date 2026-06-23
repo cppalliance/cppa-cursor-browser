@@ -21,12 +21,15 @@ from utils.workspace_descriptor import read_json_file
 from models import Bubble, ParseWarningCollector
 from services.export_engine import WorkspaceOrchestration, prepare_workspace_orchestration
 from services.summary_cache import (
+    fingerprint_workspace_storage,
     get_cached_projects,
     nocache_enabled,
     set_cached_projects,
 )
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
+    collect_workspace_entries,
+    global_storage_db_path,
     load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
@@ -91,13 +94,28 @@ def list_workspace_projects(
         :meth:`models.ParseWarningCollector.to_api_list`; empty when no skips.
     """
     effective_nocache = nocache_enabled(request_nocache=nocache)
-    orch = prepare_workspace_orchestration(
-        workspace_path, rules, nocache=effective_nocache,
-    )
+    workspace_entries: list[dict[str, Any]] | None = None
     if not effective_nocache:
-        cached = get_cached_projects(orch.fingerprint)
+        workspace_entries = collect_workspace_entries(workspace_path)
+        gdb = global_storage_db_path(workspace_path)
+        cli_path = get_cli_chats_path()
+        fingerprint = fingerprint_workspace_storage(
+            workspace_path,
+            workspace_entries,
+            global_db_path=gdb if os.path.isfile(gdb) else None,
+            rules=rules,
+            cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+        )
+        cached = get_cached_projects(fingerprint)
         if cached is not None:
             return cached
+
+    orch = prepare_workspace_orchestration(
+        workspace_path,
+        rules,
+        nocache=effective_nocache,
+        workspace_entries=workspace_entries,
+    )
 
     projects, warnings = _build_workspace_projects_uncached(
         workspace_path, rules, orch,
