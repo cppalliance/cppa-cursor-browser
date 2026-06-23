@@ -84,10 +84,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && allTabs.find(t => t.id === tabParam)) {
-      selectTab(tabParam);
+    if (tabParam) {
+      await selectTab(tabParam);
     } else if (allTabs.length > 0) {
-      selectTab(allTabs[0].id);
+      await selectTab(allTabs[0].id);
     }
   } catch (e) {
     const main = document.getElementById('main-content');
@@ -123,8 +123,11 @@ function renderSidebar() {
 
 async function selectTab(id) {
   selectTab._latest = id;
-  const summary = allTabs.find(t => t.id === id);
-  if (!summary) return;
+  let summary = allTabs.find(t => t.id === id);
+  if (!summary) {
+    // Deep link (e.g. from search): fetch even when sidebar list omits this id.
+    summary = { id, title: `Conversation ${id.slice(0, 8)}`, timestamp: 0 };
+  }
 
   const url = new URL(window.location);
   url.searchParams.set('tab', id);
@@ -155,6 +158,10 @@ async function selectTab(id) {
     try {
       const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/tabs/${id}`);
       if (selectTab._latest !== id) return;
+      if (res.status === 404 && WORKSPACE_ID !== 'global') {
+        window.location.href = `/workspace/global?tab=${encodeURIComponent(id)}`;
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (selectTab._latest !== id) return;

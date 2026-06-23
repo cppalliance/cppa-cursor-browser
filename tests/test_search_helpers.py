@@ -20,11 +20,15 @@ from pathlib import Path
 
 import pytest
 
+from datetime import datetime, timedelta, timezone
+
 from models import ParseWarningCollector
 from services.search import (
     _extract_snippet,
     _find_match,
+    _timestamp_in_search_window,
     rank_results,
+    resolve_search_since_ms,
     search_cli_sessions,
     search_global_storage,
     search_legacy_workspaces,
@@ -165,6 +169,78 @@ class TestRankResults:
             "2025-01 chat must outrank 2024-05 composer; "
             f"got order: {[r['type'] for r in ranked]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# resolve_search_since_ms / window filtering
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSearchSinceMs:
+    def test_all_history_returns_none(self):
+        assert resolve_search_since_ms(all_history=True) is None
+
+    def test_default_window_uses_30_days(self):
+        now = datetime(2026, 6, 23, 12, 0, 0, tzinfo=timezone.utc)
+        since = resolve_search_since_ms(all_history=False, now=now)
+        expected = int((now - timedelta(days=30)).timestamp() * 1000)
+        assert since == expected
+
+    def test_custom_since_days(self):
+        now = datetime(2026, 6, 23, 12, 0, 0, tzinfo=timezone.utc)
+        since = resolve_search_since_ms(all_history=False, since_days=7, now=now)
+        expected = int((now - timedelta(days=7)).timestamp() * 1000)
+        assert since == expected
+
+    def test_zero_or_negative_days_searches_all_history(self):
+        assert resolve_search_since_ms(all_history=False, since_days=0) is None
+        assert resolve_search_since_ms(all_history=False, since_days=-1) is None
+
+
+class TestTimestampInSearchWindow:
+    def test_none_since_ms_always_in_window(self):
+        assert _timestamp_in_search_window(1_715_000_000_000, None) is True
+
+    def test_old_timestamp_excluded(self):
+        since = 1_750_000_000_000  # ~2025-06
+        assert _timestamp_in_search_window(1_715_000_000_000, since) is False
+
+    def test_recent_timestamp_included(self):
+        since = 1_750_000_000_000
+        assert _timestamp_in_search_window(1_760_000_000_000, since) is True
+
+
+class TestSearchGlobalStorageWindow:
+    def test_since_ms_excludes_old_composer(self, tmp_workspace_root):
+        dirs = tmp_workspace_root
+        _make_global_db(dirs["global_root"], "cmp-old", "window-filter-term")
+        _make_workspace_db(dirs["ws_root"], "ws-old", "cmp-old", "/projects/old")
+
+        since = 1_750_000_000_000  # after fixture's May 2024 timestamps
+        results = search_global_storage(
+            workspace_path=dirs["ws_root"],
+            query="window-filter-term",
+            query_lower="window-filter-term",
+            rules=[],
+            parse_warnings=ParseWarningCollector(),
+            since_ms=since,
+        )
+        assert results == []
+
+    def test_since_ms_none_includes_old_composer(self, tmp_workspace_root):
+        dirs = tmp_workspace_root
+        _make_global_db(dirs["global_root"], "cmp-old-2", "window-include-term")
+        _make_workspace_db(dirs["ws_root"], "ws-old-2", "cmp-old-2", "/projects/old2")
+
+        results = search_global_storage(
+            workspace_path=dirs["ws_root"],
+            query="window-include-term",
+            query_lower="window-include-term",
+            rules=[],
+            parse_warnings=ParseWarningCollector(),
+            since_ms=None,
+        )
+        assert any(r["chatId"] == "cmp-old-2" for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +422,45 @@ class TestSearchGlobalStorage:
         assert results
         # Workspace folder name is resolved to the basename of the folder path.
         assert results[0]["workspaceFolder"] == "myrepo"
+
+    def test_match_in_bubble_only_not_in_composer_json(self, tmp_workspace_root):
+        """Query only in bubbleId row must still match (SQL bubble prefilter path)."""
+        dirs = tmp_workspace_root
+        db_path = os.path.join(dirs["global_root"], "state.vscdb")
+        composer_id = "cmp-bubble-only"
+        term = "bubble-only-sentinel-abc"
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
+            conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                (
+                    f"bubbleId:{composer_id}:bub-1",
+                    json.dumps({"type": "user", "text": f"answer about {term}"}),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                (
+                    f"composerData:{composer_id}",
+                    json.dumps({
+                        "name": "Unrelated title",
+                        "createdAt": 1_715_000_000_000,
+                        "lastUpdatedAt": 1_715_001_000_000,
+                        "fullConversationHeadersOnly": [{"bubbleId": "bub-1"}],
+                    }),
+                ),
+            )
+            conn.commit()
+        _make_workspace_db(dirs["ws_root"], "ws-bubble-only", composer_id, "/projects/x")
+
+        results = search_global_storage(
+            workspace_path=dirs["ws_root"],
+            query=term,
+            query_lower=term,
+            rules=[],
+            parse_warnings=ParseWarningCollector(),
+        )
+        assert any(r["chatId"] == composer_id for r in results)
 
 
 # ---------------------------------------------------------------------------

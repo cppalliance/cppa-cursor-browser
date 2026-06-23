@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +18,12 @@ from utils.path_helpers import (
 from utils.workspace_descriptor import read_json_file
 from models import Bubble, ParseWarningCollector
 from services.export_engine import WorkspaceOrchestration, prepare_workspace_orchestration
+from services.workspace_composer_scan import (
+    assign_composer_workspace,
+    composer_chat_title,
+    composer_model_names,
+    parse_composer_data_row,
+)
 from services.summary_cache import (
     fingerprint_workspace_storage,
     get_cached_projects,
@@ -30,46 +34,17 @@ from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
     collect_workspace_entries,
     global_storage_db_path,
-    load_project_layouts_for_composer,
     load_project_layouts_map,
     open_global_db,
     safe_fetchall,
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
-    determine_project_for_conversation,
+    build_composer_ids_by_workspace,
     infer_invalid_workspace_aliases,
-    infer_workspace_name_from_context,
+    infer_workspace_name_from_layouts,
     lookup_workspace_display_name,
 )
-
-
-def _composer_valid_for_listing(
-    cd: dict[str, Any],
-    composer_id: str,
-    parse_warnings: ParseWarningCollector,
-) -> bool:
-    """Lightweight list-path checks aligned with :class:`models.Composer` requirements."""
-    if "fullConversationHeadersOnly" not in cd:
-        return False
-    created_at = cd.get("createdAt")
-    if not isinstance(created_at, (int, float)) or isinstance(created_at, bool):
-        _logger.warning(
-            "Failed to parse Composer from composerData:%s: expected timestamp number for createdAt, got %s",
-            composer_id,
-            type(created_at).__name__,
-        )
-        parse_warnings.record_composer_skipped()
-        return False
-    headers = cd.get("fullConversationHeadersOnly")
-    if not isinstance(headers, list):
-        _logger.warning(
-            "Failed to parse Composer from composerData:%s: fullConversationHeadersOnly must be a list",
-            composer_id,
-        )
-        parse_warnings.record_composer_skipped()
-        return False
-    return True
 
 
 def list_workspace_projects(
@@ -137,17 +112,16 @@ def _build_workspace_projects_uncached(
     project_name_map = ctx.project_name_to_workspace_id
     workspace_path_map = ctx.workspace_path_to_id
     composer_id_to_ws = ctx.composer_id_to_workspace_id
+    composer_ids_by_ws = build_composer_ids_by_workspace(composer_id_to_ws)
 
     conversation_map: dict[str, list[dict[str, Any]]] = {}
+    project_layouts_map: dict[str, list[str]] = {}
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db:
             try:
                 composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
-
-                project_layouts_map: dict[str, list[str]] = {}
-                if invalid_workspace_ids:
-                    project_layouts_map = load_project_layouts_map(global_db)
+                project_layouts_map = load_project_layouts_map(global_db)
 
                 bubble_map: dict[str, Bubble] = {}
                 invalid_workspace_aliases: dict[str, str] = {}
@@ -164,54 +138,35 @@ def _build_workspace_projects_uncached(
                     )
 
                 for row in composer_rows:
-                    cid = row["key"].split(":")[1]
+                    composer = parse_composer_data_row(
+                        row["key"], row["value"], parse_warnings=parse_warnings,
+                    )
+                    if composer is None:
+                        continue
+                    cid = composer.composer_id
                     try:
-                        cd = json.loads(row["value"])
-                    except (json.JSONDecodeError, TypeError, ValueError) as e:
-                        _logger.warning(
-                            "Failed to decode Composer from composerData:%s: %s",
-                            cid,
-                            e,
+                        assigned = assign_composer_workspace(
+                            composer,
+                            project_layouts_map=project_layouts_map,
+                            project_name_map=project_name_map,
+                            workspace_path_map=workspace_path_map,
+                            workspace_entries=workspace_entries,
+                            bubble_map=bubble_map,
+                            composer_id_to_ws=composer_id_to_ws,
+                            invalid_workspace_ids=invalid_workspace_ids,
+                            invalid_workspace_aliases=invalid_workspace_aliases,
                         )
-                        parse_warnings.record_composer_skipped()
-                        continue
-                    if not isinstance(cd, dict):
-                        _logger.warning(
-                            "Failed to parse Composer from composerData:%s: expected object, got %s",
-                            cid,
-                            type(cd).__name__,
-                        )
-                        parse_warnings.record_composer_skipped()
-                        continue
-                    if not _composer_valid_for_listing(cd, cid, parse_warnings):
-                        continue
-                    try:
-                        if (
-                            cid not in composer_id_to_ws
-                            and cid not in project_layouts_map
-                        ):
-                            project_layouts_map[cid] = load_project_layouts_for_composer(
-                                global_db, cid,
-                            )
-                        pid = determine_project_for_conversation(
-                            cd, cid, project_layouts_map,
-                            project_name_map, workspace_path_map,
-                            workspace_entries, bubble_map, composer_id_to_ws, invalid_workspace_ids,
-                        )
-                        mapped_ws = composer_id_to_ws.get(cid)
-                        if not pid and mapped_ws in invalid_workspace_ids:
-                            pid = invalid_workspace_aliases.get(mapped_ws)
-                        assigned = pid if pid else "global"
-
-                        headers = cd.get("fullConversationHeadersOnly") or []
-                        if not headers:
-                            continue
 
                         conversation_map.setdefault(assigned, []).append({
                             "composerId": cid,
-                            "name": cd.get("name") or f"Conversation {cid[:8]}",
-                            "lastUpdatedAt": to_epoch_ms(cd.get("lastUpdatedAt")) or to_epoch_ms(cd.get("createdAt")) or 0,
-                            "createdAt": to_epoch_ms(cd.get("createdAt")) or 0,
+                            "name": composer_chat_title(composer),
+                            "modelNames": composer_model_names(composer),
+                            "lastUpdatedAt": (
+                                to_epoch_ms(composer.last_updated_at)
+                                or to_epoch_ms(composer.created_at)
+                                or 0
+                            ),
+                            "createdAt": to_epoch_ms(composer.created_at) or 0,
                         })
                     except Exception as e:
                         _logger.warning(
@@ -227,7 +182,7 @@ def _build_workspace_projects_uncached(
                     exc_info=True,
                 )
 
-    # Group workspace entries by normalized folder path
+    # Group workspace entries by normalized folder path (first folder in workspace.json).
     folder_to_entries: dict[str, list[dict[str, Any]]] = {}
     entry_folder_map: dict[str, str] = {}
     for entry in workspace_entries:
@@ -241,7 +196,7 @@ def _build_workspace_projects_uncached(
         except Exception as e:
             warn_workspace_json_read(_logger, entry["name"], e)
         if not norm_folder:
-            norm_folder = entry["name"]  # fallback to workspace ID
+            norm_folder = entry["name"]
         entry_folder_map[entry["name"]] = norm_folder
         folder_to_entries.setdefault(norm_folder, []).append(entry)
 
@@ -273,7 +228,10 @@ def _build_workspace_projects_uncached(
 
         workspace_name = lookup_workspace_display_name(workspace_path, primary["name"])
         if workspace_name == primary["name"]:
-            inferred = infer_workspace_name_from_context(workspace_path, primary["name"])
+            inferred = infer_workspace_name_from_layouts(
+                [cid for ws_id in all_ws_ids for cid in composer_ids_by_ws.get(ws_id, [])],
+                project_layouts_map,
+            )
             workspace_name = inferred or f"Project {primary['name'][:8]}"
 
         if is_excluded_by_rules(rules, workspace_name):
@@ -285,6 +243,7 @@ def _build_workspace_projects_uncached(
                 searchable = build_searchable_text(
                     project_name=workspace_name,
                     chat_title=c.get("name"),
+                    model_names=c.get("modelNames"),
                 )
                 if not is_excluded_by_rules(rules, searchable):
                     convos.append(c)
@@ -306,7 +265,11 @@ def _build_workspace_projects_uncached(
         c for c in conversation_map.get("global", [])
         if not is_excluded_by_rules(
             rules,
-            build_searchable_text(project_name="Other chats", chat_title=c.get("name")),
+            build_searchable_text(
+                project_name="Other chats",
+                chat_title=c.get("name"),
+                model_names=c.get("modelNames"),
+            ),
         )
     ]
     if global_convos:

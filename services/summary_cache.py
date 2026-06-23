@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -62,16 +63,26 @@ def fingerprint_workspace_storage(
 ) -> dict[str, Any]:
     """Build a fingerprint dict for cache invalidation."""
     ws_mt: list[list[str | int]] = []
-    for entry in workspace_entries:
+
+    def _entry_mtimes(entry: dict[str, Any]) -> list[list[str | int]]:
+        rows: list[list[str | int]] = []
         name = entry.get("name")
         if not isinstance(name, str):
-            continue
+            return rows
         base = os.path.join(workspace_path, name)
         for rel in ("state.vscdb", "workspace.json"):
             p = os.path.join(base, rel)
             mtime = _file_mtime_ns(p)
             if mtime is not None:
-                ws_mt.append([f"{name}/{rel}", mtime])
+                rows.append([f"{name}/{rel}", mtime])
+        return rows
+
+    if workspace_entries:
+        max_workers = min(32, len(workspace_entries))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(_entry_mtimes, entry) for entry in workspace_entries]
+            for fut in as_completed(futures):
+                ws_mt.extend(fut.result())
     ws_mt.sort(key=lambda row: row[0])
 
     return {

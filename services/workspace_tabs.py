@@ -37,6 +37,13 @@ from models.raw_access import (
     conversation_header_bubble_id,
     message_request_context_project_layouts,
 )
+from services.workspace_composer_scan import (
+    assign_composer_workspace,
+    composer_chat_title,
+    composer_model_names,
+    is_composer_excluded,
+    parse_composer_data_row,
+)
 from services.summary_cache import (
     fingerprint_workspace_storage,
     get_cached_tab_summaries,
@@ -63,6 +70,7 @@ from services.workspace_resolver import (
     determine_project_for_conversation,
     infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
+    matching_workspace_ids_for_folder,
 )
 
 
@@ -362,36 +370,8 @@ def _build_matching_ws_ids(
     workspace_path: str,
     workspace_entries: list[dict[str, Any]],
 ) -> set[str]:
-    """Return the set of workspace folder IDs that share the same project folder as *workspace_id*.
-
-    Cursor sometimes creates multiple workspace entries for the same on-disk
-    project; conversations recorded under any of those IDs belong to the same
-    project view.
-    """
-    matching: set[str] = {workspace_id}
-    if workspace_id == "global":
-        return matching
-    target_folder = ""
-    wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
-    try:
-        wd = read_json_file(wj_path)
-        folders = get_workspace_folder_paths(wd)
-        first_folder = folders[0] if folders else None
-        if first_folder:
-            target_folder = normalize_file_path(first_folder)
-    except Exception as e:
-        warn_workspace_json_read(_logger, workspace_id, e)
-    if target_folder:
-        for entry in workspace_entries:
-            try:
-                wd2 = read_json_file(entry["workspaceJsonPath"])
-                folders2 = get_workspace_folder_paths(wd2)
-                f2 = folders2[0] if folders2 else None
-                if f2 and normalize_file_path(f2) == target_folder:
-                    matching.add(entry["name"])
-            except Exception as e:
-                warn_workspace_json_read(_logger, entry["name"], e)
-    return matching
+    """Return workspace folder IDs sharing the same on-disk project folder."""
+    return matching_workspace_ids_for_folder(workspace_id, workspace_path, workspace_entries)
 
 
 def list_workspace_tab_summaries(
@@ -470,9 +450,7 @@ def _build_workspace_tab_summaries_uncached(
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
-        project_layouts_map: dict[str, list[str]] = {}
-        if invalid_workspace_ids:
-            project_layouts_map = load_project_layouts_map(global_db)
+        project_layouts_map = load_project_layouts_map(global_db)
 
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
@@ -490,69 +468,39 @@ def _build_workspace_tab_summaries_uncached(
             )
 
         for row in composer_rows:
-            composer_id = row["key"].split(":")[1]
-            try:
-                cd = json.loads(row["value"])
-            except (json.JSONDecodeError, TypeError, ValueError) as e:
-                payload_len, payload_fp = _kv_payload_log_meta(row["value"])
-                _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s (payload_len=%d, payload_sha256=%s)",
-                    composer_id,
-                    e,
-                    payload_len,
-                    payload_fp,
-                )
-                parse_warnings.record_composer_skipped()
+            composer = parse_composer_data_row(
+                row["key"], row["value"], parse_warnings=parse_warnings,
+            )
+            if composer is None:
                 continue
-            if not isinstance(cd, dict):
-                parse_warnings.record_composer_skipped()
-                continue
+            composer_id = composer.composer_id
             try:
-                composer = Composer.from_dict(cd, composer_id=composer_id)
-            except SchemaError as e:
-                _logger.warning(
-                    "Failed to parse Composer from composerData:%s: %s",
-                    composer_id,
-                    e,
+                assigned = assign_composer_workspace(
+                    composer,
+                    project_layouts_map=project_layouts_map,
+                    project_name_map=project_name_map,
+                    workspace_path_map=workspace_path_map,
+                    workspace_entries=workspace_entries,
+                    bubble_map={},
+                    composer_id_to_ws=composer_id_to_ws,
+                    invalid_workspace_ids=invalid_workspace_ids,
+                    invalid_workspace_aliases=invalid_workspace_aliases,
                 )
-                parse_warnings.record_composer_skipped()
-                continue
-            try:
-                if (
-                    composer_id not in composer_id_to_ws
-                    and composer_id not in project_layouts_map
-                ):
-                    project_layouts_map[composer_id] = load_project_layouts_for_composer(
-                        global_db, composer_id,
-                    )
-                pid = determine_project_for_conversation(
-                    composer, composer_id, project_layouts_map,
-                    project_name_map, workspace_path_map,
-                    workspace_entries, {}, composer_id_to_ws, invalid_workspace_ids,
-                )
-                mapped_ws = composer_id_to_ws.get(composer_id)
-                if not pid and mapped_ws in invalid_workspace_ids:
-                    pid = invalid_workspace_aliases.get(mapped_ws)
-                assigned = pid if pid else "global"
 
                 if assigned not in matching_ws_ids:
                     continue
 
-                headers = composer.full_conversation_headers_only
-                if not headers:
-                    continue
-
-                title = composer.name or f"Conversation {composer_id[:8]}"
-
-                _early_model_name = composer.model_name_from_config()
-                _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
-                if is_excluded_by_rules(rules, build_searchable_text(
+                if is_composer_excluded(
+                    rules,
                     project_name=workspace_display_name,
-                    chat_title=title,
-                    model_names=_early_model_names,
-                )):
+                    composer=composer,
+                ):
                     continue
 
+                headers = composer.full_conversation_headers_only
+                title = composer_chat_title(composer)
+
+                _early_model_names = composer_model_names(composer)
                 tab_meta: dict[str, Any] | None = None
                 if _early_model_names:
                     tab_meta = {"modelsUsed": _early_model_names}
@@ -561,7 +509,6 @@ def _build_workspace_tab_summaries_uncached(
                     "id": composer_id,
                     "title": title,
                     "timestamp": _composer_tab_timestamp_ms(composer),
-                    # Header count (KV rows), not renderable bubbles after assembly filters.
                     "messageCount": len(headers),
                 }
                 if tab_meta:

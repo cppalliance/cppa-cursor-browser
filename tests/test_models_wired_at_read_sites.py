@@ -96,24 +96,23 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
                 os.environ[key] = prior
         self._tmp.cleanup()
 
-    def test_search_endpoint_calls_bubble_from_dict(self):
+    def test_search_endpoint_finds_bubble_text(self):
+        """Search uses a lightweight bubble text extractor (not Bubble.from_dict)."""
         from app import create_app
-        import services.workspace_db as workspace_db_mod
-        from models import Bubble
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with patch.object(
-            workspace_db_mod.Bubble, "from_dict", wraps=Bubble.from_dict
-        ) as spy:
-            client = app.test_client()
-            response = client.get("/api/search?q=sentinel-wired")
-            self.assertEqual(response.status_code, 200)
-            self.assertGreaterEqual(
-                spy.call_count, 1,
-                msg="Bubble.from_dict was never called from /api/search — "
-                    "model is defined but not wired at the production read site",
-            )
+        client = app.test_client()
+        response = client.get("/api/search?q=sentinel-wired&all_history=1")
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json().get("results", [])
+        self.assertGreaterEqual(
+            len(results), 1,
+            msg="/api/search must find bubble text via the lightweight search path",
+        )
+        self.assertTrue(
+            any("sentinel-wired" in (r.get("matchingText") or "").lower() for r in results),
+        )
 
     def test_workspace_tabs_endpoint_calls_bubble_from_dict(self):
         from app import create_app
@@ -154,7 +153,7 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         app.config["EXCLUSION_RULES"] = []
         with self.assertLogs("services.workspace_db", level="WARNING") as logs:
             client = app.test_client()
-            response = client.get("/api/search?q=sentinel-wired")
+            response = client.get(f"/api/workspaces/{WORKSPACE_ID}/tabs")
             self.assertEqual(response.status_code, 200)
         messages = "\n".join(logs.output)
         self.assertIn("Schema drift in bubble", messages,

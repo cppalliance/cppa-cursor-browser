@@ -10,7 +10,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from services.workspace_resolver import get_project_from_file_path
+from services.workspace_resolver import (
+    determine_project_for_conversation,
+    get_project_from_file_path,
+)
 
 
 def _write_workspace_json(parent: str, name: str, folder: str) -> dict:
@@ -58,6 +61,40 @@ class TestPrefixCollision(unittest.TestCase):
 
             inside = os.path.join(app, "src", "main.py")
             self.assertEqual(get_project_from_file_path(inside, entries), "ws-app")
+
+
+class TestDetermineProjectUsesPathHelper(unittest.TestCase):
+    """Regression: determine_project_for_conversation must resolve get_project_from_file_path."""
+
+    def test_newly_created_files_triggers_path_helper(self):
+        from models.conversation import Composer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = os.path.join(tmp, "repo", "app")
+            os.makedirs(app, exist_ok=True)
+            entries = [_write_workspace_json(tmp, "ws-app", app)]
+            inside = os.path.join(app, "src", "main.py")
+            composer = Composer.from_dict(
+                {
+                    "name": "Path test",
+                    "createdAt": 1_739_200_000_000,
+                    "fullConversationHeadersOnly": [{"bubbleId": "b1", "type": 1}],
+                    "newlyCreatedFiles": [{"uri": {"path": inside}}],
+                },
+                composer_id="cmp-path",
+            )
+            ws_id = determine_project_for_conversation(
+                composer,
+                "cmp-path",
+                {},
+                {},
+                {},
+                entries,
+                {},
+                None,
+                None,
+            )
+            self.assertEqual(ws_id, "ws-app")
 
 
 if __name__ == "__main__":

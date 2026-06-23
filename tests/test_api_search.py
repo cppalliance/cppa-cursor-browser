@@ -23,7 +23,7 @@ def _assert_search_result_shape(hit: dict) -> None:
 
 class TestSearchHappyPath:
     def test_finds_seeded_term_and_result_shape(self, client):
-        response = client.get("/api/search?q=sentinel-grep")
+        response = client.get("/api/search?q=sentinel-grep&all_history=1")
         assert response.status_code == 200
         body = response.get_json()
         assert isinstance(body, dict)
@@ -36,7 +36,7 @@ class TestSearchHappyPath:
         assert "sentinel-grep" in hit["matchingText"].lower()
 
     def test_type_composer_still_finds_global_match(self, client):
-        response = client.get("/api/search?q=sentinel-grep&type=composer")
+        response = client.get("/api/search?q=sentinel-grep&type=composer&all_history=1")
         assert response.status_code == 200
         body = response.get_json()
         assert isinstance(body["results"], list)
@@ -67,7 +67,7 @@ class TestSearchErrorResponses:
             "api.search.search_global_storage",
             side_effect=RuntimeError("simulated DB failure"),
         ):
-            response = client.get("/api/search?q=sentinel-grep")
+            response = client.get("/api/search?q=sentinel-grep&all_history=1")
         assert response.status_code == 500
         body = response.get_json()
         assert body.get("error") == "Search failed"
@@ -83,13 +83,36 @@ class TestSearchEdgeCases:
 
     def test_exclusion_rule_filters_matching_conversation(self, workspace_storage):
         excluded_client = client_with_rules(["Happy"])
-        response = excluded_client.get("/api/search?q=sentinel-grep")
+        response = excluded_client.get("/api/search?q=sentinel-grep&all_history=1")
         assert response.status_code == 200
         assert response.get_json().get("results") == []
 
     def test_workspace_scoped_hit_has_workspace_id(self, client):
-        response = client.get("/api/search?q=sentinel-grep")
+        response = client.get("/api/search?q=sentinel-grep&all_history=1")
         assert response.status_code == 200
         results = response.get_json()["results"]
         workspace_ids = {r["workspaceId"] for r in results}
         assert HAPPY_WORKSPACE_ID in workspace_ids or "global" in workspace_ids
+
+
+class TestSearchWindow:
+    def test_default_window_excludes_old_seeded_composer(self, client):
+        response = client.get("/api/search?q=sentinel-grep")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body.get("allHistory") is False
+        assert body.get("searchWindowDays") == 30
+        assert body.get("results") == []
+
+    def test_all_history_includes_old_seeded_composer(self, client):
+        response = client.get("/api/search?q=sentinel-grep&all_history=1")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body.get("allHistory") is True
+        assert body.get("searchWindowDays") is None
+        assert len(body.get("results", [])) >= 1
+
+    def test_all_history_true_string_accepted(self, client):
+        response = client.get("/api/search?q=sentinel-grep&all_history=true")
+        assert response.status_code == 200
+        assert response.get_json().get("allHistory") is True

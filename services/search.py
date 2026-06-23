@@ -22,23 +22,34 @@ import logging
 import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "DEFAULT_SEARCH_WINDOW_DAYS",
     "rank_results",
+    "resolve_search_since_ms",
     "search_cli_sessions",
     "search_global_storage",
     "search_legacy_workspaces",
 ]
 from models import Composer, ParseWarningCollector, SchemaError, SearchResult
+from services.workspace_composer_scan import assign_composer_workspace
+from services.workspace_context import (
+    WorkspaceContext,
+    enrich_workspace_context_from_global_db,
+    resolve_workspace_context_cached,
+)
 from services.workspace_db import (
+    COMPOSER_ROWS_WITH_HEADERS_SQL,
     build_composer_id_to_workspace_id_cached,
     collect_workspace_entries,
-    load_bubble_map,
     open_global_db,
+    safe_fetchall,
 )
+from services.workspace_resolver import infer_invalid_workspace_aliases
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
 from utils.path_helpers import (
@@ -46,12 +57,49 @@ from utils.path_helpers import (
     to_epoch_ms,
     warn_workspace_json_read,
 )
-from utils.text_extract import extract_text_from_bubble
 
 _logger = logging.getLogger(__name__)
 
 # Missing/unparseable timestamps sort last in rank_results() (treated as 0.0 s).
 _UNKNOWN_SEARCH_TIMESTAMP: int = 0
+
+DEFAULT_SEARCH_WINDOW_DAYS = 30
+
+# When a date window is active, chats with no parseable timestamp stay searchable.
+_INCLUDE_UNKNOWN_TIMESTAMPS_IN_WINDOW = True
+
+
+def resolve_search_since_ms(
+    *,
+    all_history: bool = False,
+    since_days: int | None = None,
+    now: datetime | None = None,
+) -> int | None:
+    """Return epoch-ms cutoff for search, or ``None`` to search all history."""
+    if all_history:
+        return None
+    days = since_days if since_days is not None else DEFAULT_SEARCH_WINDOW_DAYS
+    if days <= 0:
+        return None
+    ref = now or datetime.now(timezone.utc)
+    cutoff = ref - timedelta(days=days)
+    return int(cutoff.timestamp() * 1000)
+
+
+def _timestamp_in_search_window(timestamp_ms: int, since_ms: int | None) -> bool:
+    if since_ms is None:
+        return True
+    if timestamp_ms <= 0:
+        return _INCLUDE_UNKNOWN_TIMESTAMPS_IN_WINDOW
+    return timestamp_ms >= since_ms
+
+
+def _composer_dict_timestamp_ms(cd: dict[str, Any]) -> int:
+    return (
+        to_epoch_ms(cd.get("lastUpdatedAt"))
+        or to_epoch_ms(cd.get("createdAt"))
+        or 0
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +134,110 @@ def _build_exclusion_searchable(
         chat_title=chat_title,
         model_names=model_names,
         chat_content_snippet="\n\n".join(combined) if combined else None,
+    )
+
+
+def _sql_like_substring(query_lower: str) -> str:
+    """Escape *query_lower* for use in a case-insensitive SQL ``LIKE``."""
+    escaped = (
+        query_lower
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
+def _quick_bubble_text(raw_value: object) -> str:
+    """Extract searchable text from a bubble KV value without full model validation."""
+    try:
+        if isinstance(raw_value, (bytes, bytearray)):
+            raw_value = raw_value.decode("utf-8", errors="replace")
+        obj = json.loads(raw_value)
+        if isinstance(obj, dict):
+            for key in ("text", "rawText", "content"):
+                val = obj.get(key)
+                if isinstance(val, str) and val:
+                    return val
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return ""
+
+
+def _index_bubble_texts_matching_query(
+    conn: sqlite3.Connection,
+    query_lower: str,
+    *,
+    composer_ids: set[str] | None = None,
+) -> dict[str, list[str]]:
+    """Index composer ID -> bubble texts containing *query_lower*.
+
+    Always uses one SQL pass over ``bubbleId:%`` rows (LIKE prefilter), then
+    optionally filters to *composer_ids* in Python. Per-composer SQL queries
+    are slower than a single scan even when the date window is narrow.
+    """
+    if not query_lower:
+        return {}
+    if composer_ids is not None and not composer_ids:
+        return {}
+
+    pattern = _sql_like_substring(query_lower)
+    by_composer: dict[str, list[str]] = {}
+
+    def _ingest_row(row_key: str, row_value: object) -> None:
+        parts = row_key.split(":")
+        if len(parts) < 2 or not parts[1]:
+            return
+        composer_id = parts[1]
+        if composer_ids is not None and composer_id not in composer_ids:
+            return
+        text = _quick_bubble_text(row_value)
+        if text and query_lower in text.lower():
+            by_composer.setdefault(composer_id, []).append(text)
+
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM cursorDiskKV"
+            " WHERE key LIKE 'bubbleId:%'"
+            " AND value IS NOT NULL"
+            " AND LOWER(value) LIKE ? ESCAPE '\\'",
+            (pattern,),
+        ).fetchall()
+        for row in rows:
+            _ingest_row(row["key"], row["value"])
+    except sqlite3.Error:
+        return by_composer
+    return by_composer
+
+
+def _composer_row_raw_text(row: sqlite3.Row) -> str:
+    raw = row["value"]
+    if raw is None:
+        return ""
+    if isinstance(raw, (bytes, bytearray)):
+        return raw.decode("utf-8", errors="replace")
+    return str(raw)
+
+
+def _light_composer_exclusion_text(
+    *,
+    project_name: str,
+    title: str,
+    model_names: list[str] | None,
+    model_config: dict[str, Any],
+    cd: dict[str, Any],
+) -> str:
+    """Exclusion text from title/metadata only (no bubble scan)."""
+    return _build_exclusion_searchable(
+        project_name=project_name,
+        chat_title=title,
+        model_names=model_names,
+        metadata_parts=[
+            _json_dump_safe(model_config),
+            _json_dump_safe(cd.get("conversationSummary")),
+            _json_dump_safe(cd.get("usage")),
+            _json_dump_safe(cd.get("requestMetadata")),
+        ],
     )
 
 
@@ -154,6 +306,78 @@ def _build_ws_id_to_name(
     return mapping
 
 
+@dataclass(frozen=True)
+class _SearchWorkspaceAssigner:
+    """Workspace assignment aligned with tab summaries (not roster map alone)."""
+
+    ws_id_to_name: dict[str, str]
+    ctx: WorkspaceContext
+    invalid_workspace_aliases: dict[str, str]
+
+    def workspace_for_composer(self, composer: Composer) -> str:
+        return assign_composer_workspace(
+            composer,
+            project_layouts_map=self.ctx.project_layouts_map,
+            project_name_map=self.ctx.project_name_to_workspace_id,
+            workspace_path_map=self.ctx.workspace_path_to_id,
+            workspace_entries=self.ctx.workspace_entries,
+            bubble_map={},
+            composer_id_to_ws=self.ctx.composer_id_to_workspace_id,
+            invalid_workspace_ids=self.ctx.invalid_workspace_ids,
+            invalid_workspace_aliases=self.invalid_workspace_aliases,
+        )
+
+
+def _load_search_workspace_assigner(
+    workspace_path: str,
+    rules: list[Any],
+    workspace_entries: list[dict[str, Any]],
+) -> _SearchWorkspaceAssigner | None:
+    ctx = resolve_workspace_context_cached(
+        workspace_path, rules, workspace_entries=workspace_entries,
+    )
+    with open_global_db(workspace_path) as (global_db, _):
+        if global_db is None:
+            return None
+        ctx = enrich_workspace_context_from_global_db(
+            ctx, global_db, populate_project_layouts=True,
+        )
+        invalid_workspace_aliases: dict[str, str] = {}
+        if ctx.invalid_workspace_ids:
+            composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
+            invalid_workspace_aliases = infer_invalid_workspace_aliases(
+                composer_rows=composer_rows,
+                project_layouts_map=ctx.project_layouts_map,
+                project_name_map=ctx.project_name_to_workspace_id,
+                workspace_path_map=ctx.workspace_path_to_id,
+                workspace_entries=ctx.workspace_entries,
+                bubble_map={},
+                composer_id_to_ws=ctx.composer_id_to_workspace_id,
+                invalid_workspace_ids=ctx.invalid_workspace_ids,
+            )
+    return _SearchWorkspaceAssigner(
+        ws_id_to_name=_build_ws_id_to_name(workspace_entries),
+        ctx=ctx,
+        invalid_workspace_aliases=invalid_workspace_aliases,
+    )
+
+
+def _workspace_id_for_search_hit(
+    *,
+    composer_id: str,
+    cd: dict[str, Any],
+    assigner: _SearchWorkspaceAssigner | None,
+    composer_id_to_ws: dict[str, str],
+) -> str:
+    if assigner is None:
+        return composer_id_to_ws.get(composer_id, "global")
+    try:
+        composer = Composer.from_dict(cd, composer_id=composer_id)
+    except SchemaError:
+        return composer_id_to_ws.get(composer_id, "global")
+    return assigner.workspace_for_composer(composer)
+
+
 # ---------------------------------------------------------------------------
 # Public: per-source search functions
 # ---------------------------------------------------------------------------
@@ -165,6 +389,8 @@ def search_global_storage(
     query_lower: str,
     rules: list[Any],
     parse_warnings: ParseWarningCollector,
+    *,
+    since_ms: int | None = None,
 ) -> list[SearchResult]:
     """Search composer conversations stored in the global ``cursorDiskKV`` table.
 
@@ -176,104 +402,178 @@ def search_global_storage(
         query_lower: ``query.lower()`` (pre-computed by caller).
         rules: Parsed exclusion rules from app config.
         parse_warnings: Collector that accumulates parse/schema failures.
+        since_ms: When set, only composers updated/created on or after this
+            epoch-ms cutoff are searched. ``None`` searches all history.
 
     Returns:
         List of search result dicts with keys ``workspaceId``, ``workspaceFolder``,
         ``chatId``, ``chatTitle``, ``timestamp``, ``matchingText``, ``type``.
     """
+    from services.search_index import index_is_usable
+
+    if index_is_usable(workspace_path, rules):
+        indexed = _search_global_storage_via_index(
+            workspace_path,
+            query,
+            query_lower,
+            rules,
+            parse_warnings,
+            since_ms=since_ms,
+        )
+        if indexed is not None:
+            return indexed
+
+    return _search_global_storage_live_scan(
+        workspace_path,
+        query,
+        query_lower,
+        rules,
+        parse_warnings,
+        since_ms=since_ms,
+    )
+
+
+def _search_global_storage_via_index(
+    workspace_path: str,
+    query: str,
+    query_lower: str,
+    rules: list[Any],
+    parse_warnings: ParseWarningCollector,
+    *,
+    since_ms: int | None = None,
+) -> list[SearchResult] | None:
+    """Search using local FTS index. Returns ``None`` to fall back to live scan."""
+    from services.search_index import (
+        query_composer_bubble_hits,
+        query_composer_rows_in_window,
+        query_composer_title_hits,
+    )
+
     results: list[SearchResult] = []
     try:
         workspace_entries = collect_workspace_entries(workspace_path)
-        ws_id_to_name = _build_ws_id_to_name(workspace_entries)
-        composer_id_to_ws = build_composer_id_to_workspace_id_cached(
-            workspace_path, workspace_entries, rules
+        assigner = _load_search_workspace_assigner(
+            workspace_path, rules, workspace_entries,
+        )
+        if assigner is not None:
+            ws_id_to_name = assigner.ws_id_to_name
+            composer_id_to_ws = assigner.ctx.composer_id_to_workspace_id
+        else:
+            ws_id_to_name = _build_ws_id_to_name(workspace_entries)
+            composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+                workspace_path, workspace_entries, rules,
+            )
+
+        composers_in_window = query_composer_rows_in_window(since_ms)
+        if since_ms is not None and not composers_in_window:
+            return results
+
+        window_ids = set(composers_in_window.keys()) if since_ms is not None else None
+        bubble_texts_by_composer = query_composer_bubble_hits(
+            query_lower,
+            since_ms=since_ms,
+            composer_ids_filter=window_ids,
         )
 
-        with open_global_db(workspace_path) as (conn, _db_path):
-            if conn is None:
-                return results
-            bubble_map = load_bubble_map(conn, parse_warnings=parse_warnings)
-            composer_rows = conn.execute(
-                "SELECT key, value FROM cursorDiskKV"
-                " WHERE key LIKE 'composerData:%' AND LENGTH(value) > 10"
-            ).fetchall()
+        candidate_ids: set[str] = set(bubble_texts_by_composer.keys())
+        for row in query_composer_title_hits(query_lower, since_ms=since_ms):
+            candidate_ids.add(row["composer_id"])
 
-        for row in composer_rows:
-            composer_id = row["key"].split(":")[1]
-            try:
-                composer = Composer.from_dict(
-                    json.loads(row["value"]), composer_id=composer_id
-                )
-            except SchemaError as exc:
-                _logger.warning(
-                    "Schema drift in composer %s: %s (%s)",
-                    composer_id,
-                    exc,
-                    type(exc).__name__,
-                )
-                parse_warnings.record_composer_skipped()
+        search_pool = composers_in_window if since_ms is not None else query_composer_rows_in_window(None)
+        for composer_id, row in search_pool.items():
+            raw_lower = (row["raw_json"] or "").lower()
+            if query_lower in raw_lower:
+                candidate_ids.add(composer_id)
+
+        for composer_id in candidate_ids:
+            row = composers_in_window.get(composer_id) if since_ms is not None else search_pool.get(composer_id)
+            if row is None:
+                row = query_composer_rows_in_window(None).get(composer_id)
+            if row is None:
                 continue
+
+            raw_text = row["raw_json"] or ""
+            try:
+                cd = json.loads(raw_text)
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 _logger.warning(
-                    "Failed to decode Composer from composerData:%s: %s",
+                    "Failed to decode Composer from index composerData:%s: %s",
                     composer_id,
                     exc,
                 )
                 parse_warnings.record_composer_skipped()
                 continue
+            if not isinstance(cd, dict):
+                parse_warnings.record_composer_skipped()
+                continue
 
             try:
-                headers = composer.full_conversation_headers_only
+                headers = cd.get("fullConversationHeadersOnly") or []
                 if not headers:
                     continue
 
-                title = composer.name or ""
-                ws_id = composer_id_to_ws.get(composer_id, "global")
+                title = row["title"] or cd.get("name") or ""
+                if not isinstance(title, str):
+                    title = str(title) if title else ""
+
+                ws_id = _workspace_id_for_search_hit(
+                    composer_id=composer_id,
+                    cd=cd,
+                    assigner=assigner,
+                    composer_id_to_ws=composer_id_to_ws,
+                )
                 ws_name = ws_id_to_name.get(ws_id)
                 project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
 
-                cd = composer.raw
-                model_config = composer.model_config
+                model_config = cd.get("modelConfig") if isinstance(cd.get("modelConfig"), dict) else {}
                 model_name = model_config.get("modelName")
                 model_names = (
-                    [model_name] if model_name and model_name != "default" else None
+                    [str(model_name)] if model_name and model_name != "default" else None
                 )
 
+                in_raw = query_lower in raw_text.lower()
+                title_match = bool(title and query_lower in title.lower())
                 bubble_texts: list[str] = []
-                bubble_meta: list[str] = []
-                for header in headers:
-                    bid = header.get("bubbleId")
-                    if not bid:
-                        continue
-                    bubble = bubble_map.get(bid)
-                    if bubble is None:
-                        continue
-                    text = extract_text_from_bubble(bubble)
-                    if text:
-                        bubble_texts.append(text)
-                    bubble_meta.append(_json_dump_safe(bubble.raw))
 
-                exclusion_text = _build_exclusion_searchable(
-                    project_name=project_name,
-                    chat_title=title,
-                    model_names=model_names,
-                    content_parts=bubble_texts,
-                    metadata_parts=[
-                        _json_dump_safe(model_config),
-                        _json_dump_safe(cd.get("conversationSummary")),
-                        _json_dump_safe(cd.get("usage")),
-                        _json_dump_safe(cd.get("requestMetadata")),
-                        "\n".join(bubble_meta),
-                    ],
-                )
-                if is_excluded_by_rules(rules, exclusion_text):
-                    continue
+                if title_match:
+                    exclusion_text = _light_composer_exclusion_text(
+                        project_name=project_name,
+                        title=title,
+                        model_names=model_names,
+                        model_config=model_config,
+                        cd=cd,
+                    )
+                    if is_excluded_by_rules(rules, exclusion_text):
+                        continue
+                    has_match, matching_text = True, title
+                else:
+                    has_match, matching_text = _find_match(title, [], query_lower, query)
+                    if not has_match and in_raw:
+                        has_match, matching_text = _find_match(
+                            title, [raw_text], query_lower, query
+                        )
+                    if not has_match:
+                        bubble_texts = bubble_texts_by_composer.get(composer_id, [])
+                        has_match, matching_text = _find_match(
+                            title, bubble_texts, query_lower, query
+                        )
+                    if not has_match:
+                        continue
 
-                has_match, matching_text = _find_match(
-                    title, bubble_texts, query_lower, query
-                )
-                if not has_match:
-                    continue
+                    exclusion_text = _build_exclusion_searchable(
+                        project_name=project_name,
+                        chat_title=title,
+                        model_names=model_names,
+                        content_parts=bubble_texts or None,
+                        metadata_parts=[
+                            _json_dump_safe(model_config),
+                            _json_dump_safe(cd.get("conversationSummary")),
+                            _json_dump_safe(cd.get("usage")),
+                            _json_dump_safe(cd.get("requestMetadata")),
+                        ],
+                    )
+                    if is_excluded_by_rules(rules, exclusion_text):
+                        continue
 
                 if not title:
                     for text in bubble_texts:
@@ -291,8 +591,8 @@ def search_global_storage(
                     "chatId": composer_id,
                     "chatTitle": title,
                     "timestamp": (
-                        to_epoch_ms(composer.last_updated_at)
-                        or to_epoch_ms(composer.created_at)
+                        to_epoch_ms(cd.get("lastUpdatedAt"))
+                        or to_epoch_ms(cd.get("createdAt"))
                         or _UNKNOWN_SEARCH_TIMESTAMP
                     ),
                     "matchingText": matching_text,
@@ -300,11 +600,196 @@ def search_global_storage(
                 })
             except Exception as exc:
                 _logger.warning(
-                    "Failed to process Composer from composerData:%s during search: %s",
+                    "Failed to process indexed Composer %s during search: %s",
                     composer_id,
                     exc,
                 )
                 parse_warnings.record_composer_processing_failure()
+
+    except Exception as exc:
+        _logger.warning("Indexed search failed, falling back to live scan: %s", exc)
+        return None
+
+    return results
+
+
+def _search_global_storage_live_scan(
+    workspace_path: str,
+    query: str,
+    query_lower: str,
+    rules: list[Any],
+    parse_warnings: ParseWarningCollector,
+    *,
+    since_ms: int | None = None,
+) -> list[SearchResult]:
+    """Search composer conversations by scanning Cursor's global ``cursorDiskKV``."""
+    results: list[SearchResult] = []
+    try:
+        workspace_entries = collect_workspace_entries(workspace_path)
+        assigner = _load_search_workspace_assigner(
+            workspace_path, rules, workspace_entries,
+        )
+        if assigner is not None:
+            ws_id_to_name = assigner.ws_id_to_name
+            composer_id_to_ws = assigner.ctx.composer_id_to_workspace_id
+        else:
+            ws_id_to_name = _build_ws_id_to_name(workspace_entries)
+            composer_id_to_ws = build_composer_id_to_workspace_id_cached(
+                workspace_path, workspace_entries, rules,
+            )
+
+        with open_global_db(workspace_path) as (conn, _db_path):
+            if conn is None:
+                return results
+
+            composer_rows = conn.execute(COMPOSER_ROWS_WITH_HEADERS_SQL).fetchall()
+
+            window_composer_ids: set[str] | None = None
+            if since_ms is not None:
+                window_composer_ids = set()
+                in_window_rows: list[sqlite3.Row] = []
+                for row in composer_rows:
+                    composer_id = row["key"].split(":")[1]
+                    raw_text = _composer_row_raw_text(row)
+                    try:
+                        cd_probe = json.loads(raw_text)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    if not isinstance(cd_probe, dict):
+                        continue
+                    if not _timestamp_in_search_window(
+                        _composer_dict_timestamp_ms(cd_probe), since_ms,
+                    ):
+                        continue
+                    window_composer_ids.add(composer_id)
+                    in_window_rows.append(row)
+                composer_rows = in_window_rows
+
+            bubble_texts_by_composer = _index_bubble_texts_matching_query(
+                conn, query_lower, composer_ids=window_composer_ids,
+            )
+
+            for row in composer_rows:
+                composer_id = row["key"].split(":")[1]
+                raw_text = _composer_row_raw_text(row)
+                raw_lower = raw_text.lower()
+                in_raw = query_lower in raw_lower
+                if not in_raw and composer_id not in bubble_texts_by_composer:
+                    continue
+
+                try:
+                    cd = json.loads(raw_text)
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    _logger.warning(
+                        "Failed to decode Composer from composerData:%s: %s",
+                        composer_id,
+                        exc,
+                    )
+                    parse_warnings.record_composer_skipped()
+                    continue
+                if not isinstance(cd, dict):
+                    parse_warnings.record_composer_skipped()
+                    continue
+
+                try:
+                    headers = cd.get("fullConversationHeadersOnly") or []
+                    if not headers:
+                        continue
+
+                    title = cd.get("name") or ""
+                    if not isinstance(title, str):
+                        title = str(title) if title else ""
+
+                    ws_id = _workspace_id_for_search_hit(
+                        composer_id=composer_id,
+                        cd=cd,
+                        assigner=assigner,
+                        composer_id_to_ws=composer_id_to_ws,
+                    )
+                    ws_name = ws_id_to_name.get(ws_id)
+                    project_name = ws_name or ("Other chats" if ws_id == "global" else ws_id)
+
+                    model_config = cd.get("modelConfig") if isinstance(cd.get("modelConfig"), dict) else {}
+                    model_name = model_config.get("modelName")
+                    model_names = (
+                        [str(model_name)] if model_name and model_name != "default" else None
+                    )
+
+                    title_match = bool(title and query_lower in title.lower())
+                    bubble_texts: list[str] = []
+
+                    if title_match:
+                        exclusion_text = _light_composer_exclusion_text(
+                            project_name=project_name,
+                            title=title,
+                            model_names=model_names,
+                            model_config=model_config,
+                            cd=cd,
+                        )
+                        if is_excluded_by_rules(rules, exclusion_text):
+                            continue
+                        has_match, matching_text = True, title
+                    else:
+                        has_match, matching_text = _find_match(
+                            title, [], query_lower, query
+                        )
+                        if not has_match and in_raw:
+                            has_match, matching_text = _find_match(
+                                title, [raw_text], query_lower, query
+                            )
+                        if not has_match:
+                            bubble_texts = bubble_texts_by_composer.get(composer_id, [])
+                            has_match, matching_text = _find_match(
+                                title, bubble_texts, query_lower, query
+                            )
+                        if not has_match:
+                            continue
+
+                        exclusion_text = _build_exclusion_searchable(
+                            project_name=project_name,
+                            chat_title=title,
+                            model_names=model_names,
+                            content_parts=bubble_texts or None,
+                            metadata_parts=[
+                                _json_dump_safe(model_config),
+                                _json_dump_safe(cd.get("conversationSummary")),
+                                _json_dump_safe(cd.get("usage")),
+                                _json_dump_safe(cd.get("requestMetadata")),
+                            ],
+                        )
+                        if is_excluded_by_rules(rules, exclusion_text):
+                            continue
+
+                    if not title:
+                        for text in bubble_texts:
+                            if text:
+                                first_lines = [ln for ln in text.split("\n") if ln.strip()]
+                                if first_lines:
+                                    title = first_lines[0][:100]
+                                break
+                        if not title:
+                            title = f"Conversation {composer_id[:8]}"
+
+                    results.append({
+                        "workspaceId": ws_id,
+                        "workspaceFolder": ws_name,
+                        "chatId": composer_id,
+                        "chatTitle": title,
+                        "timestamp": (
+                            to_epoch_ms(cd.get("lastUpdatedAt"))
+                            or to_epoch_ms(cd.get("createdAt"))
+                            or _UNKNOWN_SEARCH_TIMESTAMP
+                        ),
+                        "matchingText": matching_text,
+                        "type": "composer",
+                    })
+                except Exception as exc:
+                    _logger.warning(
+                        "Failed to process Composer from composerData:%s during search: %s",
+                        composer_id,
+                        exc,
+                    )
+                    parse_warnings.record_composer_processing_failure()
 
     except Exception as exc:
         _logger.exception("Error searching global storage")
@@ -319,6 +804,8 @@ def search_legacy_workspaces(
     query_lower: str,
     search_type: str,
     rules: list[Any],
+    *,
+    since_ms: int | None = None,
 ) -> list[SearchResult]:
     """Search legacy per-workspace ItemTable chat data.
 
@@ -371,7 +858,13 @@ def search_legacy_workspaces(
                 if not (chat_row and chat_row[0]):
                     continue
 
-                data = json.loads(chat_row[0])
+                raw_chat = chat_row[0]
+                if isinstance(raw_chat, (bytes, bytearray)):
+                    raw_chat = raw_chat.decode("utf-8", errors="replace")
+                if query_lower not in str(raw_chat).lower():
+                    continue
+
+                data = json.loads(raw_chat)
                 for tab in (data.get("tabs") or []):
                     ct = tab.get("chatTitle") or ""
                     tab_id = str(tab.get("tabId") or "")
@@ -409,12 +902,16 @@ def search_legacy_workspaces(
                     if not has_match:
                         continue
 
+                    tab_ts = to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP
+                    if not _timestamp_in_search_window(tab_ts, since_ms):
+                        continue
+
                     results.append({
                         "workspaceId": name,
                         "workspaceFolder": workspace_name,
                         "chatId": tab_id,
                         "chatTitle": ct or f"Chat {tab_id[:8]}",
-                        "timestamp": to_epoch_ms(tab.get("lastSendTime")) or _UNKNOWN_SEARCH_TIMESTAMP,
+                        "timestamp": tab_ts,
                         "matchingText": matching_text,
                         "type": "chat",
                     })
@@ -441,6 +938,8 @@ def search_cli_sessions(
     query_lower: str,
     rules: list[Any],
     parse_warnings: ParseWarningCollector | None = None,
+    *,
+    since_ms: int | None = None,
 ) -> list[SearchResult]:
     """Search Cursor CLI agent sessions stored as JSONL + blob files.
 
@@ -466,7 +965,29 @@ def search_cli_sessions(
                 meta = session.get("meta", {})
                 session_id = session["session_id"]
                 created_ms: int = to_epoch_ms(meta.get("createdAt"))
+                if not _timestamp_in_search_window(created_ms, since_ms):
+                    continue
                 session_name: str = meta.get("name") or f"Session {session_id[:8]}"
+                title_match = bool(session_name and query_lower in session_name.lower())
+
+                if title_match:
+                    exclusion_text = _build_exclusion_searchable(
+                        project_name=ws_name,
+                        chat_title=session_name,
+                    )
+                    if is_excluded_by_rules(rules, exclusion_text):
+                        continue
+                    results.append({
+                        "workspaceId": f"cli:{cp['project_id']}",
+                        "workspaceFolder": ws_name,
+                        "chatId": session_id,
+                        "chatTitle": session_name,
+                        "timestamp": created_ms,
+                        "matchingText": session_name,
+                        "type": "cli_agent",
+                        "source": "cli",
+                    })
+                    continue
 
                 try:
                     messages = traverse_blobs(session["db_path"])

@@ -20,7 +20,7 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import basename_from_pathish, read_json_file
-from services.workspace_db import open_global_db
+from services.workspace_db import load_project_layouts_map, open_global_db
 from models import SchemaError, Workspace
 from models.conversation import Bubble, Composer
 from models.raw_access import (
@@ -31,7 +31,6 @@ from models.raw_access import (
     composer_headers,
     composer_newly_created_files,
     conversation_header_bubble_id,
-    message_request_context_project_layouts,
 )
 
 
@@ -63,6 +62,96 @@ def lookup_workspace_display_name(workspace_path: str, workspace_id: str) -> str
     return workspace_id
 
 
+def build_composer_ids_by_workspace(
+    composer_id_to_workspace_id: dict[str, str],
+) -> dict[str, list[str]]:
+    """Invert ``composer_id → workspace_id`` for batch layout-based name inference."""
+    out: dict[str, list[str]] = {}
+    for composer_id, ws_id in composer_id_to_workspace_id.items():
+        out.setdefault(ws_id, []).append(composer_id)
+    return out
+
+
+def infer_workspace_name_from_layouts(
+    composer_ids: list[str],
+    project_layouts_map: dict[str, list[str]],
+) -> str | None:
+    """Infer a display name from preloaded ``messageRequestContext`` layouts.
+
+    Avoids per-workspace SQLite opens when the global layout map is already
+    loaded for listing or tab-summary paths.
+    """
+    counts: dict[str, int] = {}
+    for composer_id in composer_ids:
+        for root_path in project_layouts_map.get(composer_id, []):
+            hint = basename_from_pathish(root_path)
+            if hint:
+                counts[hint] = counts.get(hint, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+def matching_workspace_ids_for_folder(
+    workspace_id: str,
+    workspace_path: str,
+    workspace_entries: list[dict[str, Any]],
+) -> set[str]:
+    """Return workspace folder IDs that share the same on-disk project folder."""
+    matching: set[str] = {workspace_id}
+    if workspace_id == "global":
+        return matching
+    target_folder = ""
+    wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
+    try:
+        wd = read_json_file(wj_path)
+        folders = get_workspace_folder_paths(wd)
+        first_folder = folders[0] if folders else None
+        if first_folder:
+            target_folder = normalize_file_path(first_folder)
+    except Exception as e:
+        warn_workspace_json_read(_logger, workspace_id, e)
+    if not target_folder:
+        return matching
+    for entry in workspace_entries:
+        try:
+            wd2 = read_json_file(entry["workspaceJsonPath"])
+            folders2 = get_workspace_folder_paths(wd2)
+            f2 = folders2[0] if folders2 else None
+            if f2 and normalize_file_path(f2) == target_folder:
+                matching.add(entry["name"])
+        except Exception as e:
+            warn_workspace_json_read(_logger, entry["name"], e)
+    return matching
+
+
+def _composer_ids_from_workspace_db(workspace_path: str, workspace_id: str) -> list[str]:
+    """Read composer IDs registered in a workspace folder's ``state.vscdb``."""
+    local_db_path = os.path.join(workspace_path, workspace_id, "state.vscdb")
+    if not os.path.isfile(local_db_path):
+        return []
+    composer_ids: list[str] = []
+    _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
+    try:
+        with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
+            row = lconn.execute(
+                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+            ).fetchone()
+    except sqlite3.Error:
+        return []
+    if not (row and row[0]):
+        return []
+    try:
+        data = json.loads(row[0])
+    except (json.JSONDecodeError, ValueError):
+        return []
+    for c in (data.get("allComposers") or []):
+        cid = c.get("composerId") if isinstance(c, dict) else None
+        if cid:
+            composer_ids.append(cid)
+    return composer_ids
+
+
 def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) -> str | None:
     """Infer workspace name from ``projectLayouts`` when ``workspace.json`` is opaque.
 
@@ -77,86 +166,15 @@ def infer_workspace_name_from_context(workspace_path: str, workspace_id: str) ->
     if workspace_id == "global":
         return "Other chats"
 
-    # Composer IDs from per-workspace state db
-    local_db_path = os.path.join(workspace_path, workspace_id, "state.vscdb")
-    if not os.path.isfile(local_db_path):
-        return None
-    composer_ids: list[str] = []
-    # closing() guarantees .close() on scope exit (issue #17).
-    # Path.as_uri() percent-encodes reserved chars (#, ?, spaces, etc.);
-    # naive f"file:{path}" breaks sqlite URI parsing.
-    _db_uri = Path(local_db_path).resolve().as_uri() + "?mode=ro"
-    row: tuple[Any, ...] | None = None
-    try:
-        with closing(sqlite3.connect(_db_uri, uri=True)) as lconn:
-            row = lconn.execute(
-                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-            ).fetchone()
-    except sqlite3.Error:
-        return None
-    if row and row[0]:
-        try:
-            data = json.loads(row[0])
-        except (json.JSONDecodeError, ValueError):
-            return None
-        for c in (data.get("allComposers") or []):
-            cid = c.get("composerId") if isinstance(c, dict) else None
-            if cid:
-                composer_ids.append(cid)
+    composer_ids = _composer_ids_from_workspace_db(workspace_path, workspace_id)
     if not composer_ids:
         return None
 
-    # Gather folder-name hints from global messageRequestContext.projectLayouts
-    counts: dict[str, int] = {}
     with open_global_db(workspace_path) as (gconn, _):
         if not gconn:
             return None
-        for cid in composer_ids:
-            try:
-                rows = gconn.execute(
-                    "SELECT value FROM cursorDiskKV WHERE key LIKE ?",
-                    (f"messageRequestContext:{cid}:%",),
-                ).fetchall()
-            except sqlite3.Error:
-                continue
-            for row in rows:
-                if not row or row[0] is None:
-                    continue
-                try:
-                    ctx = json.loads(row[0])
-                except (json.JSONDecodeError, ValueError) as e:
-                    _logger.debug(
-                        "Skipping malformed messageRequestContext for %s: %s",
-                        cid,
-                        e,
-                    )
-                    continue
-                layouts = message_request_context_project_layouts(ctx, composer_id=cid)
-                if not layouts:
-                    continue
-                for layout in layouts:
-                    obj = None
-                    if isinstance(layout, str):
-                        try:
-                            obj = json.loads(layout)
-                        except (json.JSONDecodeError, ValueError) as e:
-                            _logger.debug(
-                                "Skipping malformed projectLayout for %s: %s",
-                                cid,
-                                e,
-                            )
-                            obj = None
-                    elif isinstance(layout, dict):
-                        obj = layout
-                    if not isinstance(obj, dict):
-                        continue
-                    hint = basename_from_pathish(obj.get("rootPath"))
-                    if hint:
-                        counts[hint] = counts.get(hint, 0) + 1
-
-    if not counts:
-        return None
-    return max(counts.items(), key=lambda kv: kv[1])[0]
+        layouts_map = load_project_layouts_map(gconn)
+    return infer_workspace_name_from_layouts(composer_ids, layouts_map)
 
 
 def get_project_from_file_path(

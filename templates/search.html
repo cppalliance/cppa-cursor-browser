@@ -16,6 +16,10 @@
       <input type="text" id="search-input" class="input" placeholder="Search across all logs..." autofocus>
       <button class="btn btn-primary" onclick="doSearch()">Search</button>
     </div>
+    <label class="text-sm" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;cursor:pointer">
+      <input type="checkbox" id="all-history" onchange="doSearch()">
+      Include chats older than 30 days <span class="text-muted">(searches all history — slower)</span>
+    </label>
   </div>
 
   <div id="loading" class="loading" style="display:none">
@@ -35,11 +39,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
   const q = params.get('q');
   const t = params.get('type') || 'all';
+  const allHistory = params.get('all_history') === '1';
+  document.getElementById('all-history').checked = allHistory;
   if (q) {
     document.getElementById('search-input').value = q;
     currentFilter = t;
     updateFilterButtons();
-    performSearch(q, t);
+    performSearch(q, t, allHistory);
   }
 
   document.getElementById('search-input').addEventListener('keydown', e => {
@@ -63,14 +69,20 @@ function updateFilterButtons() {
 function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
+  const allHistory = document.getElementById('all-history').checked;
   const url = new URL(window.location);
   url.searchParams.set('q', q);
   url.searchParams.set('type', currentFilter);
+  if (allHistory) {
+    url.searchParams.set('all_history', '1');
+  } else {
+    url.searchParams.delete('all_history');
+  }
   window.history.pushState({}, '', url);
-  performSearch(q, currentFilter);
+  performSearch(q, currentFilter, allHistory);
 }
 
-async function performSearch(query, type) {
+async function performSearch(query, type, allHistory) {
   const loading = document.getElementById('loading');
   const countEl = document.getElementById('result-count');
   const container = document.getElementById('results-container');
@@ -79,7 +91,9 @@ async function performSearch(query, type) {
   container.innerHTML = '';
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${type}`);
+    const params = new URLSearchParams({ q: query, type: type });
+    if (allHistory) params.set('all_history', '1');
+    const res = await fetch(`/api/search?${params.toString()}`);
     if (!res.ok) {
       showIncompleteResultsBanner('parse-warnings-host', []);
       loading.style.display = 'none';
@@ -92,7 +106,10 @@ async function performSearch(query, type) {
 
     loading.style.display = 'none';
     countEl.style.display = 'block';
-    countEl.textContent = `Found ${results.length} results for "${query}"`;
+    const windowNote = data.allHistory
+      ? ' (all history)'
+      : ` (last ${data.searchWindowDays || 30} days)`;
+    countEl.textContent = `Found ${results.length} results for "${query}"${windowNote}`;
 
     let html = '';
     for (const r of results) {
