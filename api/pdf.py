@@ -47,6 +47,15 @@ def _safe_text(text: str) -> str:
 
 @bp.route("/api/generate-pdf", methods=["POST"])
 def generate_pdf() -> tuple[Response, int] | Response:
+    """Render markdown chat content as a PDF download (POST /api/generate-pdf).
+
+    Args:
+        markdown: Markdown source text (optional; defaults to ``""``).
+        title: Document title (optional; defaults to ``"Chat"``).
+
+    Returns:
+        ``application/pdf`` attachment on success. 500 JSON error on failure.
+    """
     try:
         body = request.get_json(silent=True) or {}
         markdown_text = body.get("markdown", "")
@@ -55,10 +64,14 @@ def generate_pdf() -> tuple[Response, int] | Response:
         from fpdf import FPDF
 
         class PDFDoc(FPDF):
+            """Minimal fpdf2 document with page numbers in the footer."""
+
             def header(self) -> None:
+                """No running header (title is rendered in body)."""
                 pass
 
             def footer(self) -> None:
+                """Render centered page ``n/total`` at the bottom."""
                 self.set_y(-15)
                 self.set_font("Helvetica", "I", 8)
                 self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")

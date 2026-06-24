@@ -31,6 +31,17 @@ class ExportEntry:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ExportEntry":
+        """Parse one manifest.jsonl row into a validated export entry.
+
+        Args:
+            raw: Decoded JSON object for a single manifest line.
+
+        Returns:
+            Validated :class:`ExportEntry`.
+
+        Raises:
+            SchemaError: When ``log_id``, ``title``, or ``workspace`` are missing.
+        """
         raw = require_dict(raw, model="ExportEntry", field="entry")
         require_non_empty_str_fields(
             raw,

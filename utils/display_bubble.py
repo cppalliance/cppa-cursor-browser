@@ -130,10 +130,16 @@ def build_display_bubble_from_storage(
 
 
 def display_bubble_metadata(bubble: DisplayBubble) -> BubbleMetadata:
+    """Return metadata dict from a display bubble (empty dict when absent)."""
     return bubble.get("metadata") or {}
 
 
 def display_bubble_tool_calls(bubble: DisplayBubble) -> list[dict[str, Any]]:
+    """Return tool-call entries from a display bubble's metadata.
+
+    Returns:
+        List copied from ``metadata.toolCalls``, or ``[]`` when absent.
+    """
     return list(display_bubble_metadata(bubble).get("toolCalls") or [])
 
 

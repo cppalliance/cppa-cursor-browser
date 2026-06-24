@@ -30,6 +30,12 @@ def _read_json_file(path: str) -> Any:
 
 @bp.route("/api/composers")
 def list_composers() -> tuple[Response, int] | Response:
+    """List all composers across workspace databases (GET /api/composers).
+
+    Returns:
+        JSON array of composer dicts sorted by ``lastUpdatedAt`` descending.
+        500 on failure.
+    """
     try:
         workspace_path = resolve_workspace_path()
         composers = []
@@ -120,8 +126,22 @@ def list_composers() -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get composers")
         return json_response({"error": "Failed to get composers"}, 500)
+
+
 @bp.route("/api/composers/<composer_id>")
 def get_composer(composer_id: str) -> tuple[Response, int] | Response:
+    """Fetch one composer by ID (GET /api/composers/<composer_id>).
+
+    Args:
+        composer_id: Composer UUID.
+
+    Returns:
+        Composer JSON from per-workspace storage or global fallback. Per-workspace
+        schema drift is logged and skipped before global fallback is attempted.
+        404 when the composer is absent from both stores (``{"error": "Composer not found"}``)
+        or when the global row fails validation (``{"error": "Composer schema drift"}``).
+        500 on unexpected failure.
+    """
     try:
         workspace_path = resolve_workspace_path()
 

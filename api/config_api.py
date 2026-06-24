@@ -24,6 +24,12 @@ _logger = logging.getLogger(__name__)
 
 @bp.route("/api/detect-environment")
 def detect_environment() -> Response:
+    """Detect runtime OS, WSL, and SSH-remote context (GET /api/detect-environment).
+
+    Returns:
+        JSON with ``os``, ``isWSL``, and ``isRemote``. Falls back to safe defaults
+        on detection errors.
+    """
     try:
         is_wsl = False
         is_remote = bool(
@@ -59,7 +65,22 @@ def detect_environment() -> Response:
 
 @bp.route("/api/validate-path", methods=["POST"])
 def validate_path() -> tuple[Response, int] | Response:
-    """Same path rules as POST /api/set-workspace: realpath, markers (issue #15)."""
+    """Validate a workspace storage path without persisting it (POST /api/validate-path).
+
+    Uses the same rules as :func:`set_workspace` (realpath, Cursor markers; issue #15).
+
+    Args:
+        path: Workspace storage root from JSON body ``{"path": "..."}``.
+
+    Returns:
+        JSON with ``valid``, ``workspaceCount``, and canonical ``path`` on success.
+        ``valid`` is ``false`` when the path fails validation or contains no
+        workspace folders with ``state.vscdb``. Invalid JSON body returns
+        ``{"valid": false, "error": "invalid JSON body", "workspaceCount": 0}``.
+        Path validation errors return ``{"valid": false, "error": "...", "workspaceCount": 0}``.
+        500 with ``{"valid": false, "error": "Failed to validate path"}`` on
+        unexpected failure.
+    """
     try:
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
@@ -96,8 +117,21 @@ def validate_path() -> tuple[Response, int] | Response:
             exc_info=True,
         )
         return json_response({"valid": False, "error": "Failed to validate path"}, 500)
+
+
 @bp.route("/api/set-workspace", methods=["POST"])
 def set_workspace() -> tuple[Response, int] | Response:
+    """Persist a validated workspace storage path (POST /api/set-workspace).
+
+    Args:
+        path: Workspace storage root from JSON body ``{"path": "..."}``.
+            Canonicalized via :func:`utils.path_validation.validate_workspace_path`
+            before storing the thread-safe module override.
+
+    Returns:
+        ``{"success": true, "path": "..."}`` on success. 400 for invalid path or
+        body; 500 when override storage fails.
+    """
     # Reject non-dict JSON bodies (array / string / number / null). Without
     # this, get_json returns the value directly, the truthy fallback `or {}`
     # is bypassed, and `body.get("path", "")` raises AttributeError — which
@@ -127,6 +161,12 @@ def set_workspace() -> tuple[Response, int] | Response:
 
 @bp.route("/api/get-username")
 def get_username() -> Response:
+    """Return the detected Windows/WSL username (GET /api/get-username).
+
+    Returns:
+        JSON ``{"username": "..."}``. Falls back to ``YOUR_USERNAME`` when
+        detection fails.
+    """
     try:
         username = "YOUR_USERNAME"
 

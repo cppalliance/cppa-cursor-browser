@@ -57,6 +57,14 @@ def _request_nocache() -> bool:
 
 @bp.route("/api/workspaces")
 def list_workspaces() -> tuple[Response, int] | Response:
+    """List workspace projects for the sidebar (GET /api/workspaces).
+
+    Args:
+        nocache: When ``1`` or ``true``, bypass the summary disk cache.
+
+    Returns:
+        JSON with ``projects`` and optional ``warnings``. 500 on failure.
+    """
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
@@ -70,12 +78,23 @@ def list_workspaces() -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspaces")
         return json_response({"error": "Failed to get workspaces"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>")
 def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
+    """Return metadata for one workspace, global bucket, or CLI project.
+
+    Args:
+        workspace_id: Storage folder name, ``global``, or ``cli:<project_id>``.
+
+    Returns:
+        Workspace JSON (id, name, path, folder, lastModified). 404 when not found;
+        500 on unexpected failure.
+    """
     try:
         if workspace_id == "global":
             return json_response({
@@ -144,12 +163,28 @@ def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspace")
         return json_response({"error": "Failed to get workspace"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>/tabs
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>/tabs")
 def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
+    """List conversation tabs for a workspace (GET /api/workspaces/<id>/tabs).
+
+    Args:
+        workspace_id: Storage folder name, ``global`` for unassigned chats, or
+            ``cli:<project_id>``.
+        summary: When ``1`` or ``true``, return lightweight tab headers only.
+        nocache: When ``1`` or ``true``, bypass cache on summary requests.
+
+    Returns:
+        Tabs payload from :func:`services.workspace_tabs` helpers (typically
+        ``{"tabs": [...]}`` with optional ``warnings``). May return 200 with an
+        empty ``tabs`` list when upstream SQLite reads fail silently; 404 when
+        global storage is missing; 500 on unexpected route-level failure.
+    """
     if workspace_id.startswith("cli:"):
         try:
             return get_cli_workspace_tabs(workspace_id, exclusion_rules())
@@ -170,12 +205,27 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspace tabs")
         return json_response({"error": "Failed to get workspace tabs"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>/tabs/<composer_id>
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/workspaces/<workspace_id>/tabs/<composer_id>")
 def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, int] | Response:
+    """Lazy-load one conversation tab (GET /api/workspaces/<id>/tabs/<composer_id>).
+
+    Args:
+        workspace_id: Storage folder name, ``global`` for unassigned chats, or
+            ``cli:<project_id>`` (CLI workspaces return 400).
+        composer_id: Composer UUID to load.
+
+    Returns:
+        Single-tab JSON from :func:`services.workspace_tabs.assemble_single_tab`
+        (typically ``{"tab": {...}}`` with optional ``warnings``). 400 for CLI
+        workspaces; 404 when global storage is missing, the composer is not found,
+        or it is not assigned to *workspace_id*; 500 on unexpected failure.
+    """
     if workspace_id.startswith("cli:"):
         return json_response({"error": "Per-tab lazy load is not supported for CLI workspaces"}, 400)
     try:

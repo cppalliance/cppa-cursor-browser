@@ -30,6 +30,18 @@ class Composer:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, composer_id: str) -> "Composer":
+        """Parse a global ``composerData`` row into a validated composer.
+
+        Args:
+            raw: Decoded JSON object from cursorDiskKV.
+            composer_id: Composer UUID from the storage key.
+
+        Returns:
+            Validated :class:`Composer` with required headers and timestamps.
+
+        Raises:
+            SchemaError: When required fields are missing or malformed.
+        """
         raw = require_dict(raw, model="Composer", field="composerData")
         require_non_empty_str(composer_id, model="Composer", field="composerId")
         require_key(raw, "fullConversationHeadersOnly", model="Composer")
@@ -164,6 +176,17 @@ class WorkspaceLocalComposer:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "WorkspaceLocalComposer":
+        """Parse one ``allComposers`` entry from per-workspace state.
+
+        Args:
+            raw: Composer summary dict from ``composer.composerData``.
+
+        Returns:
+            Validated local composer row.
+
+        Raises:
+            SchemaError: When ``composerId`` is missing or invalid.
+        """
         raw = require_dict(raw, model="WorkspaceLocalComposer", field="composer")
         composer_id = require_non_empty_str_field(
             raw, "composerId", model="WorkspaceLocalComposer"
@@ -187,6 +210,18 @@ class Bubble:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, bubble_id: str) -> "Bubble":
+        """Parse one ``bubbleId:*`` KV value into a validated bubble.
+
+        Args:
+            raw: Decoded bubble JSON (``bubble_id`` comes from the key, not value).
+            bubble_id: Bubble UUID from the storage key suffix.
+
+        Returns:
+            Validated :class:`Bubble`.
+
+        Raises:
+            SchemaError: When the payload or *bubble_id* is invalid.
+        """
         raw = require_dict(raw, model="Bubble", field="bubble")
         require_non_empty_str(bubble_id, model="Bubble", field="bubbleId")
         return cls(bubble_id=bubble_id, raw=raw)
