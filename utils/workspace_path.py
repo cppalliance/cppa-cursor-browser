@@ -19,12 +19,23 @@ _workspace_path_override: str | None = None
 
 
 def set_workspace_path_override(path: str | None) -> None:
+    """Set the thread-safe module-level workspace path override.
+
+    Args:
+        path: Canonical workspace storage root from POST /api/set-workspace, or
+            ``None`` to clear the override.
+    """
     global _workspace_path_override
     with _workspace_path_lock:
         _workspace_path_override = path
 
 
 def get_workspace_path_override() -> str | None:
+    """Return the current module-level workspace path override, if any.
+
+    Returns:
+        Canonical path set via :func:`set_workspace_path_override`, else ``None``.
+    """
     with _workspace_path_lock:
         return _workspace_path_override
 

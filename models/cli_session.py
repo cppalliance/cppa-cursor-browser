@@ -17,6 +17,17 @@ class CliSessionMeta:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "CliSessionMeta":
+        """Parse CLI session ``meta`` JSON into a validated descriptor.
+
+        Args:
+            raw: Decoded meta object from a CLI chat session.
+
+        Returns:
+            Validated :class:`CliSessionMeta`.
+
+        Raises:
+            SchemaError: When ``latestRootBlobId`` is missing or not a string.
+        """
         raw = require_dict(raw, model="CliSessionMeta", field="meta")
         latest = require_truthy(
             raw.get("latestRootBlobId"),

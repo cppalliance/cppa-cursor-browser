@@ -26,6 +26,14 @@ TAB_SUMMARIES_PREFIX = "tab-summaries-"
 
 
 def nocache_enabled(*, request_nocache: bool = False) -> bool:
+    """Return whether summary-cache reads should be bypassed.
+
+    Args:
+        request_nocache: True when the HTTP request included ``?nocache=1``.
+
+    Returns:
+        True when bypass is requested or ``CURSOR_CHAT_BROWSER_NOCACHE`` is set.
+    """
     if request_nocache:
         return True
     return os.environ.get("CURSOR_CHAT_BROWSER_NOCACHE", "").strip().lower() in (
@@ -132,6 +140,15 @@ def _write_cache_file(path: Path | str, payload: dict[str, Any]) -> None:
 def get_cached_projects(
     fingerprint: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """Load cached workspace project list when the fingerprint matches.
+
+    Args:
+        fingerprint: Storage mtime/rules digest from
+            :func:`fingerprint_workspace_storage`.
+
+    Returns:
+        ``(projects, warnings)`` on hit, else ``None``.
+    """
     data = _read_cache_file(PROJECTS_CACHE_FILE)
     if not data:
         return None
@@ -151,6 +168,13 @@ def set_cached_projects(
     projects: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
 ) -> None:
+    """Write workspace project list and warnings to the disk cache.
+
+    Args:
+        fingerprint: Invalidation fingerprint paired with the payload.
+        projects: Sidebar project dicts.
+        warnings: Parse warnings emitted while building *projects*.
+    """
     _write_cache_file(
         PROJECTS_CACHE_FILE,
         {
@@ -164,6 +188,14 @@ def set_cached_projects(
 def get_cached_composer_id_to_ws(
     fingerprint: dict[str, Any],
 ) -> dict[str, str] | None:
+    """Load cached composer-id → workspace-id map when the fingerprint matches.
+
+    Args:
+        fingerprint: Storage mtime/rules digest.
+
+    Returns:
+        Mapping on hit, else ``None``.
+    """
     data = _read_cache_file(COMPOSER_MAP_CACHE_FILE)
     if not data:
         return None
@@ -179,6 +211,12 @@ def set_cached_composer_id_to_ws(
     fingerprint: dict[str, Any],
     mapping: dict[str, str],
 ) -> None:
+    """Persist composer-id → workspace-id map under *fingerprint*.
+
+    Args:
+        fingerprint: Invalidation fingerprint paired with *mapping*.
+        mapping: Composer UUID to workspace folder name.
+    """
     _write_cache_file(
         COMPOSER_MAP_CACHE_FILE,
         {
@@ -197,6 +235,15 @@ def get_cached_tab_summaries(
     fingerprint: dict[str, Any],
     workspace_id: str,
 ) -> tuple[dict[str, Any], int] | None:
+    """Load cached tab-summary response for one workspace when fingerprint matches.
+
+    Args:
+        fingerprint: Storage mtime/rules digest.
+        workspace_id: Workspace folder name the payload belongs to.
+
+    Returns:
+        ``(payload, status)`` on hit, else ``None``.
+    """
     data = _read_cache_file(_tab_summaries_path(workspace_id))
     if not data:
         return None
@@ -217,6 +264,14 @@ def set_cached_tab_summaries(
     payload: dict[str, Any],
     status: int,
 ) -> None:
+    """Persist tab-summary API payload for one workspace.
+
+    Args:
+        fingerprint: Invalidation fingerprint paired with the response.
+        workspace_id: Workspace folder name.
+        payload: JSON body returned to clients.
+        status: HTTP status code paired with *payload*.
+    """
     _write_cache_file(
         _tab_summaries_path(workspace_id),
         {

@@ -25,6 +25,14 @@ _logger = logging.getLogger(__name__)
 
 @bp.route("/api/search")
 def search() -> tuple[Response, int] | Response:
+    """Search chats, composers, and CLI sessions across Cursor storage.
+
+    Query params: ``q`` (required), ``type`` (``all`` | ``chat`` | ``composer``).
+
+    Returns:
+        JSON ``{"results": [...]}`` with optional ``warnings``. 400 when ``q`` is
+        empty; 500 on unexpected failure.
+    """
     try:
         query = request.args.get("q", "").strip()
         search_type = request.args.get("type", "all")

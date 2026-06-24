@@ -30,6 +30,12 @@ def _extract_chat_id_from_bubble_key(key: str) -> str | None:
 
 @bp.route("/api/logs")
 def get_logs() -> tuple[Response, int] | Response:
+    """List chat logs from global and per-workspace storage (GET /api/logs).
+
+    Returns:
+        JSON array of log summary objects (id, title, timestamp, etc.). 500 on
+        unexpected failure.
+    """
     try:
         workspace_path = resolve_workspace_path()
         logs = []
