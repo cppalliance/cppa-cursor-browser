@@ -32,7 +32,8 @@ def nocache_enabled(*, request_nocache: bool = False) -> bool:
         request_nocache: True when the HTTP request included ``?nocache=1``.
 
     Returns:
-        True when bypass is requested or ``CURSOR_CHAT_BROWSER_NOCACHE`` is set.
+        True when bypass is requested or ``CURSOR_CHAT_BROWSER_NOCACHE`` is set
+        to ``"1"``, ``"true"``, or ``"yes"`` (case-insensitive).
     """
     if request_nocache:
         return True

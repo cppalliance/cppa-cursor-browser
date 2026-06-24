@@ -49,8 +49,9 @@ def _safe_text(text: str) -> str:
 def generate_pdf() -> tuple[Response, int] | Response:
     """Render markdown chat content as a PDF download (POST /api/generate-pdf).
 
-    Body (optional): ``{"markdown": "...", "title": "..."}``. Missing keys
-    default to ``""`` and ``"Chat"`` respectively.
+    Args:
+        markdown: Markdown source text (optional; defaults to ``""``).
+        title: Document title (optional; defaults to ``"Chat"``).
 
     Returns:
         ``application/pdf`` attachment on success. 500 JSON error on failure.

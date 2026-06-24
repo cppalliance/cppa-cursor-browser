@@ -27,7 +27,7 @@ class CliSessionMeta:
 
         Raises:
             SchemaError: When ``latestRootBlobId`` is missing, falsey (e.g.
-            empty string or ``None``), or not a string.
+                empty string or ``None``), or not a string.
         """
         raw = require_dict(raw, model="CliSessionMeta", field="meta")
         latest = require_truthy(

@@ -106,9 +106,10 @@ def validate_path() -> tuple[Response, int] | Response:
 def set_workspace() -> tuple[Response, int] | Response:
     """Persist a validated workspace storage path (POST /api/set-workspace).
 
-    Body: ``{"path": "<workspaceStorage root>"}``. Path is canonicalized via
-    :func:`utils.path_validation.validate_workspace_path` before storing the
-    thread-safe module override.
+    Args:
+        path: Workspace storage root from JSON body ``{"path": "..."}``.
+            Canonicalized via :func:`utils.path_validation.validate_workspace_path`
+            before storing the thread-safe module override.
 
     Returns:
         ``{"success": true, "path": "..."}`` on success. 400 for invalid path or

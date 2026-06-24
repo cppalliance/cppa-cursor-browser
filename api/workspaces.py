@@ -24,10 +24,7 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
-from services.workspace_resolver import (
-    infer_workspace_name_from_context,
-    lookup_workspace_display_name,
-)
+from services.workspace_resolver import infer_workspace_name_from_context
 from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import (
@@ -59,7 +56,8 @@ def _request_nocache() -> bool:
 def list_workspaces() -> tuple[Response, int] | Response:
     """List workspace projects for the sidebar (GET /api/workspaces).
 
-    Honors ``?nocache=1`` to bypass the summary disk cache.
+    Args:
+        nocache: When ``1`` or ``true``, bypass the summary disk cache.
 
     Returns:
         JSON with ``projects`` and optional ``warnings``. 500 on failure.
@@ -171,9 +169,8 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     Args:
         workspace_id: Storage folder name, ``global`` for unassigned chats, or
             ``cli:<project_id>``.
-
-    Query params: ``summary=1`` for lightweight tab headers only; ``nocache=1`` to
-    bypass cache on summary requests.
+        summary: When ``1`` or ``true``, return lightweight tab headers only.
+        nocache: When ``1`` or ``true``, bypass cache on summary requests.
 
     Returns:
         Tabs payload from :func:`services.workspace_tabs` helpers (typically

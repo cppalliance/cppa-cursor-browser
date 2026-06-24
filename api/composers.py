@@ -126,6 +126,8 @@ def list_composers() -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get composers")
         return json_response({"error": "Failed to get composers"}, 500)
+
+
 @bp.route("/api/composers/<composer_id>")
 def get_composer(composer_id: str) -> tuple[Response, int] | Response:
     """Fetch one composer by ID (GET /api/composers/<composer_id>).
