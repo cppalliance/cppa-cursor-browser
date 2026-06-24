@@ -37,7 +37,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--benchmark-skip"
 testpaths = ["tests"]
 markers = [
     "benchmark: performance benchmarks (pytest-benchmark)",

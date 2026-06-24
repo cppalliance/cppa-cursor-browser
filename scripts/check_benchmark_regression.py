@@ -92,10 +92,12 @@ def check_regression(
     baseline_means = load_baseline_means(baselines_path)
 
     failures: list[str] = []
+    missing: list[str] = []
     for name, base in baseline_means.items():
         cur = flat.get(name)
         if cur is None:
-            print(f"WARN: no current result for baseline {name!r}; skipping")
+            print(f"FAIL: no current result for gated baseline {name!r}")
+            missing.append(name)
             continue
         if base == 0:
             print(f"WARN: baseline for {name!r} is zero; skipping ratio check")
@@ -112,6 +114,9 @@ def check_regression(
 
     if failures:
         print(f"\nREGRESSION: {len(failures)} benchmark(s) exceeded {threshold:.0%}")
+    if missing:
+        print(f"\nMISSING: {len(missing)} gated benchmark(s) absent from current results")
+    if failures or missing:
         return 1
     return 0
 
