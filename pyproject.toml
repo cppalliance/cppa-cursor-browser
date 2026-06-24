@@ -37,6 +37,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "--benchmark-disable"
 testpaths = ["tests"]
 markers = [
     "benchmark: performance benchmarks (pytest-benchmark)",

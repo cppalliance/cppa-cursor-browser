@@ -1,6 +1,6 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #7 summary-cache benchmarks). Refresh via: pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts= then update these values.",
-  "updated": "2026-06-25T12:00:00Z",
+  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #120, run 28123677675). Refresh: pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts=",
+  "updated": "2026-06-24T19:20:27Z",
   "machine": "Linux",
   "groups": {
     "summary-cache": {

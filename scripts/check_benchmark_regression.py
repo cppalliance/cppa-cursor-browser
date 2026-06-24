@@ -14,6 +14,11 @@ class BenchmarkDataError(ValueError):
     """Raised when benchmark JSON input is malformed or missing required fields."""
 
 
+def normalize_benchmark_name(name: str) -> str:
+    """Strip pytest node prefix so baselines match short or full benchmark names."""
+    return str(name).rsplit("::", 1)[-1]
+
+
 def load_results(results_path: str | Path) -> dict[str, float]:
     path = Path(results_path)
     try:
@@ -34,13 +39,13 @@ def load_results(results_path: str | Path) -> dict[str, float]:
         if not isinstance(entry, dict):
             raise BenchmarkDataError(f"{path} benchmarks[{index}] must be an object")
         try:
-            name = entry["name"]
+            raw_name = entry["name"]
             mean = float(entry["stats"]["mean"])
         except (KeyError, TypeError, ValueError) as exc:
             raise BenchmarkDataError(
                 f"{path} benchmarks[{index}] missing 'name' or 'stats.mean'"
             ) from exc
-        name = str(name)
+        name = normalize_benchmark_name(str(raw_name))
         if name in results:
             raise BenchmarkDataError(f"{path} duplicate benchmark name {name!r}")
         results[name] = mean
@@ -67,13 +72,17 @@ def load_baseline_means(baselines_path: str | Path) -> dict[str, float]:
     means: dict[str, float] = {}
     for group_name, value in groups.items():
         if not isinstance(value, dict):
-            continue
+            raise BenchmarkDataError(
+                f"{path} groups[{group_name!r}] must be an object of benchmark means"
+            )
         for name, mean in value.items():
-            name = str(name)
-            if name in means:
-                raise BenchmarkDataError(f"{path} duplicate benchmark name {name!r} across groups")
+            bench_name = normalize_benchmark_name(str(name))
+            if bench_name in means:
+                raise BenchmarkDataError(
+                    f"{path} duplicate benchmark name {bench_name!r} across groups"
+                )
             try:
-                means[name] = float(mean)
+                means[bench_name] = float(mean)
             except (TypeError, ValueError) as exc:
                 raise BenchmarkDataError(
                     f"{path} groups[{group_name!r}][{name!r}] is not a numeric mean"

@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
-
-from services import summary_cache  # noqa: E402
-from services.summary_cache import fingerprint_workspace_storage  # noqa: E402
+from services import summary_cache
+from services.summary_cache import fingerprint_workspace_storage
 
 
 def make_workspace_entries(workspace_root: Path, count: int) -> list[dict[str, Any]]:
@@ -38,7 +32,11 @@ def make_workspace_entries(workspace_root: Path, count: int) -> list[dict[str, A
 
 @pytest.fixture
 def summary_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect summary-cache files to an isolated temp directory."""
+    """Redirect summary-cache files to an isolated temp directory.
+
+    Patches ``CACHE_DIR`` (also used by tab-summary paths via ``_tab_summaries_path``)
+    plus the projects/composer-map file constants used by current benchmarks.
+    """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     monkeypatch.setattr(summary_cache, "CACHE_DIR", cache_dir)
@@ -86,4 +84,5 @@ def workspace_fingerprint(synthetic_workspace: tuple[str, list[dict[str, Any]]])
 
 @pytest.fixture
 def stale_fingerprint(workspace_fingerprint: dict[str, Any]) -> dict[str, Any]:
-    return {**workspace_fingerprint, "global_db_mtime_ns": 9_999_999_999}
+    """Return a fingerprint guaranteed to differ from the stored one."""
+    return {**workspace_fingerprint, "rules_digest": "deadbeefdeadbeef"}

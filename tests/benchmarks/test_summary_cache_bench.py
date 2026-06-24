@@ -13,6 +13,7 @@ from services.summary_cache import (
     set_cached_projects,
 )
 
+
 @pytest.mark.benchmark(group="summary-cache")
 def test_summary_cache_hit(
     benchmark,
