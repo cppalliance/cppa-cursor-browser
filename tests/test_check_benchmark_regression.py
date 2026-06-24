@@ -37,6 +37,13 @@ def test_normalize_benchmark_name_strips_module_prefix() -> None:
     assert normalize_benchmark_name("test_summary_cache_hit") == "test_summary_cache_hit"
 
 
+def test_normalize_benchmark_name_preserves_colons_in_param_values() -> None:
+    short = "test_x[param::v]"
+    full = f"tests/benchmarks/test_x.py::{short}"
+    assert normalize_benchmark_name(short) == short
+    assert normalize_benchmark_name(full) == short
+
+
 def test_load_results_normalizes_full_node_id(tmp_path) -> None:
     path = tmp_path / "results.json"
     _write_results(

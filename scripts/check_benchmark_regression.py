@@ -15,8 +15,15 @@ class BenchmarkDataError(ValueError):
 
 
 def normalize_benchmark_name(name: str) -> str:
-    """Strip pytest node prefix so baselines match short or full benchmark names."""
-    return str(name).rsplit("::", 1)[-1]
+    """Strip pytest file node prefix so baselines match short or full benchmark names."""
+    text = str(name)
+    if "::" not in text:
+        return text
+    prefix, _, suffix = text.partition("::")
+    # Only strip module paths (…/test_foo.py::test_name); leave "::" inside [param::value] intact.
+    if prefix.endswith(".py"):
+        return suffix
+    return text
 
 
 def load_results(results_path: str | Path) -> dict[str, float]:
