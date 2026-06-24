@@ -44,3 +44,5 @@ Thumbs.db
 htmlcov/
 coverage.xml
 .hypothesis/
+benchmark-results.json
+benchmarks/_raw.json
