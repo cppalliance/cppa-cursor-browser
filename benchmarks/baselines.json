@@ -1,15 +1,15 @@
 {
-  "_note": "Gated means from local reference run with 1.5x slack (Windows dev host). Refresh from ubuntu-latest CI artifact after first green benchmark job.",
-  "updated": "2026-06-25T00:00:00Z",
-  "machine": "Windows",
+  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #7 summary-cache benchmarks). Refresh via: pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts= then update these values.",
+  "updated": "2026-06-25T12:00:00Z",
+  "machine": "Linux",
   "groups": {
     "summary-cache": {
-      "test_summary_cache_hit": 8.91e-05,
-      "test_summary_cache_miss": 8.13e-05,
-      "test_fingerprint_workspace_entries[10]": 0.001708,
-      "test_fingerprint_workspace_entries[50]": 0.005457,
-      "test_fingerprint_workspace_entries[200]": 0.01715,
-      "test_summary_cache_round_trip": 0.001667
+      "test_summary_cache_hit": 6.3e-05,
+      "test_summary_cache_miss": 6.3e-05,
+      "test_fingerprint_workspace_entries[10]": 0.001844,
+      "test_fingerprint_workspace_entries[50]": 0.007759,
+      "test_fingerprint_workspace_entries[200]": 0.022231,
+      "test_summary_cache_round_trip": 0.000351
     }
   }
 }
