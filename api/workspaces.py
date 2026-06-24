@@ -169,13 +169,17 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     """List conversation tabs for a workspace (GET /api/workspaces/<id>/tabs).
 
     Args:
-        workspace_id: Storage folder name or ``cli:<project_id>``.
+        workspace_id: Storage folder name, ``global`` for unassigned chats, or
+            ``cli:<project_id>``.
 
     Query params: ``summary=1`` for lightweight tab headers only; ``nocache=1`` to
     bypass cache on summary requests.
 
     Returns:
-        Tabs payload from :func:`services.workspace_tabs` helpers. 500 on failure.
+        Tabs payload from :func:`services.workspace_tabs` helpers (typically
+        ``{"tabs": [...]}`` with optional ``warnings``). May return 200 with an
+        empty ``tabs`` list when upstream SQLite reads fail silently; 404 when
+        global storage is missing; 500 on unexpected route-level failure.
     """
     if workspace_id.startswith("cli:"):
         try:

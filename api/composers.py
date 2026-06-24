@@ -134,8 +134,11 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
         composer_id: Composer UUID.
 
     Returns:
-        Composer JSON from per-workspace storage or global fallback. 404 when not
-        found or schema drift blocks serving; 500 on unexpected failure.
+        Composer JSON from per-workspace storage or global fallback. Per-workspace
+        schema drift is logged and skipped before global fallback is attempted.
+        404 when the composer is absent from both stores (``{"error": "Composer not found"}``)
+        or when the global row fails validation (``{"error": "Composer schema drift"}``).
+        500 on unexpected failure.
     """
     try:
         workspace_path = resolve_workspace_path()

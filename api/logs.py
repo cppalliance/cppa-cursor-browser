@@ -33,7 +33,8 @@ def get_logs() -> tuple[Response, int] | Response:
     """List chat logs from global and per-workspace storage (GET /api/logs).
 
     Returns:
-        JSON array of log summary objects (id, title, timestamp, etc.). 500 on
+        JSON ``{"logs": [<log summary>, ...]}`` where each summary has ``id``,
+        ``title``, ``timestamp``, etc. 500 with ``{"error": ..., "logs": []}`` on
         unexpected failure.
     """
     try:

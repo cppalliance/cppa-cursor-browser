@@ -49,10 +49,11 @@ def _safe_text(text: str) -> str:
 def generate_pdf() -> tuple[Response, int] | Response:
     """Render markdown chat content as a PDF download (POST /api/generate-pdf).
 
-    Body: ``{"markdown": "...", "title": "..."}``.
+    Body (optional): ``{"markdown": "...", "title": "..."}``. Missing keys
+    default to ``""`` and ``"Chat"`` respectively.
 
     Returns:
-        ``application/pdf`` attachment on success. 400/500 JSON errors on failure.
+        ``application/pdf`` attachment on success. 500 JSON error on failure.
     """
     try:
         body = request.get_json(silent=True) or {}
