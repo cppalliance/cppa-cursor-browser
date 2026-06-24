@@ -207,7 +207,7 @@ class TestSearchExclusionFiltering(unittest.TestCase):
             os.unlink(path)
 
     def _search(self, query: str, search_type: str = "all"):
-        resp = self.client.get(f"/api/search?q={query}&type={search_type}")
+        resp = self.client.get(f"/api/search?q={query}&type={search_type}&all_history=1")
         self.assertEqual(resp.status_code, 200)
         payload = resp.get_json()
         self.assertIsInstance(payload, dict)

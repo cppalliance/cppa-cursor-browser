@@ -101,7 +101,7 @@ class TestParseFailureLogging(unittest.TestCase):
     def test_listing_logs_composer_schema_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ws_root = _seed_listing_with_drifted_composer(tmp)
-            with self.assertLogs("services.workspace_listing", level="WARNING") as cm:
+            with self.assertLogs("services.workspace_composer_scan", level="WARNING") as cm:
                 list_workspace_projects(ws_root, rules=[])
 
         messages = [r.getMessage() for r in cm.records]
@@ -156,7 +156,7 @@ class TestParseFailureLogging(unittest.TestCase):
                     ("composerData:cmp-json", bad_composer_value),
                 )
                 conn.commit()
-            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+            with self.assertLogs("services.workspace_composer_scan", level="WARNING") as cm:
                 with app.test_request_context("/api/workspaces/global/tabs"):
                     _payload, _status = assemble_workspace_tabs("global", ws_root, rules=[])
 

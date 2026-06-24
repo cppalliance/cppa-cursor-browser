@@ -23,6 +23,15 @@ from tests._fixture_ids import (  # noqa: E402,F401  (re-export for legacy impor
     HAPPY_WORKSPACE_ID,
 )
 
+
+@pytest.fixture(autouse=True)
+def _disable_search_index_unless_index_tests(request, monkeypatch):
+    """Avoid background index builds during the main test suite."""
+    if "test_search_index" in request.module.__name__:
+        return
+    monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
+
+
 def _make_global_state_db(path: str) -> None:
     """globalStorage/state.vscdb with one composerData + one bubbleId row."""
     # contextlib.closing guarantees conn.close() even if an exec/commit raises

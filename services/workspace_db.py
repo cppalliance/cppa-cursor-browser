@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -356,13 +357,50 @@ def global_storage_db_path(workspace_path: str) -> str:
     return os.path.normpath(os.path.join(workspace_path, "..", "globalStorage", "state.vscdb"))
 
 
+def _composer_ids_for_workspace_entry(
+    workspace_path: str,
+    entry: dict[str, Any],
+) -> list[tuple[str, str]]:
+    """Read ``composer.composerData`` from one workspace folder (parallel-safe)."""
+    pairs: list[tuple[str, str]] = []
+    db_path = os.path.join(workspace_path, entry["name"], "state.vscdb")
+    if not os.path.isfile(db_path):
+        return pairs
+    db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    try:
+        with closing(sqlite3.connect(db_uri, uri=True)) as conn:
+            row = conn.execute(
+                "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
+            ).fetchone()
+    except sqlite3.Error:
+        return pairs
+    if not (row and row[0]):
+        return pairs
+    try:
+        data = json.loads(row[0])
+    except (json.JSONDecodeError, ValueError):
+        return pairs
+    all_composers = data.get("allComposers") if isinstance(data, dict) else None
+    if not isinstance(all_composers, list):
+        return pairs
+    ws_name = entry["name"]
+    for c in all_composers:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("composerId")
+        if cid:
+            pairs.append((cid, ws_name))
+    return pairs
+
+
 def build_composer_id_to_workspace_id(
     workspace_path: str, workspace_entries: list[dict[str, Any]],
 ) -> dict[str, str]:
     """Build mapping from composer ID to workspace folder name.
 
     Reads ``composer.composerData`` from each workspace's ``state.vscdb``.
-    Skips workspaces with missing databases or malformed JSON.
+    Skips workspaces with missing databases or malformed JSON. Workspace
+    folders are scanned in parallel (issue #95).
 
     Args:
         workspace_path: Cursor workspace storage root.
@@ -371,38 +409,19 @@ def build_composer_id_to_workspace_id(
     Returns:
         Dict mapping ``composerId`` strings to workspace folder names.
     """
+    if not workspace_entries:
+        return {}
     mapping: dict[str, str] = {}
-    for entry in workspace_entries:
-        db_path = os.path.join(workspace_path, entry["name"], "state.vscdb")
-        if not os.path.isfile(db_path):
-            continue
-        # closing() guarantees .close() on scope exit (issue #17).
-        # Path.as_uri() percent-encodes reserved chars; ``f"file:{path}"``
-        # breaks sqlite URI parsing on paths with spaces, ``#``, etc.
-        db_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-        row: tuple[Any, ...] | None = None
-        try:
-            with closing(sqlite3.connect(db_uri, uri=True)) as conn:
-                row = conn.execute(
-                    "SELECT value FROM ItemTable WHERE [key] = 'composer.composerData'"
-                ).fetchone()
-        except sqlite3.Error:
-            continue
-        if not (row and row[0]):
-            continue
-        try:
-            data = json.loads(row[0])
-        except (json.JSONDecodeError, ValueError):
-            continue
-        all_composers = data.get("allComposers") if isinstance(data, dict) else None
-        if not isinstance(all_composers, list):
-            continue
-        for c in all_composers:
-            if not isinstance(c, dict):
-                continue
-            cid = c.get("composerId")
-            if cid:
-                mapping[cid] = entry["name"]
+    max_workers = min(32, len(workspace_entries))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(_composer_ids_for_workspace_entry, workspace_path, entry)
+            for entry in workspace_entries
+        ]
+        for _entry, fut in zip(workspace_entries, futures):
+            for cid, ws_name in fut.result():
+                if cid not in mapping:
+                    mapping[cid] = ws_name
     return mapping
 
 

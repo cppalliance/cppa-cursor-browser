@@ -69,6 +69,17 @@ def create_app(exclusion_rules_path: str | None = None) -> Flask:
     app.register_blueprint(pdf_bp)
     app.register_blueprint(config_bp)
 
+    try:
+        from services.search_index import start_search_index_background
+        from utils.workspace_path import resolve_workspace_path
+
+        start_search_index_background(
+            resolve_workspace_path(),
+            app.config["EXCLUSION_RULES"],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to start search index background worker")
+
     # ---------- Page routes ----------
 
     @app.route("/")
