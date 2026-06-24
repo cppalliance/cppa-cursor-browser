@@ -117,11 +117,14 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
 
     def test_workspace_tabs_endpoint_calls_bubble_from_dict(self):
         from app import create_app
-        import api.workspaces as workspaces_mod
+        import services.workspace_db as workspace_db_mod
+        from models import Bubble
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with patch.object(workspaces_mod.Bubble, "from_dict", wraps=workspaces_mod.Bubble.from_dict) as spy:
+        with patch.object(
+            workspace_db_mod.Bubble, "from_dict", wraps=Bubble.from_dict
+        ) as spy:
             client = app.test_client()
             response = client.get(f"/api/workspaces/{WORKSPACE_ID}/tabs")
             self.assertEqual(response.status_code, 200)
@@ -136,8 +139,6 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         # ValueError and skipped silently. Schema drift must now log a
         # `Schema drift in bubble <bid>` line so disappearing bubbles can be
         # traced. The well-formed row still loads alongside.
-        import logging
-
         from app import create_app
         # Seed a deliberately-malformed bubble row that will trip
         # Bubble.from_dict's "expected non-empty str" gate on the bubble_id by
@@ -163,17 +164,20 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
             msg="drift log must include the offending bubble id")
 
     def test_workspace_tabs_endpoint_calls_composer_from_dict(self):
-        # Brad's most-important finding: list_workspaces() at api/workspaces.py:605
-        # validates each composer with Composer.from_dict, but get_workspace_tabs()
-        # in the same file used raw json.loads. Schema drift would have been hidden
-        # from one of the two primary conversation-browsing paths. This test pins
-        # that BOTH paths must now validate via the model.
+        # Brad's most-important finding: list_workspaces() validates each composer
+        # with Composer.from_dict, but get_workspace_tabs() used raw json.loads.
+        # Schema drift would have been hidden from one of the two primary
+        # conversation-browsing paths. This test pins that BOTH paths must now
+        # validate via the model.
         from app import create_app
-        import api.workspaces as workspaces_mod
+        import services.workspace_tabs as workspace_tabs_mod
+        from models import Composer
         app = create_app()
         app.config["TESTING"] = True
         app.config["EXCLUSION_RULES"] = []
-        with patch.object(workspaces_mod.Composer, "from_dict", wraps=workspaces_mod.Composer.from_dict) as spy:
+        with patch.object(
+            workspace_tabs_mod.Composer, "from_dict", wraps=Composer.from_dict
+        ) as spy:
             client = app.test_client()
             response = client.get(f"/api/workspaces/{WORKSPACE_ID}/tabs")
             self.assertEqual(response.status_code, 200)
@@ -220,8 +224,13 @@ class TestWorkspaceWiredAtReadSite(unittest.TestCase):
 
     def test_workspace_display_name_calls_workspace_from_dict(self):
         from services.workspace_resolver import lookup_workspace_display_name
-        import api.workspaces as workspaces_mod
-        with patch.object(workspaces_mod.Workspace, "from_dict", wraps=workspaces_mod.Workspace.from_dict) as spy:
+        import services.workspace_resolver as workspace_resolver_mod
+        from models import Workspace
+        with patch.object(
+            workspace_resolver_mod.Workspace,
+            "from_dict",
+            wraps=Workspace.from_dict,
+        ) as spy:
             name = lookup_workspace_display_name(self.workspace_path, WORKSPACE_ID)
             self.assertIsInstance(name, str)
             self.assertGreaterEqual(

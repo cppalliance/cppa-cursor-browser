@@ -24,10 +24,7 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
-from services.workspace_resolver import (
-    infer_workspace_name_from_context,
-    lookup_workspace_display_name,
-)
+from services.workspace_resolver import infer_workspace_name_from_context
 from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import (
@@ -35,13 +32,6 @@ from services.workspace_tabs import (
     assemble_workspace_tabs,
     list_workspace_tab_summaries,
 )
-
-# Re-exported for tests/test_models_wired_at_read_sites.py — the typed-model
-# spy harness patches `workspaces_mod.Bubble` / `.Composer` / `.Workspace` to
-# verify that production read paths actually call from_dict. The classes
-# themselves are wired inside the services modules now (post-#25 split);
-# importing them here keeps the spy resolution stable.
-from models import Bubble, Composer, Workspace  # noqa: F401
 
 bp = Blueprint("workspaces", __name__)
 _logger = logging.getLogger(__name__)
