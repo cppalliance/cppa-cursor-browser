@@ -1,0 +1,15 @@
+{
+  "_note": "Gated means from local reference run with 1.5x slack (Windows dev host). Refresh from ubuntu-latest CI artifact after first green benchmark job.",
+  "updated": "2026-06-25T00:00:00Z",
+  "machine": "Windows",
+  "groups": {
+    "summary-cache": {
+      "test_summary_cache_hit": 8.91e-05,
+      "test_summary_cache_miss": 8.13e-05,
+      "test_fingerprint_workspace_entries[10]": 0.001708,
+      "test_fingerprint_workspace_entries[50]": 0.005457,
+      "test_fingerprint_workspace_entries[200]": 0.01715,
+      "test_summary_cache_round_trip": 0.001667
+    }
+  }
+}

@@ -31,8 +31,16 @@ desktop = ["pywebview>=5.0,<6"]
 # Development tooling: testing + type checking.
 dev = [
     "pytest>=8,<9",
+    "pytest-benchmark>=4,<5",
     "mypy>=1.10,<2",
     "hypothesis>=6.100,<7",
+]
+
+[tool.pytest.ini_options]
+addopts = "--benchmark-skip"
+testpaths = ["tests"]
+markers = [
+    "benchmark: performance benchmarks (pytest-benchmark)",
 ]
 
 [project.scripts]
