@@ -75,6 +75,8 @@ def list_workspaces() -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspaces")
         return json_response({"error": "Failed to get workspaces"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>
 # ---------------------------------------------------------------------------
@@ -158,6 +160,8 @@ def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspace")
         return json_response({"error": "Failed to get workspace"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>/tabs
 # ---------------------------------------------------------------------------
@@ -198,6 +202,8 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     except Exception:
         _logger.exception("Failed to get workspace tabs")
         return json_response({"error": "Failed to get workspace tabs"}, 500)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/<id>/tabs/<composer_id>
 # ---------------------------------------------------------------------------
@@ -207,12 +213,15 @@ def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, in
     """Lazy-load one conversation tab (GET /api/workspaces/<id>/tabs/<composer_id>).
 
     Args:
-        workspace_id: IDE workspace folder name (CLI workspaces return 400).
+        workspace_id: Storage folder name, ``global`` for unassigned chats, or
+            ``cli:<project_id>`` (CLI workspaces return 400).
         composer_id: Composer UUID to load.
 
     Returns:
-        Single-tab JSON from :func:`services.workspace_tabs.assemble_single_tab`.
-        400 for CLI workspaces; 500 on unexpected failure.
+        Single-tab JSON from :func:`services.workspace_tabs.assemble_single_tab`
+        (typically ``{"tab": {...}}`` with optional ``warnings``). 400 for CLI
+        workspaces; 404 when global storage is missing, the composer is not found,
+        or it is not assigned to *workspace_id*; 500 on unexpected failure.
     """
     if workspace_id.startswith("cli:"):
         return json_response({"error": "Per-tab lazy load is not supported for CLI workspaces"}, 400)

@@ -65,7 +65,22 @@ def detect_environment() -> Response:
 
 @bp.route("/api/validate-path", methods=["POST"])
 def validate_path() -> tuple[Response, int] | Response:
-    """Same path rules as POST /api/set-workspace: realpath, markers (issue #15)."""
+    """Validate a workspace storage path without persisting it (POST /api/validate-path).
+
+    Uses the same rules as :func:`set_workspace` (realpath, Cursor markers; issue #15).
+
+    Args:
+        path: Workspace storage root from JSON body ``{"path": "..."}``.
+
+    Returns:
+        JSON with ``valid``, ``workspaceCount``, and canonical ``path`` on success.
+        ``valid`` is ``false`` when the path fails validation or contains no
+        workspace folders with ``state.vscdb``. Invalid JSON body returns
+        ``{"valid": false, "error": "invalid JSON body", "workspaceCount": 0}``.
+        Path validation errors return ``{"valid": false, "error": "...", "workspaceCount": 0}``.
+        500 with ``{"valid": false, "error": "Failed to validate path"}`` on
+        unexpected failure.
+    """
     try:
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
@@ -102,6 +117,8 @@ def validate_path() -> tuple[Response, int] | Response:
             exc_info=True,
         )
         return json_response({"valid": False, "error": "Failed to validate path"}, 500)
+
+
 @bp.route("/api/set-workspace", methods=["POST"])
 def set_workspace() -> tuple[Response, int] | Response:
     """Persist a validated workspace storage path (POST /api/set-workspace).
