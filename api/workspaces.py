@@ -24,7 +24,10 @@ from utils.path_helpers import (
     warn_workspace_json_read,
 )
 from utils.workspace_descriptor import read_json_file
-from services.workspace_resolver import infer_workspace_name_from_context
+from services.workspace_resolver import (
+    infer_workspace_name_from_context,
+    lookup_workspace_display_name,
+)
 from services.cli_tabs import get_cli_workspace_tabs
 from services.workspace_listing import list_workspace_projects
 from services.workspace_tabs import (
