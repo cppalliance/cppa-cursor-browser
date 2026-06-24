@@ -139,8 +139,6 @@ class TestBubbleWiredAtReadSite(unittest.TestCase):
         # ValueError and skipped silently. Schema drift must now log a
         # `Schema drift in bubble <bid>` line so disappearing bubbles can be
         # traced. The well-formed row still loads alongside.
-        import logging
-
         from app import create_app
         # Seed a deliberately-malformed bubble row that will trip
         # Bubble.from_dict's "expected non-empty str" gate on the bubble_id by
