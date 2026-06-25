@@ -1,5 +1,5 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5\u00d7 slack at generation time. Refresh after intentional speedups via reduce_baselines.py.",
+  "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5x slack at generation time. Refresh after intentional speedups via reduce_baselines.py.",
   "updated": "2026-06-25T21:48:35Z",
   "machine": "Linux",
   "groups": {

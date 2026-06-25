@@ -6,7 +6,7 @@ import argparse
 import json
 import math
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -75,6 +75,11 @@ def reduce_baselines(
                 f"{path} benchmarks[{index}] ({bench_name!r}) has unknown group {group!r}; "
                 f"expected one of {GATED_GROUPS}"
             )
+        if bench_name in groups[group]:
+            raise BenchmarkDataError(
+                f"{path} benchmarks[{index}] ({raw_name!r}) duplicates normalized "
+                f"benchmark {group!r}/{bench_name!r}"
+            )
         groups[group][bench_name] = mean * slack
 
     excluded = ", ".join(sorted(EXCLUDED_FROM_GATE))
@@ -83,7 +88,7 @@ def reduce_baselines(
         if excluded
         else ""
     )
-    slack_note = f" Values multiplied by {slack}× slack at generation time." if slack != 1.0 else ""
+    slack_note = f" Values multiplied by {slack}x slack at generation time." if slack != 1.0 else ""
     machine_info = raw.get("machine_info")
     machine = machine_info.get("system") if isinstance(machine_info, dict) else None
     source_labels = {
@@ -97,7 +102,7 @@ def reduce_baselines(
             f"{slack_note}{excluded_note} "
             "Refresh after intentional speedups via reduce_baselines.py."
         ),
-        "updated": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "machine": machine,
         "groups": groups,
     }

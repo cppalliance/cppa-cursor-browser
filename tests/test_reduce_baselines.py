@@ -59,9 +59,10 @@ def test_reduce_baselines_groups_and_slack(tmp_path) -> None:
     assert groups["parse"]["test_list_workspace_projects_nocache[composers-50]"] == pytest.approx(0.075)
     assert groups["export"]["test_post_export_zip[composers-10]"] == pytest.approx(0.015)
     assert groups["search"]["test_search_full_corpus"] == pytest.approx(0.06)
+    assert groups["summary-cache"]["test_summary_cache_lookup[hit]"] == pytest.approx(0.00015)
     assert data["machine"] == "Linux"
     assert "ubuntu-latest CI benchmark-results.json" in data["_note"]
-    assert "1.5× slack" in data["_note"]
+    assert "1.5x slack" in data["_note"]
     assert output["groups"] == groups
 
 
@@ -118,6 +119,29 @@ def test_reduce_baselines_rejects_missing_group(tmp_path) -> None:
     )
 
     with pytest.raises(BenchmarkDataError, match="missing required 'group'"):
+        reduce_baselines(raw, out)
+
+
+def test_reduce_baselines_rejects_duplicate_normalized_name(tmp_path) -> None:
+    raw = tmp_path / "raw.json"
+    out = tmp_path / "baselines.json"
+    _write_raw(
+        raw,
+        [
+            {
+                "name": "test_summary_cache_lookup[hit]",
+                "group": "summary-cache",
+                "stats": {"mean": 0.0001},
+            },
+            {
+                "name": "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_lookup[hit]",
+                "group": "summary-cache",
+                "stats": {"mean": 0.0002},
+            },
+        ],
+    )
+
+    with pytest.raises(BenchmarkDataError, match="duplicates normalized"):
         reduce_baselines(raw, out)
 
 
