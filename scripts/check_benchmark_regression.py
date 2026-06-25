@@ -11,8 +11,17 @@ from pathlib import Path
 THRESHOLD = 1.20
 STALE_FLOOR = 0.50
 
-# Benchmarks gated via baselines.json; empty set means all baseline entries are checked.
-EXCLUDED_FROM_GATE: frozenset[str] = frozenset()
+# Benchmarks recorded in baselines.json but excluded from the regression gate.
+# Use sparingly — only for benches whose timing is inherently noisy across CI runs
+# (e.g. file I/O operations that depend on OS page-cache state).
+EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
+    {
+        # round_trip calls set_cached_projects (file write) + get_cached_projects (file read)
+        # each round. OS page-cache state on shared runners causes 3–5x variation between
+        # consecutive CI runs, making this ungatable with any reasonable slack.
+        "test_summary_cache_round_trip",
+    }
+)
 
 
 class BenchmarkDataError(ValueError):

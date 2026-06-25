@@ -35,11 +35,13 @@ The `benchmarks` job on **ubuntu-latest** runs the full `tests/benchmarks/` suit
 - **Fail** when a gated mean is **<50%** of baseline (stale — refresh after intentional speedups)
 - **Fail** when a gated baseline name has no current result
 - **Warn** for benchmarks without a baseline entry
-- All benchmarks listed in `baselines.json` are gated (no exclusion list)
+- All benchmarks listed in `baselines.json` are gated unless named in `EXCLUDED_FROM_GATE` in `scripts/check_benchmark_regression.py`
 
 Pinned runner: `ubuntu-latest`, `--benchmark-min-rounds=5`.
 
-Sub-millisecond benches (e.g. `test_summary_cache_lookup`, `test_composer_map_cache_lookup`) can be high-variance on shared runners. If the gate becomes flaky, raise `--slack` for those entries or reintroduce targeted exclusions in `EXCLUDED_FROM_GATE`.
+Sub-millisecond benches (e.g. `test_summary_cache_lookup`, `test_composer_map_cache_lookup`) can be high-variance on shared runners. If the gate becomes flaky, raise `--slack` for those entries or add targeted exclusions in `EXCLUDED_FROM_GATE`.
+
+`test_summary_cache_round_trip` is intentionally excluded from the gate: it calls `set_cached_projects` (file write) + `get_cached_projects` (file read) each round, so OS page-cache state on shared runners causes 3–5x variation between consecutive CI runs. The baseline entry is kept for observation only.
 
 ## Refresh baselines
 
