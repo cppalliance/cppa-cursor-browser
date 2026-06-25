@@ -179,6 +179,12 @@ def main(argv: list[str] | None = None) -> int:
         help="fail when current mean is below this fraction of baseline (default: 0.50)",
     )
     args = parser.parse_args(argv)
+    if args.threshold <= 1:
+        print("ERROR: --threshold must be greater than 1", file=sys.stderr)
+        return 2
+    if not 0 < args.stale_floor < 1:
+        print("ERROR: --stale-floor must be between 0 and 1 (exclusive)", file=sys.stderr)
+        return 2
     try:
         return check_regression(
             args.results_path,

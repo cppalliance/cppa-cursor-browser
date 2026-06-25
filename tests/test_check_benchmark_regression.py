@@ -251,3 +251,27 @@ def test_excluded_benchmark_not_gated(tmp_path, capsys: pytest.CaptureFixture[st
     out = capsys.readouterr().out
     assert "REGRESSION" not in out
     assert "STALE" not in out
+
+
+def test_main_rejects_invalid_threshold(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import main
+
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    assert main([str(results), str(baselines), "--threshold", "1.0"]) == 2
+    assert "--threshold must be greater than 1" in capsys.readouterr().err
+
+
+def test_main_rejects_invalid_stale_floor(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import main
+
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    assert main([str(results), str(baselines), "--stale-floor", "1.5"]) == 2
+    assert "--stale-floor must be between 0 and 1" in capsys.readouterr().err

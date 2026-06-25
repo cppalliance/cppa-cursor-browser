@@ -23,5 +23,6 @@ def test_list_workspace_projects_nocache(
     def _run() -> object:
         return list_workspace_projects(workspace_path, [], nocache=True)
 
-    projects, _warnings = benchmark(_run)
+    projects, warnings = benchmark(_run)
     assert isinstance(projects, list) and len(projects) > 0
+    assert warnings == []

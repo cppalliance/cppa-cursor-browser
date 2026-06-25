@@ -33,6 +33,7 @@ def reduce_baselines(
     out_path: str | Path,
     *,
     slack: float = 1.0,
+    source: str = "local",
 ) -> dict[str, object]:
     path = Path(raw_path)
     try:
@@ -70,9 +71,14 @@ def reduce_baselines(
     slack_note = f" Values multiplied by {slack}× slack at generation time." if slack != 1.0 else ""
     machine_info = raw.get("machine_info")
     machine = machine_info.get("system") if isinstance(machine_info, dict) else None
+    source_labels = {
+        "ubuntu-latest-ci": "ubuntu-latest CI benchmark-results.json",
+        "local": "local benchmark-results.json",
+    }
+    source_label = source_labels.get(source, source)
     output: dict[str, object] = {
         "_note": (
-            "Gated means from ubuntu-latest CI benchmark-results.json."
+            f"Gated means from {source_label}."
             f"{slack_note} "
             f"Excluded from gate (recorded for reference): {excluded}. "
             "Refresh after intentional speedups via reduce_baselines.py."
@@ -99,9 +105,14 @@ def main(argv: list[str] | None = None) -> int:
         default=1.0,
         help="multiply means by this factor (must be > 0)",
     )
+    parser.add_argument(
+        "--source",
+        default="local",
+        help="provenance label for _note (e.g. ubuntu-latest-ci, local)",
+    )
     args = parser.parse_args(argv)
     try:
-        reduce_baselines(args.raw_path, args.out_path, slack=args.slack)
+        reduce_baselines(args.raw_path, args.out_path, slack=args.slack, source=args.source)
     except BenchmarkDataError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

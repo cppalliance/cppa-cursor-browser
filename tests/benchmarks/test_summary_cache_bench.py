@@ -29,7 +29,14 @@ def test_summary_cache_lookup(
     """Time ``get_cached_projects`` only; miss = fingerprint mismatch, not rebuild."""
     set_cached_projects(workspace_fingerprint, sample_projects, [])
     lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
-    benchmark(get_cached_projects, lookup_fp)
+    result = benchmark(get_cached_projects, lookup_fp)
+    if mode == "hit":
+        assert result is not None
+        projects, warnings = result
+        assert projects == sample_projects
+        assert warnings == []
+    else:
+        assert result is None
 
 
 @pytest.mark.benchmark(group="summary-cache")
@@ -82,4 +89,11 @@ def test_tab_summary_cache_lookup(
     payload = {"tabs": [{"id": "cmp_0000", "title": "Bench"}]}
     set_cached_tab_summaries(workspace_fingerprint, workspace_id, payload, 200)
     lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
-    benchmark(get_cached_tab_summaries, lookup_fp, workspace_id)
+    result = benchmark(get_cached_tab_summaries, lookup_fp, workspace_id)
+    if mode == "hit":
+        assert result is not None
+        cached_payload, status = result
+        assert status == 200
+        assert cached_payload == payload
+    else:
+        assert result is None

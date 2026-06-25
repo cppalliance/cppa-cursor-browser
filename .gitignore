@@ -46,3 +46,4 @@ coverage.xml
 .hypothesis/
 benchmark-results.json
 benchmarks/_raw.json
+benchmarks/_ci/
