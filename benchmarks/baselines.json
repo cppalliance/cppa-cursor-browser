@@ -1,5 +1,5 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #120, run 28123677675). Refresh: pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts=",
+  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #120, run 28123677675). Refresh after intentional perf changes: download benchmark-results.json from the CI artifacts job, then `python scripts/check_benchmark_regression.py benchmark-results.json benchmarks/baselines.json` (re-seed with reduce_baselines or edit means). Local capture: `pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts=` on ubuntu-latest.",
   "updated": "2026-06-24T19:20:27Z",
   "machine": "Linux",
   "groups": {

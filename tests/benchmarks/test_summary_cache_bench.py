@@ -1,4 +1,8 @@
-"""pytest-benchmark coverage for services/summary_cache.py hot paths."""
+"""pytest-benchmark coverage for services/summary_cache.py hot paths.
+
+``test_summary_cache_hit`` and ``test_summary_cache_miss`` both time ``get_cached_projects``
+only. Miss means fingerprint mismatch (cache not used), not a full cache rebuild.
+"""
 
 from __future__ import annotations
 
