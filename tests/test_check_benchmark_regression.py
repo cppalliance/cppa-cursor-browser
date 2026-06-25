@@ -14,7 +14,7 @@ from scripts.check_benchmark_regression import (
     normalize_benchmark_name,
 )
 
-GATED_BENCH = "test_summary_cache_hit"
+GATED_BENCH = "test_summary_cache_lookup[hit]"
 
 
 def _write_results(path, benchmarks: list[dict]) -> None:
@@ -32,9 +32,9 @@ def _write_baselines(path, groups: dict[str, dict[str, float]]) -> None:
 
 
 def test_normalize_benchmark_name_strips_module_prefix() -> None:
-    full = "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_hit"
-    assert normalize_benchmark_name(full) == "test_summary_cache_hit"
-    assert normalize_benchmark_name("test_summary_cache_hit") == "test_summary_cache_hit"
+    full = "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_lookup[hit]"
+    assert normalize_benchmark_name(full) == "test_summary_cache_lookup[hit]"
+    assert normalize_benchmark_name("test_summary_cache_lookup[hit]") == "test_summary_cache_lookup[hit]"
 
 
 def test_normalize_benchmark_name_preserves_colons_in_param_values() -> None:
@@ -50,13 +50,13 @@ def test_load_results_normalizes_full_node_id(tmp_path) -> None:
         path,
         [
             {
-                "name": "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_hit",
+                "name": "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_lookup[hit]",
                 "stats": {"mean": 0.0001},
             }
         ],
     )
 
-    assert load_results(path)["test_summary_cache_hit"] == pytest.approx(0.0001)
+    assert load_results(path)["test_summary_cache_lookup[hit]"] == pytest.approx(0.0001)
 
 
 def test_missing_baseline_warns_without_failing(
@@ -213,3 +213,41 @@ def test_load_baseline_means_rejects_non_dict_group(tmp_path) -> None:
 
     with pytest.raises(BenchmarkDataError, match="must be an object"):
         load_baseline_means(baselines)
+
+
+def test_stale_baseline_fails(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(
+        results,
+        [{"name": GATED_BENCH, "stats": {"mean": 0.00005}}],
+    )
+    _write_baselines(
+        baselines,
+        {"summary-cache": {GATED_BENCH: 0.0002}},
+    )
+
+    assert check_regression(results, baselines) == 1
+    out = capsys.readouterr().out
+    assert "STALE" in out
+
+
+def test_excluded_benchmark_not_gated(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import EXCLUDED_FROM_GATE
+
+    excluded = next(iter(EXCLUDED_FROM_GATE))
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(
+        results,
+        [{"name": excluded, "stats": {"mean": 1.0}}],
+    )
+    _write_baselines(
+        baselines,
+        {"search": {excluded: 0.0001}},
+    )
+
+    assert check_regression(results, baselines) == 0
+    out = capsys.readouterr().out
+    assert "REGRESSION" not in out
+    assert "STALE" not in out

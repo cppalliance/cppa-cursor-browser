@@ -1,15 +1,29 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json (PR #120, run 28123677675). Refresh after intentional perf changes: download benchmark-results.json from the CI artifacts job, then `python scripts/check_benchmark_regression.py benchmark-results.json benchmarks/baselines.json` (re-seed with reduce_baselines or edit means). Local capture: `pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmark-results.json -o addopts=` on ubuntu-latest.",
-  "updated": "2026-06-24T19:20:27Z",
-  "machine": "Linux",
+  "_note": "Gated means seeded locally (Windows, 1.5× slack) — refresh from ubuntu-latest CI benchmark-results.json artifact before merge. Excluded from gate: test_list_workspace_projects_nocache[composers-10], test_search_full_corpus.",
+  "updated": "2026-06-25T20:34:07Z",
+  "machine": "Windows",
   "groups": {
+    "parse": {
+      "test_list_workspace_projects_nocache[composers-10]": 0.01313006085768828,
+      "test_list_workspace_projects_nocache[composers-50]": 0.04705098008271307,
+      "test_list_workspace_projects_nocache[composers-200]": 0.19944224995560944
+    },
+    "export": {
+      "test_post_export_zip[composers-10]": 0.0170322916819714,
+      "test_post_export_zip[composers-50]": 0.040990050032269215
+    },
+    "search": {
+      "test_search_full_corpus": 0.057670830062124874
+    },
     "summary-cache": {
-      "test_summary_cache_hit": 6.3e-05,
-      "test_summary_cache_miss": 6.3e-05,
-      "test_fingerprint_workspace_entries[10]": 0.001844,
-      "test_fingerprint_workspace_entries[50]": 0.007759,
-      "test_fingerprint_workspace_entries[200]": 0.022231,
-      "test_summary_cache_round_trip": 0.000351
+      "test_summary_cache_lookup[hit]": 0.00014543285277406022,
+      "test_summary_cache_lookup[miss]": 0.0001437347241805802,
+      "test_fingerprint_workspace_entries[10]": 0.001866654586096193,
+      "test_fingerprint_workspace_entries[50]": 0.00636450619807407,
+      "test_fingerprint_workspace_entries[200]": 0.020523441289855247,
+      "test_summary_cache_round_trip": 0.0019650292328056915,
+      "test_tab_summary_cache_lookup[hit]": 0.00015344636292124477,
+      "test_tab_summary_cache_lookup[miss]": 0.00012440098537902896
     }
   }
 }

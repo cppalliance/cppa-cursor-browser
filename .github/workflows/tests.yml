@@ -215,7 +215,7 @@ jobs:
             --redact \
             --exit-code 1
 
-  # ── Performance benchmarks: summary cache (issue #115) ─────────────────────
+  # ── Performance benchmarks: unified suite (issues #115, #110) ──────────────
   benchmarks:
     name: Performance benchmarks (gated)
     needs: [unittest]
@@ -236,7 +236,7 @@ jobs:
           python -m pip install -r requirements-lock.txt
           python -m pip install 'pytest>=8,<9' 'pytest-benchmark==4.0.0'
 
-      - name: Run summary-cache benchmarks
+      - name: Run benchmark suite
         run: >
           python -m pytest tests/benchmarks/
           --benchmark-only
