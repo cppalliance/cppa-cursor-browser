@@ -1,32 +1,32 @@
 {
   "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5x slack at generation time. Refresh after intentional speedups via reduce_baselines.py.",
-  "updated": "2026-06-25T22:57:33Z",
+  "updated": "2026-06-25T23:21:29Z",
   "machine": "Linux",
   "groups": {
     "parse": {
-      "test_list_workspace_projects_nocache[composers-10]": 0.01702312019643009,
-      "test_list_workspace_projects_nocache[composers-50]": 0.07538331990000699,
-      "test_list_workspace_projects_nocache[composers-200]": 0.251991555999993
+      "test_list_workspace_projects_nocache[composers-10]": 0.012957852608107466,
+      "test_list_workspace_projects_nocache[composers-50]": 0.05577718626923036,
+      "test_list_workspace_projects_nocache[composers-200]": 0.1878804727500003
     },
     "export": {
-      "test_post_export_zip[composers-10]": 0.0112034034344294,
-      "test_post_export_zip[composers-50]": 0.04482855966665985
+      "test_post_export_zip[composers-10]": 0.009724031427631593,
+      "test_post_export_zip[composers-50]": 0.041050375020001154
     },
     "search": {
-      "test_search_full_corpus_live_scan": 0.047164217833331655,
-      "test_search_full_corpus_indexed": 0.05494209932945618
+      "test_search_full_corpus_live_scan": 0.03440949781249936,
+      "test_search_full_corpus_indexed": 0.04301802726315884
     },
     "summary-cache": {
-      "test_summary_cache_lookup[hit]": 9.224067718099102e-05,
-      "test_summary_cache_lookup[miss]": 9.128770315496628e-05,
-      "test_fingerprint_workspace_entries[10]": 0.0024789120309553535,
-      "test_fingerprint_workspace_entries[50]": 0.010901568931818675,
-      "test_fingerprint_workspace_entries[200]": 0.03069810573000666,
-      "test_summary_cache_round_trip": 0.0004966099535917549,
-      "test_tab_summary_cache_lookup[hit]": 0.00010487297799045405,
-      "test_tab_summary_cache_lookup[miss]": 0.00010309520517204601,
-      "test_composer_map_cache_lookup[hit]": 8.074544668606364e-05,
-      "test_composer_map_cache_lookup[miss]": 9.495690246481993e-05
+      "test_summary_cache_lookup[hit]": 5.7807392057047035e-05,
+      "test_summary_cache_lookup[miss]": 5.6223937183791584e-05,
+      "test_composer_map_cache_lookup[hit]": 5.551344090189019e-05,
+      "test_composer_map_cache_lookup[miss]": 5.490079494266499e-05,
+      "test_fingerprint_workspace_entries[10]": 0.0019021180608754708,
+      "test_fingerprint_workspace_entries[50]": 0.008100319212766178,
+      "test_fingerprint_workspace_entries[200]": 0.0235079150476191,
+      "test_summary_cache_round_trip": 0.001704988098923577,
+      "test_tab_summary_cache_lookup[hit]": 6.058533512024974e-05,
+      "test_tab_summary_cache_lookup[miss]": 6.130049047937722e-05
     }
   }
 }
