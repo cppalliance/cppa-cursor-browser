@@ -31,7 +31,7 @@ The `benchmarks` job on **ubuntu-latest** runs the full `tests/benchmarks/` suit
 - **Fail** when a gated mean is **<50%** of baseline (stale — refresh after intentional speedups)
 - **Fail** when a gated baseline name has no current result
 - **Warn** for benchmarks without a baseline entry
-- **Skip gate** for `EXCLUDED_FROM_GATE` names (smallest parse corpus, full-corpus search — sub-ms CI noise)
+- All benchmarks listed in `baselines.json` are gated (no exclusion list)
 
 Pinned runner: `ubuntu-latest`, `--benchmark-min-rounds=5`.
 

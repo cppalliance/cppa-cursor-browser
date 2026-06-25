@@ -74,6 +74,11 @@ def test_summary_cache_round_trip(
         get_cached_projects(fp)
 
     benchmark(_run)
+    cached = get_cached_projects(fp)
+    assert cached is not None
+    cached_projects, cached_warnings = cached
+    assert cached_projects == projects
+    assert cached_warnings == []
 
 
 @pytest.mark.benchmark(group="summary-cache")

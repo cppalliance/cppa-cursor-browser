@@ -1,6 +1,6 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5\u00d7 slack at generation time. Excluded from gate (recorded for reference): test_list_workspace_projects_nocache[composers-10], test_search_full_corpus. Refresh after intentional speedups via reduce_baselines.py.",
-  "updated": "2026-06-25T21:14:16Z",
+  "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5\u00d7 slack at generation time. Refresh after intentional speedups via reduce_baselines.py.",
+  "updated": "2026-06-25T21:48:35Z",
   "machine": "Linux",
   "groups": {
     "parse": {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ GATED_GROUPS = ("parse", "export", "search", "summary-cache")
 
 def _positive_float(value: str) -> float:
     parsed = float(value)
+    if not math.isfinite(parsed):
+        raise argparse.ArgumentTypeError("slack must be a finite number")
     if parsed <= 0:
         raise argparse.ArgumentTypeError("slack must be greater than zero")
     return parsed
@@ -63,11 +66,23 @@ def reduce_baselines(
             ) from exc
         bench_name = normalize_benchmark_name(str(raw_name))
         group = entry.get("group")
+        if group is None:
+            raise BenchmarkDataError(
+                f"{path} benchmarks[{index}] ({bench_name!r}) missing required 'group'"
+            )
         if group not in GATED_GROUPS:
-            continue
+            raise BenchmarkDataError(
+                f"{path} benchmarks[{index}] ({bench_name!r}) has unknown group {group!r}; "
+                f"expected one of {GATED_GROUPS}"
+            )
         groups[group][bench_name] = mean * slack
 
     excluded = ", ".join(sorted(EXCLUDED_FROM_GATE))
+    excluded_note = (
+        f" Excluded from gate (recorded for reference): {excluded}."
+        if excluded
+        else ""
+    )
     slack_note = f" Values multiplied by {slack}× slack at generation time." if slack != 1.0 else ""
     machine_info = raw.get("machine_info")
     machine = machine_info.get("system") if isinstance(machine_info, dict) else None
@@ -79,8 +94,7 @@ def reduce_baselines(
     output: dict[str, object] = {
         "_note": (
             f"Gated means from {source_label}."
-            f"{slack_note} "
-            f"Excluded from gate (recorded for reference): {excluded}. "
+            f"{slack_note}{excluded_note} "
             "Refresh after intentional speedups via reduce_baselines.py."
         ),
         "updated": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

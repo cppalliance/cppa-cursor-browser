@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from flask.testing import FlaskClient
 
-from tests.benchmarks.conftest import BENCH_SEARCH_TERM
+from tests.benchmarks.constants import BENCH_SEARCH_TERM
 
 
 @pytest.mark.benchmark(group="search")

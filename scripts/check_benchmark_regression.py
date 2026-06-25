@@ -4,19 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 THRESHOLD = 1.20
 STALE_FLOOR = 0.50
 
-# Sub-ms timings are too noisy for a fixed 20% gate on ubuntu CI.
-EXCLUDED_FROM_GATE = frozenset(
-    {
-        "test_list_workspace_projects_nocache[composers-10]",
-        "test_search_full_corpus",
-    }
-)
+# Benchmarks gated via baselines.json; empty set means all baseline entries are checked.
+EXCLUDED_FROM_GATE: frozenset[str] = frozenset()
 
 
 class BenchmarkDataError(ValueError):
@@ -106,6 +102,17 @@ def load_baseline_means(baselines_path: str | Path) -> dict[str, float]:
     return means
 
 
+def _validate_gate_ratios(threshold: float, stale_floor: float) -> None:
+    if not math.isfinite(threshold):
+        raise BenchmarkDataError("threshold must be finite")
+    if threshold <= 1:
+        raise BenchmarkDataError("threshold must be greater than 1")
+    if not math.isfinite(stale_floor):
+        raise BenchmarkDataError("stale_floor must be finite")
+    if not 0 < stale_floor < 1:
+        raise BenchmarkDataError("stale_floor must be between 0 and 1 (exclusive)")
+
+
 def check_regression(
     results_path: str | Path,
     baselines_path: str | Path,
@@ -114,6 +121,7 @@ def check_regression(
     stale_floor: float = STALE_FLOOR,
 ) -> int:
     """Return 0 when within threshold; 1 when any gated benchmark regresses or is stale."""
+    _validate_gate_ratios(threshold, stale_floor)
     flat = load_results(results_path)
     baseline_means = load_baseline_means(baselines_path)
 
@@ -179,12 +187,6 @@ def main(argv: list[str] | None = None) -> int:
         help="fail when current mean is below this fraction of baseline (default: 0.50)",
     )
     args = parser.parse_args(argv)
-    if args.threshold <= 1:
-        print("ERROR: --threshold must be greater than 1", file=sys.stderr)
-        return 2
-    if not 0 < args.stale_floor < 1:
-        print("ERROR: --stale-floor must be between 0 and 1 (exclusive)", file=sys.stderr)
-        return 2
     try:
         return check_regression(
             args.results_path,

@@ -14,8 +14,7 @@ from flask.testing import FlaskClient
 from app import create_app
 from services import summary_cache
 from services.summary_cache import fingerprint_workspace_storage
-
-BENCH_SEARCH_TERM = "bench-search-token"
+from tests.benchmarks.constants import BENCH_SEARCH_TERM
 
 
 def make_workspace_entries(workspace_root: Path, count: int) -> list[dict[str, Any]]:
@@ -117,6 +116,26 @@ def build_bench_storage(root: Path, composer_count: int) -> dict[str, str]:
     }
 
 
+def _make_bench_flask_client(
+    storage: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    state_subdir: str = ".cursor-chat-browser",
+) -> FlaskClient:
+    """Flask test client with env + export state patched for synthetic storage."""
+    monkeypatch.setenv("WORKSPACE_PATH", storage["workspace_path"])
+    monkeypatch.setenv("CLI_CHATS_PATH", storage["cli_chats_path"])
+    monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
+    state_dir = tmp_path / state_subdir
+    state_dir.mkdir()
+    monkeypatch.setattr("api.export_api._get_state_dir", lambda: str(state_dir))
+    app = create_app()
+    app.config["TESTING"] = True
+    app.config["EXCLUSION_RULES"] = []
+    return app.test_client()
+
+
 @pytest.fixture
 def summary_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect summary-cache files to an isolated temp directory."""
@@ -193,13 +212,7 @@ def bench_env(
 @pytest.fixture
 def bench_client(bench_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FlaskClient:
     """Flask test client bound to synthetic bench storage."""
-    state_dir = tmp_path / ".cursor-chat-browser"
-    state_dir.mkdir()
-    monkeypatch.setattr("api.export_api._get_state_dir", lambda: str(state_dir))
-    app = create_app()
-    app.config["TESTING"] = True
-    app.config["EXCLUSION_RULES"] = []
-    return app.test_client()
+    return _make_bench_flask_client(bench_env, tmp_path, monkeypatch)
 
 
 @pytest.fixture
@@ -209,13 +222,9 @@ def bench_client_search_corpus(
 ) -> FlaskClient:
     """Flask client over a fixed 50-composer corpus for search benchmarks."""
     storage = build_bench_storage(tmp_path / "search_storage", 50)
-    monkeypatch.setenv("WORKSPACE_PATH", storage["workspace_path"])
-    monkeypatch.setenv("CLI_CHATS_PATH", storage["cli_chats_path"])
-    monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
-    state_dir = tmp_path / ".cursor-chat-browser-search"
-    state_dir.mkdir()
-    monkeypatch.setattr("api.export_api._get_state_dir", lambda: str(state_dir))
-    app = create_app()
-    app.config["TESTING"] = True
-    app.config["EXCLUSION_RULES"] = []
-    return app.test_client()
+    return _make_bench_flask_client(
+        storage,
+        tmp_path,
+        monkeypatch,
+        state_subdir=".cursor-chat-browser-search",
+    )
