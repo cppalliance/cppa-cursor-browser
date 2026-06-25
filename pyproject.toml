@@ -37,8 +37,9 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+# Requires pytest-benchmark (pip install -e ".[dev]") for default `pytest` invocations.
 pythonpath = ["."]
-addopts = "--benchmark-disable"
+addopts = "--benchmark-skip"
 testpaths = ["tests"]
 markers = [
     "benchmark: performance benchmarks (pytest-benchmark)",
