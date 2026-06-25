@@ -1,6 +1,6 @@
 {
   "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5x slack at generation time. Refresh after intentional speedups via reduce_baselines.py.",
-  "updated": "2026-06-25T21:48:35Z",
+  "updated": "2026-06-25T22:57:33Z",
   "machine": "Linux",
   "groups": {
     "parse": {
@@ -13,7 +13,8 @@
       "test_post_export_zip[composers-50]": 0.04482855966665985
     },
     "search": {
-      "test_search_full_corpus": 0.047164217833331655
+      "test_search_full_corpus_live_scan": 0.047164217833331655,
+      "test_search_full_corpus_indexed": 0.05494209932945618
     },
     "summary-cache": {
       "test_summary_cache_lookup[hit]": 9.224067718099102e-05,
@@ -23,7 +24,9 @@
       "test_fingerprint_workspace_entries[200]": 0.03069810573000666,
       "test_summary_cache_round_trip": 0.0004966099535917549,
       "test_tab_summary_cache_lookup[hit]": 0.00010487297799045405,
-      "test_tab_summary_cache_lookup[miss]": 0.00010309520517204601
+      "test_tab_summary_cache_lookup[miss]": 0.00010309520517204601,
+      "test_composer_map_cache_lookup[hit]": 8.074544668606364e-05,
+      "test_composer_map_cache_lookup[miss]": 9.495690246481993e-05
     }
   }
 }

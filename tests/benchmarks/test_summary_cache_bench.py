@@ -9,8 +9,10 @@ import pytest
 
 from services.summary_cache import (
     fingerprint_workspace_storage,
+    get_cached_composer_id_to_ws,
     get_cached_projects,
     get_cached_tab_summaries,
+    set_cached_composer_id_to_ws,
     set_cached_projects,
     set_cached_tab_summaries,
 )
@@ -35,6 +37,26 @@ def test_summary_cache_lookup(
         projects, warnings = result
         assert projects == sample_projects
         assert warnings == []
+    else:
+        assert result is None
+
+
+@pytest.mark.benchmark(group="summary-cache")
+@pytest.mark.parametrize("mode", ["hit", "miss"], ids=["hit", "miss"])
+def test_composer_map_cache_lookup(
+    benchmark,
+    mode: Literal["hit", "miss"],
+    summary_cache_dir: Path,
+    workspace_fingerprint: dict[str, Any],
+    stale_fingerprint: dict[str, Any],
+) -> None:
+    """Time ``get_cached_composer_id_to_ws`` hit/miss (fingerprint mismatch on miss)."""
+    mapping = {"cmp_0000": "ws_0000"}
+    set_cached_composer_id_to_ws(workspace_fingerprint, mapping)
+    lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
+    result = benchmark(get_cached_composer_id_to_ws, lookup_fp)
+    if mode == "hit":
+        assert result == mapping
     else:
         assert result is None
 

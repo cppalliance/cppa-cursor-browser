@@ -122,11 +122,21 @@ def _make_bench_flask_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     state_subdir: str = ".cursor-chat-browser",
+    live_scan_search: bool = False,
 ) -> FlaskClient:
-    """Flask test client with env + export state patched for synthetic storage."""
+    """Flask test client with env + export state patched for synthetic storage.
+
+    When *live_scan_search* is True, set ``CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX=1`` so
+    ``/api/search`` measures the live-scan fallback. Otherwise the FTS index path
+    from #113 may be used when an index is built (see indexed search fixtures).
+    """
     monkeypatch.setenv("WORKSPACE_PATH", storage["workspace_path"])
     monkeypatch.setenv("CLI_CHATS_PATH", storage["cli_chats_path"])
-    monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
+    if live_scan_search:
+        monkeypatch.setenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", "1")
+    else:
+        monkeypatch.delenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", raising=False)
+        monkeypatch.delenv("CURSOR_CHAT_BROWSER_NOCACHE", raising=False)
     state_dir = tmp_path / state_subdir
     state_dir.mkdir()
     monkeypatch.setattr("api.export_api._get_state_dir", lambda: str(state_dir))
@@ -138,7 +148,12 @@ def _make_bench_flask_client(
 
 @pytest.fixture
 def summary_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect summary-cache files to an isolated temp directory."""
+    """Redirect summary-cache files to an isolated temp directory.
+
+    Tab-summary files use ``CACHE_DIR`` + hashed filenames only (see
+    ``summary_cache._tab_summaries_path``); they do not use
+    ``PROJECTS_CACHE_FILE`` or ``COMPOSER_MAP_CACHE_FILE``.
+    """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     monkeypatch.setattr(summary_cache, "CACHE_DIR", cache_dir)
@@ -212,7 +227,7 @@ def bench_env(
 @pytest.fixture
 def bench_client(bench_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FlaskClient:
     """Flask test client bound to synthetic bench storage."""
-    return _make_bench_flask_client(bench_env, tmp_path, monkeypatch)
+    return _make_bench_flask_client(bench_env, tmp_path, monkeypatch, live_scan_search=True)
 
 
 @pytest.fixture
@@ -220,11 +235,46 @@ def bench_client_search_corpus(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> FlaskClient:
-    """Flask client over a fixed 50-composer corpus for search benchmarks."""
+    """Flask client over a fixed 50-composer corpus (live-scan search path)."""
     storage = build_bench_storage(tmp_path / "search_storage", 50)
     return _make_bench_flask_client(
         storage,
         tmp_path,
         monkeypatch,
         state_subdir=".cursor-chat-browser-search",
+        live_scan_search=True,
+    )
+
+
+@pytest.fixture
+def bench_client_search_corpus_indexed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> FlaskClient:
+    """Flask client with FTS index built for the 50-composer search corpus."""
+    from services.search_index import build_search_index
+
+    monkeypatch.delenv("CURSOR_CHAT_BROWSER_NO_SEARCH_INDEX", raising=False)
+    monkeypatch.delenv("CURSOR_CHAT_BROWSER_NOCACHE", raising=False)
+
+    storage = build_bench_storage(tmp_path / "search_indexed_storage", 50)
+    cache_dir = tmp_path / "search_index_cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr("services.search_index.CACHE_DIR", cache_dir)
+    monkeypatch.setattr(
+        "services.search_index.SEARCH_INDEX_POINTER_FILE",
+        cache_dir / "search_index.active",
+    )
+    monkeypatch.setattr(
+        "services.search_index.SEARCH_INDEX_FILE",
+        cache_dir / "search_index.sqlite",
+    )
+    built = build_search_index(storage["workspace_path"], [], force=True)
+    assert built is True
+    return _make_bench_flask_client(
+        storage,
+        tmp_path,
+        monkeypatch,
+        state_subdir=".cursor-chat-browser-search-indexed",
+        live_scan_search=False,
     )

@@ -6,7 +6,9 @@
 seed-baselines-local:
 	@echo "WARNING: seed-baselines-local uses this host's timings; CI gates on ubuntu-latest." >&2
 	python -m pytest tests/benchmarks/ --benchmark-only --benchmark-json=benchmarks/_raw.json -o addopts=
-	python scripts/reduce_baselines.py benchmarks/_raw.json benchmarks/baselines.json --slack 1.5 --source local
+	python -c "import os, subprocess, sys; \
+	  cmd = [sys.executable, 'scripts/reduce_baselines.py', 'benchmarks/_raw.json', 'benchmarks/baselines.json', '--slack', '1.5', '--source', 'local']; \
+	  (subprocess.run(cmd, check=True), print('Updated benchmarks/baselines.json', file=sys.stderr)) if os.environ.get('FORCE') == '1' else print('Wrote benchmarks/_raw.json only. Set FORCE=1 to overwrite benchmarks/baselines.json.', file=sys.stderr)"
 
 # Deprecated alias — kept for muscle memory; see seed-baselines-local warning above.
 update-baselines: seed-baselines-local

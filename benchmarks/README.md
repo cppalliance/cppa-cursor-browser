@@ -17,11 +17,15 @@ pytest tests/benchmarks/ --benchmark-only -o addopts= -v
 | Group | What |
 |-------|------|
 | parse | `list_workspace_projects(..., nocache=True)` over 10 / 50 / 200 synthetic composers |
-| export | `POST /api/export` (ZIP) over 10 / 50 composer corpora |
-| search | `GET /api/search` over a 50-composer synthetic corpus |
-| summary-cache | cache lookup (hit/miss), fingerprint (10/50/200), round-trip, tab-summary lookup |
+| export | `POST /api/export` (ZIP) over 10 / 50 composer corpora (capped at 50 for CI runtime; parse goes to 200) |
+| search | `GET /api/search` over a 50-composer corpus — **live-scan** (`test_search_full_corpus_live_scan`, `NO_SEARCH_INDEX=1`) and **FTS index** (`test_search_full_corpus_indexed`, pre-built index) |
+| summary-cache | projects lookup (hit/miss), composer-map lookup (hit/miss), fingerprint (10/50/200), round-trip, tab-summary lookup |
 
 Synthetic corpora are built in `tests/benchmarks/conftest.py` — no real Cursor storage dependency.
+
+### Adding a benchmark group
+
+Every `@pytest.mark.benchmark(group="...")` name must appear in `GATED_GROUPS` inside `scripts/reduce_baselines.py`. Otherwise `reduce_baselines.py` fails at refresh time with an unknown-group error. Update both the test marker and `GATED_GROUPS` when introducing a new group.
 
 ## CI gate
 
@@ -35,18 +39,22 @@ The `benchmarks` job on **ubuntu-latest** runs the full `tests/benchmarks/` suit
 
 Pinned runner: `ubuntu-latest`, `--benchmark-min-rounds=5`.
 
+Sub-millisecond benches (e.g. `test_summary_cache_lookup`, `test_composer_map_cache_lookup`) can be high-variance on shared runners. If the gate becomes flaky, raise `--slack` for those entries or reintroduce targeted exclusions in `EXCLUDED_FROM_GATE`.
+
 ## Refresh baselines
 
 After intentional performance work, capture on **ubuntu-latest** (same OS as the gated CI job). Download `benchmark-results.json` from a CI artifact when possible:
 
 ```bash
-python scripts/reduce_baselines.py benchmark-results.json benchmarks/baselines.json --slack 1.5
+python scripts/reduce_baselines.py benchmark-results.json benchmarks/baselines.json --slack 1.5 --source ubuntu-latest-ci
 ```
 
 For a quick local snapshot only (may not match CI timings):
 
 ```bash
 make seed-baselines-local
+# writes benchmarks/_raw.json only; does not overwrite benchmarks/baselines.json
+make seed-baselines-local FORCE=1   # also runs reduce_baselines into benchmarks/baselines.json
 ```
 
 `make update-baselines` is a deprecated alias for `seed-baselines-local`. Do not commit baselines from macOS/Windows unless you accept cross-OS gate skew.
@@ -56,5 +64,5 @@ make seed-baselines-local
 | Target | Purpose |
 |--------|---------|
 | `make check-benchmarks` | Run suite + regression gate locally |
-| `make seed-baselines-local` | Capture local timings into `benchmarks/baselines.json` (with slack) |
+| `make seed-baselines-local` | Capture local timings to `benchmarks/_raw.json` (use `FORCE=1` to update `baselines.json`) |
 | `make clean-benchmark-artifacts` | Remove `benchmark-results.json` and `benchmarks/_raw.json` |
