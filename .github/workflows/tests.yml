@@ -215,7 +215,7 @@ jobs:
             --redact \
             --exit-code 1
 
-  # ── Performance benchmarks: summary cache (issue #7) ───────────────────────
+  # ── Performance benchmarks: summary cache (issue #115) ─────────────────────
   benchmarks:
     name: Performance benchmarks (gated)
     needs: [unittest]

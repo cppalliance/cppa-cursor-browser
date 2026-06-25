@@ -36,7 +36,7 @@ def summary_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     Patches ``CACHE_DIR`` (also used by tab-summary paths via ``_tab_summaries_path``)
     plus the projects/composer-map file constants used by current benchmarks.
-    Tab-summary cache benchmarks are deferred to issue #8 (unified benchmark suite).
+    Tab-summary cache benchmarks are deferred to issue #110 (unified benchmark suite).
     """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
