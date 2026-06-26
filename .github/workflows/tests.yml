@@ -115,7 +115,7 @@ jobs:
         # exercise Flask routes via app.test_client(). Only listed files — not
         # `pytest tests/` — to avoid re-collecting unittest.TestCase classes above.
         # -o addopts= avoids inheriting benchmark-only options from pyproject.toml.
-        run: python -m pytest tests/test_api_search.py tests/test_api_workspaces.py tests/test_api_export.py tests/test_pdf_export.py tests/test_search_helpers.py tests/test_check_benchmark_regression.py -v --tb=short -o addopts=
+        run: python -m pytest tests/test_api_search.py tests/test_api_workspaces.py tests/test_api_export.py tests/test_pdf_export.py tests/test_search_helpers.py tests/test_check_benchmark_regression.py tests/test_reduce_baselines.py -v --tb=short -o addopts=
 
       # ── PyInstaller desktop build (Windows only, once per workflow) ────────
       # Closes #44. Builds the onedir bundle and smoke-tests --help so the
@@ -215,7 +215,7 @@ jobs:
             --redact \
             --exit-code 1
 
-  # ── Performance benchmarks: summary cache (issue #115) ─────────────────────
+  # ── Performance benchmarks: unified suite (issues #115, #110) ──────────────
   benchmarks:
     name: Performance benchmarks (gated)
     needs: [unittest]
@@ -236,7 +236,7 @@ jobs:
           python -m pip install -r requirements-lock.txt
           python -m pip install 'pytest>=8,<9' 'pytest-benchmark==4.0.0'
 
-      - name: Run summary-cache benchmarks
+      - name: Run benchmark suite
         run: >
           python -m pytest tests/benchmarks/
           --benchmark-only

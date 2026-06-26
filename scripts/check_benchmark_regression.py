@@ -4,10 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 THRESHOLD = 1.20
+STALE_FLOOR = 0.50
+
+# Benchmarks recorded in baselines.json but excluded from the regression gate.
+# Use sparingly — only for benches whose timing is inherently noisy across CI runs
+# (e.g. file I/O operations that depend on OS page-cache state).
+EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
+    {
+        # round_trip calls set_cached_projects (file write) + get_cached_projects (file read)
+        # each round. OS page-cache state on shared runners causes 3–5x variation between
+        # consecutive CI runs, making this ungatable with any reasonable slack.
+        "test_summary_cache_round_trip",
+    }
+)
 
 
 class BenchmarkDataError(ValueError):
@@ -97,19 +111,35 @@ def load_baseline_means(baselines_path: str | Path) -> dict[str, float]:
     return means
 
 
+def _validate_gate_ratios(threshold: float, stale_floor: float) -> None:
+    if not math.isfinite(threshold):
+        raise BenchmarkDataError("threshold must be finite")
+    if threshold <= 1:
+        raise BenchmarkDataError("threshold must be greater than 1")
+    if not math.isfinite(stale_floor):
+        raise BenchmarkDataError("stale_floor must be finite")
+    if not 0 < stale_floor < 1:
+        raise BenchmarkDataError("stale_floor must be between 0 and 1 (exclusive)")
+
+
 def check_regression(
     results_path: str | Path,
     baselines_path: str | Path,
     *,
     threshold: float = THRESHOLD,
+    stale_floor: float = STALE_FLOOR,
 ) -> int:
-    """Return 0 when within threshold; 1 when any gated benchmark regresses."""
+    """Return 0 when within threshold; 1 when any gated benchmark regresses or is stale."""
+    _validate_gate_ratios(threshold, stale_floor)
     flat = load_results(results_path)
     baseline_means = load_baseline_means(baselines_path)
 
     failures: list[str] = []
+    stale: list[str] = []
     missing: list[str] = []
     for name, base in baseline_means.items():
+        if name in EXCLUDED_FROM_GATE:
+            continue
         cur = flat.get(name)
         if cur is None:
             print(f"FAIL: no current result for gated baseline {name!r}")
@@ -119,20 +149,32 @@ def check_regression(
             print(f"WARN: baseline for {name!r} is zero; skipping ratio check")
             continue
         ratio = cur / base
-        tag = "FAIL" if ratio > threshold else "ok"
-        print(f"[{tag}] {name}: {cur:.6f}s vs {base:.6f}s ({ratio:.2f}x)")
         if ratio > threshold:
+            tag = "FAIL"
             failures.append(name)
+        elif ratio < stale_floor:
+            tag = "STALE"
+            stale.append(name)
+        else:
+            tag = "ok"
+        print(f"[{tag}] {name}: {cur:.6f}s vs {base:.6f}s ({ratio:.2f}x)")
 
     for name in flat:
+        if name in EXCLUDED_FROM_GATE:
+            continue
         if name not in baseline_means:
             print(f"WARN: {name!r} has no baseline yet; not gated")
 
     if failures:
         print(f"\nREGRESSION: {len(failures)} benchmark(s) exceeded {threshold:.0%}")
+    if stale:
+        print(
+            f"\nSTALE: {len(stale)} benchmark(s) are faster than {stale_floor:.0%} of baseline "
+            "(refresh baselines after intentional speedups)"
+        )
     if missing:
         print(f"\nMISSING: {len(missing)} gated benchmark(s) absent from current results")
-    if failures or missing:
+    if failures or stale or missing:
         return 1
     return 0
 
@@ -147,12 +189,19 @@ def main(argv: list[str] | None = None) -> int:
         default=THRESHOLD,
         help="fail when current mean exceeds baseline by more than this ratio (default: 1.20)",
     )
+    parser.add_argument(
+        "--stale-floor",
+        type=float,
+        default=STALE_FLOOR,
+        help="fail when current mean is below this fraction of baseline (default: 0.50)",
+    )
     args = parser.parse_args(argv)
     try:
         return check_regression(
             args.results_path,
             args.baselines_path,
             threshold=args.threshold,
+            stale_floor=args.stale_floor,
         )
     except BenchmarkDataError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

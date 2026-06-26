@@ -1,44 +1,64 @@
-"""pytest-benchmark coverage for services/summary_cache.py hot paths.
-
-``test_summary_cache_hit`` and ``test_summary_cache_miss`` both time ``get_cached_projects``
-only. Miss means fingerprint mismatch (cache not used), not a full cache rebuild.
-"""
+"""pytest-benchmark coverage for services/summary_cache.py hot paths."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
 from services.summary_cache import (
     fingerprint_workspace_storage,
+    get_cached_composer_id_to_ws,
     get_cached_projects,
+    get_cached_tab_summaries,
+    set_cached_composer_id_to_ws,
     set_cached_projects,
+    set_cached_tab_summaries,
 )
 
 
 @pytest.mark.benchmark(group="summary-cache")
-def test_summary_cache_hit(
+@pytest.mark.parametrize("mode", ["hit", "miss"], ids=["hit", "miss"])
+def test_summary_cache_lookup(
     benchmark,
-    summary_cache_dir: Path,
-    workspace_fingerprint: dict[str, Any],
-    sample_projects: list[dict[str, Any]],
-) -> None:
-    set_cached_projects(workspace_fingerprint, sample_projects, [])
-    benchmark(get_cached_projects, workspace_fingerprint)
-
-
-@pytest.mark.benchmark(group="summary-cache")
-def test_summary_cache_miss(
-    benchmark,
+    mode: Literal["hit", "miss"],
     summary_cache_dir: Path,
     workspace_fingerprint: dict[str, Any],
     stale_fingerprint: dict[str, Any],
     sample_projects: list[dict[str, Any]],
 ) -> None:
+    """Time ``get_cached_projects`` only; miss = fingerprint mismatch, not rebuild."""
     set_cached_projects(workspace_fingerprint, sample_projects, [])
-    benchmark(get_cached_projects, stale_fingerprint)
+    lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
+    result = benchmark(get_cached_projects, lookup_fp)
+    if mode == "hit":
+        assert result is not None
+        projects, warnings = result
+        assert projects == sample_projects
+        assert warnings == []
+    else:
+        assert result is None
+
+
+@pytest.mark.benchmark(group="summary-cache")
+@pytest.mark.parametrize("mode", ["hit", "miss"], ids=["hit", "miss"])
+def test_composer_map_cache_lookup(
+    benchmark,
+    mode: Literal["hit", "miss"],
+    summary_cache_dir: Path,
+    workspace_fingerprint: dict[str, Any],
+    stale_fingerprint: dict[str, Any],
+) -> None:
+    """Time ``get_cached_composer_id_to_ws`` hit/miss (fingerprint mismatch on miss)."""
+    mapping = {"cmp_0000": "ws_0000"}
+    set_cached_composer_id_to_ws(workspace_fingerprint, mapping)
+    lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
+    result = benchmark(get_cached_composer_id_to_ws, lookup_fp)
+    if mode == "hit":
+        assert result == mapping
+    else:
+        assert result is None
 
 
 @pytest.mark.benchmark(group="summary-cache")
@@ -76,3 +96,31 @@ def test_summary_cache_round_trip(
         get_cached_projects(fp)
 
     benchmark(_run)
+    cached = get_cached_projects(fp)
+    assert cached is not None
+    cached_projects, cached_warnings = cached
+    assert cached_projects == projects
+    assert cached_warnings == []
+
+
+@pytest.mark.benchmark(group="summary-cache")
+@pytest.mark.parametrize("mode", ["hit", "miss"], ids=["hit", "miss"])
+def test_tab_summary_cache_lookup(
+    benchmark,
+    mode: Literal["hit", "miss"],
+    summary_cache_dir: Path,
+    workspace_fingerprint: dict[str, Any],
+    stale_fingerprint: dict[str, Any],
+) -> None:
+    workspace_id = "ws_0000"
+    payload = {"tabs": [{"id": "cmp_0000", "title": "Bench"}]}
+    set_cached_tab_summaries(workspace_fingerprint, workspace_id, payload, 200)
+    lookup_fp = workspace_fingerprint if mode == "hit" else stale_fingerprint
+    result = benchmark(get_cached_tab_summaries, lookup_fp, workspace_id)
+    if mode == "hit":
+        assert result is not None
+        cached_payload, status = result
+        assert status == 200
+        assert cached_payload == payload
+    else:
+        assert result is None

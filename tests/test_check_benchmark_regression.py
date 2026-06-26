@@ -14,7 +14,7 @@ from scripts.check_benchmark_regression import (
     normalize_benchmark_name,
 )
 
-GATED_BENCH = "test_summary_cache_hit"
+GATED_BENCH = "test_summary_cache_lookup[hit]"
 
 
 def _write_results(path, benchmarks: list[dict]) -> None:
@@ -32,9 +32,9 @@ def _write_baselines(path, groups: dict[str, dict[str, float]]) -> None:
 
 
 def test_normalize_benchmark_name_strips_module_prefix() -> None:
-    full = "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_hit"
-    assert normalize_benchmark_name(full) == "test_summary_cache_hit"
-    assert normalize_benchmark_name("test_summary_cache_hit") == "test_summary_cache_hit"
+    full = "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_lookup[hit]"
+    assert normalize_benchmark_name(full) == "test_summary_cache_lookup[hit]"
+    assert normalize_benchmark_name("test_summary_cache_lookup[hit]") == "test_summary_cache_lookup[hit]"
 
 
 def test_normalize_benchmark_name_preserves_colons_in_param_values() -> None:
@@ -50,13 +50,13 @@ def test_load_results_normalizes_full_node_id(tmp_path) -> None:
         path,
         [
             {
-                "name": "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_hit",
+                "name": "tests/benchmarks/test_summary_cache_bench.py::test_summary_cache_lookup[hit]",
                 "stats": {"mean": 0.0001},
             }
         ],
     )
 
-    assert load_results(path)["test_summary_cache_hit"] == pytest.approx(0.0001)
+    assert load_results(path)["test_summary_cache_lookup[hit]"] == pytest.approx(0.0001)
 
 
 def test_missing_baseline_warns_without_failing(
@@ -213,3 +213,76 @@ def test_load_baseline_means_rejects_non_dict_group(tmp_path) -> None:
 
     with pytest.raises(BenchmarkDataError, match="must be an object"):
         load_baseline_means(baselines)
+
+
+def test_stale_baseline_fails(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(
+        results,
+        [{"name": GATED_BENCH, "stats": {"mean": 0.00005}}],
+    )
+    _write_baselines(
+        baselines,
+        {"summary-cache": {GATED_BENCH: 0.0002}},
+    )
+
+    assert check_regression(results, baselines) == 1
+    out = capsys.readouterr().out
+    assert "STALE" in out
+
+
+def test_main_rejects_invalid_threshold(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import main
+
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    assert main([str(results), str(baselines), "--threshold", "1.0"]) == 2
+    assert "threshold must be greater than 1" in capsys.readouterr().err
+
+
+def test_main_rejects_invalid_stale_floor(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import main
+
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    assert main([str(results), str(baselines), "--stale-floor", "1.5"]) == 2
+    assert "stale_floor must be between 0 and 1" in capsys.readouterr().err
+
+
+def test_check_regression_rejects_invalid_threshold(tmp_path) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    with pytest.raises(BenchmarkDataError, match="threshold must be greater than 1"):
+        check_regression(results, baselines, threshold=1.0)
+
+
+def test_check_regression_rejects_non_finite_threshold(tmp_path) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    with pytest.raises(BenchmarkDataError, match="threshold must be finite"):
+        check_regression(results, baselines, threshold=float("nan"))
+
+
+def test_main_rejects_non_finite_threshold(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.check_benchmark_regression import main
+
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [{"name": GATED_BENCH, "stats": {"mean": 0.0001}}])
+    _write_baselines(baselines, {"summary-cache": {GATED_BENCH: 0.0002}})
+
+    assert main([str(results), str(baselines), "--threshold", "inf"]) == 2
+    assert "threshold must be finite" in capsys.readouterr().err
