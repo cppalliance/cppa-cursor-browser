@@ -50,7 +50,10 @@ from services.summary_cache import (
     nocache_enabled,
     set_cached_tab_summaries,
 )
-from services.workspace_context import resolve_workspace_context_cached
+from services.workspace_context import (
+    resolve_invalid_workspace_aliases_cached,
+    resolve_workspace_context_cached,
+)
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
     collect_workspace_entries,
@@ -67,7 +70,6 @@ from services.workspace_db import (
 )
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
-    infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
     matching_workspace_ids_for_folder,
 )
@@ -453,18 +455,14 @@ def _build_workspace_tab_summaries_uncached(
 
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases: dict[str, str] = {}
-        if invalid_workspace_ids:
-            invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                composer_rows=composer_rows,
-                project_layouts_map=project_layouts_map,
-                project_name_map=project_name_map,
-                workspace_path_map=workspace_path_map,
-                workspace_entries=workspace_entries,
-                bubble_map={},
-                composer_id_to_ws=composer_id_to_ws,
-                invalid_workspace_ids=invalid_workspace_ids,
-            )
+        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+            ctx,
+            global_db,
+            workspace_path,
+            rules,
+            nocache=nocache,
+            project_layouts_map=project_layouts_map,
+        )
 
         for row in composer_rows:
             composer = parse_composer_data_row(
@@ -582,22 +580,15 @@ def assemble_single_tab(
             return {"error": "Conversation not found"}, 404
 
         project_layouts_map: dict[str, list[str]] = {}
-        invalid_workspace_aliases: dict[str, str] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
             global_db, composer_id,
         )
-        if invalid_workspace_ids:
-            composer_rows_for_aliases = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
-            invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                composer_rows=composer_rows_for_aliases,
-                project_layouts_map=project_layouts_map,
-                project_name_map=project_name_map,
-                workspace_path_map=workspace_path_map,
-                workspace_entries=workspace_entries,
-                bubble_map={},
-                composer_id_to_ws=composer_id_to_ws,
-                invalid_workspace_ids=invalid_workspace_ids,
-            )
+        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+            ctx,
+            global_db,
+            workspace_path,
+            rules,
+        )
 
         bubble_map = load_bubbles_for_composer(
             global_db, composer_id, parse_warnings=parse_warnings,
@@ -723,18 +714,13 @@ def assemble_workspace_tabs(
         # Get composer data entries with conversations
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases: dict[str, str] = {}
-        if invalid_workspace_ids:
-            invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                composer_rows=composer_rows,
-                project_layouts_map=project_layouts_map,
-                project_name_map=project_name_map,
-                workspace_path_map=workspace_path_map,
-                workspace_entries=workspace_entries,
-                bubble_map=bubble_map,
-                composer_id_to_ws=composer_id_to_ws,
-                invalid_workspace_ids=invalid_workspace_ids,
-            )
+        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+            ctx,
+            global_db,
+            workspace_path,
+            rules,
+            project_layouts_map=project_layouts_map,
+        )
 
         for row in composer_rows:
             composer = parse_composer_data_row(

@@ -30,6 +30,7 @@ from services.summary_cache import (
     nocache_enabled,
     set_cached_projects,
 )
+from services.workspace_context import resolve_invalid_workspace_aliases_cached
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
     collect_workspace_entries,
@@ -41,7 +42,6 @@ from services.workspace_db import (
 from utils.workspace_path import get_cli_chats_path
 from services.workspace_resolver import (
     build_composer_ids_by_workspace,
-    infer_invalid_workspace_aliases,
     infer_workspace_name_from_layouts,
     lookup_workspace_display_name,
 )
@@ -124,18 +124,13 @@ def _build_workspace_projects_uncached(
                 project_layouts_map = load_project_layouts_map(global_db)
 
                 bubble_map: dict[str, Bubble] = {}
-                invalid_workspace_aliases: dict[str, str] = {}
-                if invalid_workspace_ids:
-                    invalid_workspace_aliases = infer_invalid_workspace_aliases(
-                        composer_rows=composer_rows,
-                        project_layouts_map=project_layouts_map,
-                        project_name_map=project_name_map,
-                        workspace_path_map=workspace_path_map,
-                        workspace_entries=workspace_entries,
-                        bubble_map=bubble_map,
-                        composer_id_to_ws=composer_id_to_ws,
-                        invalid_workspace_ids=invalid_workspace_ids,
-                    )
+                invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+                    ctx,
+                    global_db,
+                    workspace_path,
+                    rules,
+                    project_layouts_map=project_layouts_map,
+                )
 
                 for row in composer_rows:
                     composer = parse_composer_data_row(

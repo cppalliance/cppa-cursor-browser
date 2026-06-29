@@ -18,7 +18,9 @@ from pathlib import Path
 
 from services.summary_cache import (
     fingerprint_workspace_storage,
+    get_cached_invalid_workspace_aliases,
     get_cached_projects,
+    set_cached_invalid_workspace_aliases,
     set_cached_projects,
 )
 
@@ -29,6 +31,9 @@ class TestSummaryCache(unittest.TestCase):
         self.cache_patch = patch.object(summary_cache, "CACHE_DIR", self.tmp.name)
         self.cache_patch.start()
         summary_cache.PROJECTS_CACHE_FILE = Path(self.tmp.name) / "projects.json"
+        summary_cache.INVALID_WORKSPACE_ALIASES_CACHE_FILE = (
+            Path(self.tmp.name) / "invalid-workspace-aliases.json"
+        )
 
     def tearDown(self):
         self.cache_patch.stop()
@@ -83,6 +88,19 @@ class TestSummaryCache(unittest.TestCase):
             self.assertIsNotNone(hit, msg="cache miss after JSON round-trip of workspace_files")
             assert hit is not None
             self.assertEqual(hit[0], projects)
+
+    def test_invalid_workspace_aliases_cache_hit(self):
+        fp = {"version": 1, "workspace_path": "/ws", "global_db_mtime_ns": 100}
+        aliases = {"broken-ws": "good-ws"}
+        set_cached_invalid_workspace_aliases(fp, aliases)
+        hit = get_cached_invalid_workspace_aliases(fp)
+        self.assertEqual(hit, aliases)
+
+    def test_invalid_workspace_aliases_cache_miss_on_fingerprint_change(self):
+        fp1 = {"version": 1, "workspace_path": "/ws", "global_db_mtime_ns": 100}
+        fp2 = {**fp1, "global_db_mtime_ns": 101}
+        set_cached_invalid_workspace_aliases(fp1, {"broken-ws": "good-ws"})
+        self.assertIsNone(get_cached_invalid_workspace_aliases(fp2))
 
 
 if __name__ == "__main__":

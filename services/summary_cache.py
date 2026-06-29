@@ -23,6 +23,7 @@ CACHE_VERSION = 1
 CACHE_DIR = Path.home() / ".cache" / "cursor-chat-browser"
 PROJECTS_CACHE_FILE = CACHE_DIR / "projects.json"
 COMPOSER_MAP_CACHE_FILE = CACHE_DIR / "composer-id-to-ws.json"
+INVALID_WORKSPACE_ALIASES_CACHE_FILE = CACHE_DIR / "invalid-workspace-aliases.json"
 TAB_SUMMARIES_PREFIX = "tab-summaries-"
 
 
@@ -234,6 +235,47 @@ def set_cached_composer_id_to_ws(
         {
             "fingerprint": fingerprint,
             "composer_id_to_ws": mapping,
+        },
+    )
+
+
+def get_cached_invalid_workspace_aliases(
+    fingerprint: dict[str, Any],
+) -> dict[str, str] | None:
+    """Load cached invalid-workspace alias map when the fingerprint matches.
+
+    Args:
+        fingerprint: Storage mtime/rules digest.
+
+    Returns:
+        ``{invalid_id: replacement_id}`` on hit, else ``None``.
+    """
+    data = _read_cache_file(INVALID_WORKSPACE_ALIASES_CACHE_FILE)
+    if not data:
+        return None
+    if not _fingerprint_equal(data.get("fingerprint"), fingerprint):
+        return None
+    aliases = data.get("invalid_workspace_aliases")
+    if not isinstance(aliases, dict):
+        return None
+    return {str(k): str(v) for k, v in aliases.items()}
+
+
+def set_cached_invalid_workspace_aliases(
+    fingerprint: dict[str, Any],
+    aliases: dict[str, str],
+) -> None:
+    """Persist invalid-workspace alias map under *fingerprint*.
+
+    Args:
+        fingerprint: Invalidation fingerprint paired with *aliases*.
+        aliases: ``{invalid_id: replacement_id}`` from alias inference.
+    """
+    _write_cache_file(
+        INVALID_WORKSPACE_ALIASES_CACHE_FILE,
+        {
+            "fingerprint": fingerprint,
+            "invalid_workspace_aliases": aliases,
         },
     )
 
