@@ -1,8 +1,11 @@
-"""Flask test-client coverage for GET /api/search (issue #101)."""
+"""Flask test-client coverage for GET /api/search (issue #101, #117)."""
 
 from __future__ import annotations
 
+import sqlite3
 from unittest.mock import patch
+
+import pytest
 
 from tests._fixture_ids import HAPPY_COMPOSER_ID, HAPPY_WORKSPACE_ID
 from tests._helpers import client_with_rules
@@ -19,6 +22,11 @@ def _assert_search_result_shape(hit: dict) -> None:
     assert hit["type"] in ("composer", "chat", "cli_agent")
     if "source" in hit:
         assert hit["source"] == "cli"
+
+
+def _assert_error_body(body: dict, *, code: str) -> None:
+    assert body.get("code") == code
+    assert isinstance(body.get("error"), str) and body["error"]
 
 
 class TestSearchHappyPath:
@@ -44,25 +52,38 @@ class TestSearchHappyPath:
         assert all(r["type"] == "composer" for r in body["results"])
 
 
+@pytest.mark.parametrize(
+    ("path", "expected_status", "expected_code"),
+    [
+        ("/api/search", 400, "empty_query"),
+        ("/api/search?q=", 400, "empty_query"),
+        ("/api/search?q=%20%20%20", 400, "empty_query"),
+        ("/api/search?q=x&type=invalid", 400, "invalid_type"),
+        ("/api/search?q=x&since_days=0", 400, "invalid_since_days"),
+        ("/api/search?q=x&since_days=not-a-number", 400, "invalid_since_days"),
+        (
+            "/api/search?q=no-such-workspace-scope&workspace=does-not-exist-xyzzy",
+            404,
+            "workspace_not_found",
+        ),
+    ],
+)
+def test_search_error_status_codes(client, path, expected_status, expected_code):
+    response = client.get(path)
+    assert response.status_code == expected_status
+    body = response.get_json()
+    assert isinstance(body, dict)
+    _assert_error_body(body, code=expected_code)
+    assert "results" not in body
+
+
 class TestSearchErrorResponses:
-    def test_missing_q_returns_400(self, client):
-        response = client.get("/api/search")
+    def test_query_too_long_returns_400(self, client):
+        response = client.get("/api/search?q=" + ("x" * 501))
         assert response.status_code == 400
-        body = response.get_json()
-        assert body.get("error") == "No search query provided"
-        assert "results" not in body
+        _assert_error_body(response.get_json(), code="query_too_long")
 
-    def test_empty_q_returns_400(self, client):
-        response = client.get("/api/search?q=")
-        assert response.status_code == 400
-        assert response.get_json().get("error") == "No search query provided"
-
-    def test_whitespace_only_q_returns_400(self, client):
-        response = client.get("/api/search?q=%20%20%20")
-        assert response.status_code == 400
-        assert response.get_json().get("error") == "No search query provided"
-
-    def test_internal_failure_returns_500_with_empty_results(self, client):
+    def test_internal_failure_returns_500(self, client):
         with patch(
             "api.search.search_global_storage",
             side_effect=RuntimeError("simulated DB failure"),
@@ -70,8 +91,19 @@ class TestSearchErrorResponses:
             response = client.get("/api/search?q=sentinel-grep&all_history=1")
         assert response.status_code == 500
         body = response.get_json()
-        assert body.get("error") == "Search failed"
-        assert body.get("results") == []
+        _assert_error_body(body, code="internal_error")
+        assert "results" not in body
+
+    def test_index_lock_returns_503(self, client):
+        with patch(
+            "api.search.search_global_storage",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            response = client.get("/api/search?q=sentinel-grep&all_history=1")
+        assert response.status_code == 503
+        body = response.get_json()
+        _assert_error_body(body, code="search_index_unavailable")
+        assert "results" not in body
 
 
 class TestSearchEdgeCases:
@@ -93,6 +125,15 @@ class TestSearchEdgeCases:
         results = response.get_json()["results"]
         workspace_ids = {r["workspaceId"] for r in results}
         assert HAPPY_WORKSPACE_ID in workspace_ids or "global" in workspace_ids
+
+    def test_workspace_filter_limits_results(self, client):
+        response = client.get(
+            f"/api/search?q=sentinel-grep&all_history=1&workspace={HAPPY_WORKSPACE_ID}",
+        )
+        assert response.status_code == 200
+        results = response.get_json()["results"]
+        assert results
+        assert all(r["workspaceId"] == HAPPY_WORKSPACE_ID for r in results)
 
 
 class TestSearchWindow:

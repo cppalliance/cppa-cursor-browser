@@ -245,8 +245,52 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 }
 .input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
 
-.search-bar { display: flex; gap: 0.5rem; }
+.search-bar { display: flex; gap: 0.5rem; align-items: center; }
 .search-bar .input { flex: 1; }
+
+.search-info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.search-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-style: italic;
+  cursor: help;
+  user-select: none;
+}
+.search-info-tooltip-text {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 60;
+  width: min(20rem, 70vw);
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--info-border);
+  border-radius: 0.5rem;
+  background: var(--info-bg);
+  color: var(--info-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.search-info-tooltip:hover .search-info-tooltip-text,
+.search-info-tooltip:focus .search-info-tooltip-text,
+.search-info-tooltip:focus-within .search-info-tooltip-text {
+  display: block;
+}
 
 /* ---------- Alerts ---------- */
 .alert {
