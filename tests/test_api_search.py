@@ -66,6 +66,11 @@ class TestSearchHappyPath:
             404,
             "workspace_not_found",
         ),
+        (
+            "/api/search?q=x&workspace=..%2F..%2Fetc",
+            404,
+            "workspace_not_found",
+        ),
     ],
 )
 def test_search_error_status_codes(client, path, expected_status, expected_code):
@@ -104,6 +109,15 @@ class TestSearchErrorResponses:
         body = response.get_json()
         _assert_error_body(body, code="search_index_unavailable")
         assert "results" not in body
+
+    def test_workspace_path_resolution_failure_returns_structured_500(self, client):
+        with patch(
+            "api.search.resolve_workspace_path",
+            side_effect=OSError("simulated storage discovery failure"),
+        ):
+            response = client.get("/api/search?q=sentinel-grep&all_history=1")
+        assert response.status_code == 500
+        _assert_error_body(response.get_json(), code="internal_error")
 
 
 class TestSearchEdgeCases:

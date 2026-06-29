@@ -14,14 +14,19 @@
   <div class="form-group" style="margin-bottom:1.5rem">
     <div class="search-bar">
       <input type="text" id="search-input" class="input" placeholder="Search across all logs..." autofocus>
-      <span class="search-info-tooltip" tabindex="0" aria-label="Search window help">
+      <button
+        type="button"
+        class="search-info-tooltip"
+        id="search-window-help"
+        aria-describedby="search-window-help-text"
+      >
         <span class="search-info-icon" aria-hidden="true">i</span>
-        <span class="search-info-tooltip-text">
+        <span class="search-info-tooltip-text" id="search-window-help-text" role="tooltip">
           By default, search covers the most recent 30-day indexed window.
           Chats without a parseable date are always included.
           Check &ldquo;Include chats older than 30 days&rdquo; to search full history.
         </span>
-      </span>
+      </button>
       <button class="btn btn-primary" onclick="doSearch()">Search</button>
     </div>
     <label class="text-sm" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;cursor:pointer">

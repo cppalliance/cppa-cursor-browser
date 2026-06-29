@@ -254,6 +254,11 @@ h3 { font-size: 1.15rem; font-weight: 600; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: help;
 }
 .search-info-icon {
   display: inline-flex;
