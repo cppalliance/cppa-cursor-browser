@@ -93,7 +93,7 @@ def list_workspace_projects(
     )
 
     projects, warnings = _build_workspace_projects_uncached(
-        workspace_path, rules, orch,
+        workspace_path, rules, orch, nocache=effective_nocache,
     )
     if not effective_nocache:
         set_cached_projects(orch.fingerprint, projects, warnings)
@@ -104,6 +104,8 @@ def _build_workspace_projects_uncached(
     workspace_path: str,
     rules: list[Any],
     orch: WorkspaceOrchestration,
+    *,
+    nocache: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parse_warnings = ParseWarningCollector()
     ctx = orch.ctx
@@ -129,6 +131,7 @@ def _build_workspace_projects_uncached(
                     global_db,
                     workspace_path,
                     rules,
+                    nocache=nocache,
                     project_layouts_map=project_layouts_map,
                 )
 

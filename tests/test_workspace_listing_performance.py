@@ -65,6 +65,15 @@ def _make_fixture(base: str) -> str:
     return ws_path
 
 
+def _make_fixture_with_invalid_workspace(base: str) -> str:
+    ws_path = _make_fixture(base)
+    invalid_dir = os.path.join(ws_path, "invalid-ws")
+    os.makedirs(invalid_dir)
+    with open(os.path.join(invalid_dir, "workspace.json"), "w", encoding="utf-8") as f:
+        json.dump({"folders": []}, f)
+    return ws_path
+
+
 class TestListWorkspaceProjectsNoBubbleScan(unittest.TestCase):
     """list_workspace_projects must not query bubbleId rows from global storage."""
 
@@ -125,6 +134,15 @@ class TestListWorkspaceProjectsNoBubbleScan(unittest.TestCase):
             self.assertIn("name", p)
             self.assertIn("conversationCount", p)
             self.assertIn("lastModified", p)
+
+    def test_nocache_bypasses_alias_disk_cache(self):
+        ws_path = _make_fixture_with_invalid_workspace(self.tmp.name)
+        with patch(
+            "services.summary_cache.get_cached_invalid_workspace_aliases",
+        ) as mock_get:
+            mock_get.return_value = {"invalid-ws": "global"}
+            list_workspace_projects(ws_path, rules=[], nocache=True)
+        mock_get.assert_not_called()
 
 
 if __name__ == "__main__":

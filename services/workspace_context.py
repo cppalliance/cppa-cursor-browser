@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from models import Bubble
@@ -37,7 +37,7 @@ class WorkspaceContext:
     workspace_path_to_id: dict[str, str]
     project_layouts_map: dict[str, list[str]]
     bubble_map: dict[str, Bubble]
-    invalid_workspace_aliases: dict[str, str] = field(default_factory=dict)
+    invalid_workspace_aliases: dict[str, str] | None = None
 
 
 def _entries(
@@ -171,6 +171,8 @@ def resolve_invalid_workspace_aliases_cached(
     Returns:
         ``{invalid_id: replacement_id}``, or ``{}`` when every workspace is valid.
     """
+    if ctx.invalid_workspace_aliases is not None:
+        return ctx.invalid_workspace_aliases
     if not ctx.invalid_workspace_ids:
         return {}
 
@@ -227,6 +229,8 @@ def with_invalid_workspace_aliases(
     project_layouts_map: dict[str, list[str]] | None = None,
 ) -> WorkspaceContext:
     """Return *ctx* with ``invalid_workspace_aliases`` populated from cache."""
+    if ctx.invalid_workspace_aliases is not None:
+        return ctx
     aliases = resolve_invalid_workspace_aliases_cached(
         ctx,
         global_db,
@@ -235,6 +239,4 @@ def with_invalid_workspace_aliases(
         nocache=nocache,
         project_layouts_map=project_layouts_map,
     )
-    if aliases is ctx.invalid_workspace_aliases:
-        return ctx
     return replace(ctx, invalid_workspace_aliases=aliases)

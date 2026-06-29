@@ -258,7 +258,12 @@ def get_cached_invalid_workspace_aliases(
     aliases = data.get("invalid_workspace_aliases")
     if not isinstance(aliases, dict):
         return None
-    return {str(k): str(v) for k, v in aliases.items()}
+    validated: dict[str, str] = {}
+    for key, value in aliases.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return None
+        validated[key] = value
+    return validated
 
 
 def set_cached_invalid_workspace_aliases(

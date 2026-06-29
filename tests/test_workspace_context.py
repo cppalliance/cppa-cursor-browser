@@ -362,4 +362,30 @@ def test_with_invalid_workspace_aliases_attaches_to_context():
                 assert enriched.invalid_workspace_aliases == {
                     "invalidws": "abc123workspace",
                 }
-                assert ctx.invalid_workspace_aliases == {}
+                assert ctx.invalid_workspace_aliases is None
+
+
+def test_resolve_invalid_workspace_aliases_uses_ctx_fast_path():
+    from dataclasses import replace
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _make_workspace_root(tmp)
+        _add_workspace_without_folders(ws_root, "invalidws")
+        ctx = resolve_workspace_context(ws_root)
+        enriched = replace(
+            ctx,
+            invalid_workspace_aliases={"invalidws": "abc123workspace"},
+        )
+        conn = _open_workspace_global_db(ws_root)
+        conn.commit()
+        try:
+            with patch(
+                "services.workspace_context.infer_invalid_workspace_aliases",
+            ) as mock_infer:
+                aliases = resolve_invalid_workspace_aliases_cached(
+                    enriched, conn, ws_root, [],
+                )
+            assert aliases == {"invalidws": "abc123workspace"}
+            mock_infer.assert_not_called()
+        finally:
+            conn.close()

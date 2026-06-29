@@ -102,6 +102,17 @@ class TestSummaryCache(unittest.TestCase):
         set_cached_invalid_workspace_aliases(fp1, {"broken-ws": "good-ws"})
         self.assertIsNone(get_cached_invalid_workspace_aliases(fp2))
 
+    def test_invalid_workspace_aliases_rejects_non_string_entries(self):
+        fp = {"version": 1, "workspace_path": "/ws", "global_db_mtime_ns": 100}
+        summary_cache._write_cache_file(
+            summary_cache.INVALID_WORKSPACE_ALIASES_CACHE_FILE,
+            {
+                "fingerprint": fp,
+                "invalid_workspace_aliases": {"broken-ws": 123},
+            },
+        )
+        self.assertIsNone(get_cached_invalid_workspace_aliases(fp))
+
 
 if __name__ == "__main__":
     unittest.main()
