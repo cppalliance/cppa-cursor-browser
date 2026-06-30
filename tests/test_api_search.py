@@ -110,14 +110,14 @@ class TestSearchErrorResponses:
         _assert_error_body(body, code="search_index_unavailable")
         assert "results" not in body
 
-    def test_workspace_path_resolution_failure_returns_structured_500(self, client):
+    def test_workspace_path_resolution_failure_returns_structured_503(self, client):
         with patch(
             "api.search.resolve_workspace_path",
             side_effect=OSError("simulated storage discovery failure"),
         ):
             response = client.get("/api/search?q=sentinel-grep&all_history=1")
-        assert response.status_code == 500
-        _assert_error_body(response.get_json(), code="internal_error")
+        assert response.status_code == 503
+        _assert_error_body(response.get_json(), code="storage_unavailable")
 
 
 class TestSearchEdgeCases:

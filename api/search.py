@@ -105,11 +105,13 @@ def search() -> tuple[Response, int] | Response:
     Args:
         q: Search query string (required; 400 when empty).
         type: Filter scope — ``all`` (default), ``chat``, or ``composer``.
-        workspace: Optional workspace folder hash; 404 when unknown.
+        workspace: Optional workspace folder hash; 404 when unknown (bonus API
+            filter — not exposed in the search UI).
 
     Returns:
         JSON ``{"results": [...]}`` with optional ``warnings``. Structured
-        ``{"error", "code"}`` bodies for 400/404/503/500 failures.
+        ``{"error", "code"}`` bodies for 400/404/503/500 failures. Error
+        responses omit ``results`` (breaking change vs. legacy 500 bodies).
     """
     query = request.args.get("q", "").strip()
     if not query:
@@ -203,7 +205,13 @@ def search() -> tuple[Response, int] | Response:
             "search_index_unavailable",
             503,
         )
+    except OSError:
+        _logger.exception("Workspace storage unavailable")
+        return _search_error(
+            "Workspace storage is temporarily unavailable",
+            "storage_unavailable",
+            503,
+        )
     except Exception:
         _logger.exception("Search failed")
         return _search_error("Search failed", "internal_error", 500)
-
