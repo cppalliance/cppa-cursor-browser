@@ -229,8 +229,10 @@ class TestAssembleSingleTab(unittest.TestCase):
         )
 
     def test_scoped_mrc_load_with_invalid_workspaces(self):
-        """With invalid workspace folders, alias scan runs but MRC stays per-composer."""
+        """With invalid workspaces, alias map is cached — no per-tab global composer/MRC scans."""
         _add_invalid_workspace_and_mrc_rows(self.ws_path)
+        # Warm the alias disk cache (one global layout/composer pass per fingerprint).
+        assemble_single_tab("global", COMPOSER_ID, self.ws_path, rules=[])
         (_, _), queries = _collect_queries(
             self.ws_path,
             lambda p: assemble_single_tab("global", COMPOSER_ID, p, rules=[]),
@@ -244,7 +246,17 @@ class TestAssembleSingleTab(unittest.TestCase):
         self.assertEqual(
             mrc_scans,
             [],
-            msg=f"assemble_single_tab ran a global MRC scan:\n{mrc_scans}",
+            msg=f"assemble_single_tab ran a global MRC scan on cache hit:\n{mrc_scans}",
+        )
+        composer_scans = [
+            q for q in queries
+            if "composerData:%" in q
+            and f"composerData:{COMPOSER_ID}" not in q
+        ]
+        self.assertEqual(
+            composer_scans,
+            [],
+            msg=f"assemble_single_tab scanned all composers on cache hit:\n{composer_scans}",
         )
 
     def test_scoped_mrc_load_no_invalid_workspaces(self):

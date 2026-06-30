@@ -11,9 +11,11 @@ from unittest.mock import patch
 from services.workspace_context import (
     WorkspaceContext,
     enrich_workspace_context_from_global_db,
+    resolve_invalid_workspace_aliases_cached,
     resolve_workspace_context,
     resolve_workspace_context_cached,
     resolve_workspace_context_minimal,
+    with_invalid_workspace_aliases,
 )
 
 
@@ -41,6 +43,17 @@ def _add_workspace_without_folders(ws_root: str, ws_id: str) -> None:
 
 def _open_global_db(tmp: str) -> sqlite3.Connection:
     db_path = os.path.join(tmp, "global.vscdb")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)")
+    return conn
+
+
+def _open_workspace_global_db(ws_root: str) -> sqlite3.Connection:
+    """Open the global DB at the path ``open_global_db`` expects for *ws_root*."""
+    global_dir = os.path.normpath(os.path.join(ws_root, "..", "globalStorage"))
+    os.makedirs(global_dir, exist_ok=True)
+    db_path = os.path.join(global_dir, "state.vscdb")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)")
@@ -241,3 +254,138 @@ def test_enrich_with_no_flags_returns_unchanged_context():
         finally:
             conn.close()
         assert result is ctx
+
+
+def test_resolve_invalid_workspace_aliases_empty_when_all_workspaces_valid():
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _make_workspace_root(tmp)
+        ctx = resolve_workspace_context(ws_root)
+        conn = _open_global_db(tmp)
+        conn.commit()
+        try:
+            aliases = resolve_invalid_workspace_aliases_cached(
+                ctx, conn, ws_root, [],
+            )
+        finally:
+            conn.close()
+        assert aliases == {}
+
+
+def test_resolve_invalid_workspace_aliases_cached_uses_disk_cache():
+    from pathlib import Path
+    from services import summary_cache
+
+    with tempfile.TemporaryDirectory() as cache_tmp:
+        with patch.object(summary_cache, "CACHE_DIR", cache_tmp):
+            summary_cache.INVALID_WORKSPACE_ALIASES_CACHE_FILE = (
+                Path(cache_tmp) / "invalid-workspace-aliases.json"
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                ws_root = _make_workspace_root(tmp)
+                _add_workspace_without_folders(ws_root, "invalidws")
+                ctx = resolve_workspace_context(ws_root)
+                conn = _open_workspace_global_db(ws_root)
+                conn.commit()
+                try:
+                    with patch(
+                        "services.workspace_context.infer_invalid_workspace_aliases",
+                        return_value={"invalidws": "abc123workspace"},
+                    ) as mock_infer:
+                        first = resolve_invalid_workspace_aliases_cached(
+                            ctx, conn, ws_root, [],
+                        )
+                        second = resolve_invalid_workspace_aliases_cached(
+                            ctx, conn, ws_root, [],
+                        )
+                    assert first == {"invalidws": "abc123workspace"}
+                    assert second == first
+                    mock_infer.assert_called_once()
+                finally:
+                    conn.close()
+
+
+def test_resolve_invalid_workspace_aliases_cache_miss_after_fingerprint_change():
+    from pathlib import Path
+    from services import summary_cache
+
+    with tempfile.TemporaryDirectory() as cache_tmp:
+        with patch.object(summary_cache, "CACHE_DIR", cache_tmp):
+            summary_cache.INVALID_WORKSPACE_ALIASES_CACHE_FILE = (
+                Path(cache_tmp) / "invalid-workspace-aliases.json"
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                ws_root = _make_workspace_root(tmp)
+                _add_workspace_without_folders(ws_root, "invalidws")
+                ctx = resolve_workspace_context(ws_root)
+                conn = _open_workspace_global_db(ws_root)
+                conn.commit()
+                global_db_path = os.path.normpath(
+                    os.path.join(ws_root, "..", "globalStorage", "state.vscdb"),
+                )
+                try:
+                    with patch(
+                        "services.workspace_context.infer_invalid_workspace_aliases",
+                        return_value={"invalidws": "abc123workspace"},
+                    ) as mock_infer:
+                        resolve_invalid_workspace_aliases_cached(ctx, conn, ws_root, [])
+                        stat = os.stat(global_db_path)
+                        os.utime(global_db_path, (stat.st_atime, stat.st_mtime + 2))
+                        resolve_invalid_workspace_aliases_cached(ctx, conn, ws_root, [])
+                    assert mock_infer.call_count == 2
+                finally:
+                    conn.close()
+
+
+def test_with_invalid_workspace_aliases_attaches_to_context():
+    from pathlib import Path
+    from services import summary_cache
+
+    with tempfile.TemporaryDirectory() as cache_tmp:
+        with patch.object(summary_cache, "CACHE_DIR", cache_tmp):
+            summary_cache.INVALID_WORKSPACE_ALIASES_CACHE_FILE = (
+                Path(cache_tmp) / "invalid-workspace-aliases.json"
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                ws_root = _make_workspace_root(tmp)
+                _add_workspace_without_folders(ws_root, "invalidws")
+                ctx = resolve_workspace_context(ws_root)
+                conn = _open_workspace_global_db(ws_root)
+                conn.commit()
+                try:
+                    with patch(
+                        "services.workspace_context.infer_invalid_workspace_aliases",
+                        return_value={"invalidws": "abc123workspace"},
+                    ):
+                        enriched = with_invalid_workspace_aliases(ctx, conn, ws_root, [])
+                finally:
+                    conn.close()
+                assert enriched.invalid_workspace_aliases == {
+                    "invalidws": "abc123workspace",
+                }
+                assert ctx.invalid_workspace_aliases is None
+
+
+def test_resolve_invalid_workspace_aliases_uses_ctx_fast_path():
+    from dataclasses import replace
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ws_root = _make_workspace_root(tmp)
+        _add_workspace_without_folders(ws_root, "invalidws")
+        ctx = resolve_workspace_context(ws_root)
+        enriched = replace(
+            ctx,
+            invalid_workspace_aliases={"invalidws": "abc123workspace"},
+        )
+        conn = _open_workspace_global_db(ws_root)
+        conn.commit()
+        try:
+            with patch(
+                "services.workspace_context.infer_invalid_workspace_aliases",
+            ) as mock_infer:
+                aliases = resolve_invalid_workspace_aliases_cached(
+                    enriched, conn, ws_root, [],
+                )
+            assert aliases == {"invalidws": "abc123workspace"}
+            mock_infer.assert_not_called()
+        finally:
+            conn.close()

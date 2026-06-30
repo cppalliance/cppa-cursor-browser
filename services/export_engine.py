@@ -16,6 +16,7 @@ from services.summary_cache import fingerprint_workspace_storage, nocache_enable
 from services.workspace_context import (
     WorkspaceContext,
     enrich_workspace_context_from_global_db,
+    resolve_invalid_workspace_aliases_cached,
     resolve_workspace_context_cached,
 )
 from services.workspace_db import (
@@ -28,7 +29,6 @@ from services.workspace_db import (
 )
 from services.workspace_resolver import (
     determine_project_for_conversation,
-    infer_invalid_workspace_aliases,
     lookup_workspace_display_name,
 )
 from utils.cli_chat_reader import (
@@ -169,6 +169,9 @@ def prepare_workspace_orchestration(
 
 def load_global_db_export_data(
     orch: WorkspaceOrchestration,
+    rules: list[Any],
+    *,
+    nocache: bool = False,
 ) -> GlobalDbExportData | None:
     """Load global DB maps needed for IDE composer export."""
     ctx = orch.ctx
@@ -197,15 +200,13 @@ def load_global_db_export_data(
         code_block_diff_map = load_code_block_diff_map(global_db)
         ide_composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases = infer_invalid_workspace_aliases(
-            composer_rows=ide_composer_rows,
+        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+            ctx,
+            global_db,
+            orch.workspace_path,
+            rules,
+            nocache=nocache,
             project_layouts_map=project_layouts_map,
-            project_name_map=ctx.project_name_to_workspace_id,
-            workspace_path_map=ctx.workspace_path_to_id,
-            workspace_entries=orch.workspace_entries,
-            bubble_map=bubble_map,
-            composer_id_to_ws=ctx.composer_id_to_workspace_id,
-            invalid_workspace_ids=ctx.invalid_workspace_ids,
         )
 
     return GlobalDbExportData(
@@ -503,7 +504,9 @@ def collect_export_entries(
     exported: list[CollectedExportEntry] = []
 
     if include_composer:
-        db_data = load_global_db_export_data(orch)
+        db_data = load_global_db_export_data(
+            orch, exclusion_rules, nocache=effective_nocache,
+        )
         if db_data is not None:
             exported.extend(
                 _collect_ide_export_entries(

@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass, replace
 from typing import Any
 
 from models import Bubble
 from services.workspace_db import (
+    COMPOSER_ROWS_WITH_HEADERS_SQL,
     build_composer_id_to_workspace_id,
     build_composer_id_to_workspace_id_cached,
     collect_invalid_workspace_ids,
     collect_workspace_entries,
+    global_storage_db_path,
     load_bubble_map,
     load_project_layouts_map,
+    safe_fetchall,
 )
 from services.workspace_resolver import (
     create_project_name_to_workspace_id_map,
     create_workspace_path_to_id_map,
+    infer_invalid_workspace_aliases,
 )
 
 
@@ -32,6 +37,7 @@ class WorkspaceContext:
     workspace_path_to_id: dict[str, str]
     project_layouts_map: dict[str, list[str]]
     bubble_map: dict[str, Bubble]
+    invalid_workspace_aliases: dict[str, str] | None = None
 
 
 def _entries(
@@ -135,3 +141,102 @@ def enrich_workspace_context_from_global_db(
     if not updates:
         return ctx
     return replace(ctx, **updates)
+
+
+def resolve_invalid_workspace_aliases_cached(
+    ctx: WorkspaceContext,
+    global_db: sqlite3.Connection,
+    workspace_path: str,
+    rules: list[Any],
+    *,
+    nocache: bool = False,
+    project_layouts_map: dict[str, list[str]] | None = None,
+) -> dict[str, str]:
+    """Return invalid-workspace alias map, using the summary-cache fingerprint.
+
+    Computes ``infer_invalid_workspace_aliases`` at most once per storage
+    fingerprint (same mtime key as composer-map / tab-summary caches). When
+    *ctx* already carries a populated ``invalid_workspace_aliases`` field,
+    that value is returned without touching disk or the global DB roster.
+
+    Args:
+        ctx: Workspace maps from :func:`resolve_workspace_context_cached`.
+        global_db: Open global ``state.vscdb`` connection.
+        workspace_path: Cursor ``workspaceStorage`` root.
+        rules: Exclusion rule token lists (fingerprint input).
+        nocache: When ``True``, bypass disk cache reads and writes.
+        project_layouts_map: Pre-loaded layouts; loaded from *global_db* when
+            ``None``.
+
+    Returns:
+        ``{invalid_id: replacement_id}``, or ``{}`` when every workspace is valid.
+    """
+    if ctx.invalid_workspace_aliases is not None:
+        return ctx.invalid_workspace_aliases
+    if not ctx.invalid_workspace_ids:
+        return {}
+
+    from services.summary_cache import (
+        fingerprint_workspace_storage,
+        get_cached_invalid_workspace_aliases,
+        nocache_enabled,
+        set_cached_invalid_workspace_aliases,
+    )
+    from utils.workspace_path import get_cli_chats_path
+
+    gdb = global_storage_db_path(workspace_path)
+    cli_path = get_cli_chats_path()
+    fingerprint = fingerprint_workspace_storage(
+        workspace_path,
+        ctx.workspace_entries,
+        global_db_path=gdb if os.path.isfile(gdb) else None,
+        rules=rules,
+        cli_chats_path=cli_path if os.path.isdir(cli_path) else None,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        cached = get_cached_invalid_workspace_aliases(fingerprint)
+        if cached is not None:
+            return cached
+
+    layouts = (
+        project_layouts_map
+        if project_layouts_map is not None
+        else load_project_layouts_map(global_db)
+    )
+    composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
+    aliases = infer_invalid_workspace_aliases(
+        composer_rows=composer_rows,
+        project_layouts_map=layouts,
+        project_name_map=ctx.project_name_to_workspace_id,
+        workspace_path_map=ctx.workspace_path_to_id,
+        workspace_entries=ctx.workspace_entries,
+        bubble_map={},
+        composer_id_to_ws=ctx.composer_id_to_workspace_id,
+        invalid_workspace_ids=ctx.invalid_workspace_ids,
+    )
+    if not nocache_enabled(request_nocache=nocache):
+        set_cached_invalid_workspace_aliases(fingerprint, aliases)
+    return aliases
+
+
+def with_invalid_workspace_aliases(
+    ctx: WorkspaceContext,
+    global_db: sqlite3.Connection,
+    workspace_path: str,
+    rules: list[Any],
+    *,
+    nocache: bool = False,
+    project_layouts_map: dict[str, list[str]] | None = None,
+) -> WorkspaceContext:
+    """Return *ctx* with ``invalid_workspace_aliases`` populated from cache."""
+    if ctx.invalid_workspace_aliases is not None:
+        return ctx
+    aliases = resolve_invalid_workspace_aliases_cached(
+        ctx,
+        global_db,
+        workspace_path,
+        rules,
+        nocache=nocache,
+        project_layouts_map=project_layouts_map,
+    )
+    return replace(ctx, invalid_workspace_aliases=aliases)

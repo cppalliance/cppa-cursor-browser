@@ -382,6 +382,9 @@ def _load_search_workspace_assigner(
         )
         invalid_workspace_aliases: dict[str, str] = {}
         if ctx.invalid_workspace_ids:
+            # Issue #116 follow-up: search assigner still cold-scans composerData:*
+            # rows here; sharing resolve_invalid_workspace_aliases_cached is
+            # intentionally deferred (operator scope — see issue Out of scope).
             composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
             invalid_workspace_aliases = infer_invalid_workspace_aliases(
                 composer_rows=composer_rows,
