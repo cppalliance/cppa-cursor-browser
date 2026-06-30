@@ -111,7 +111,12 @@ class TestSummaryCache(unittest.TestCase):
                 "invalid_workspace_aliases": {"broken-ws": 123},
             },
         )
-        self.assertIsNone(get_cached_invalid_workspace_aliases(fp))
+        with self.assertLogs(summary_cache._logger, level="DEBUG") as logs:
+            self.assertIsNone(get_cached_invalid_workspace_aliases(fp))
+        self.assertTrue(
+            any("non-string entry" in msg for msg in logs.output),
+            msg=f"expected debug log for corrupt cache entry, got: {logs.output}",
+        )
 
 
 if __name__ == "__main__":

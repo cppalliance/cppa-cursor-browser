@@ -257,10 +257,18 @@ def get_cached_invalid_workspace_aliases(
         return None
     aliases = data.get("invalid_workspace_aliases")
     if not isinstance(aliases, dict):
+        _logger.debug(
+            "Invalid workspace aliases cache rejected: invalid_workspace_aliases is not a dict",
+        )
         return None
     validated: dict[str, str] = {}
     for key, value in aliases.items():
         if not isinstance(key, str) or not isinstance(value, str):
+            _logger.debug(
+                "Invalid workspace aliases cache rejected: non-string entry (%r -> %r)",
+                key,
+                value,
+            )
             return None
         validated[key] = value
     return validated
