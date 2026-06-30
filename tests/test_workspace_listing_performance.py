@@ -137,12 +137,18 @@ class TestListWorkspaceProjectsNoBubbleScan(unittest.TestCase):
 
     def test_nocache_bypasses_alias_disk_cache(self):
         ws_path = _make_fixture_with_invalid_workspace(self.tmp.name)
-        with patch(
-            "services.summary_cache.get_cached_invalid_workspace_aliases",
-        ) as mock_get:
+        with (
+            patch(
+                "services.summary_cache.get_cached_invalid_workspace_aliases",
+            ) as mock_get,
+            patch(
+                "services.summary_cache.set_cached_invalid_workspace_aliases",
+            ) as mock_set,
+        ):
             mock_get.return_value = {"invalid-ws": "global"}
             list_workspace_projects(ws_path, rules=[], nocache=True)
         mock_get.assert_not_called()
+        mock_set.assert_not_called()
 
 
 if __name__ == "__main__":

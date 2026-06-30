@@ -167,7 +167,8 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
         workspace_id: Storage folder name, ``global`` for unassigned chats, or
             ``cli:<project_id>``.
         summary: When ``1`` or ``true``, return lightweight tab headers only.
-        nocache: When ``1`` or ``true``, bypass cache on summary requests.
+        nocache: When ``1`` or ``true``, bypass cache on summary and full-tab
+            requests (alias disk cache on per-tab lazy load).
 
     Returns:
         Tabs payload from :func:`services.workspace_tabs` helpers (typically
@@ -190,7 +191,9 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
                 workspace_id, workspace_path, rules, nocache=_request_nocache(),
             )
         else:
-            payload, status = assemble_workspace_tabs(workspace_id, workspace_path, rules)
+            payload, status = assemble_workspace_tabs(
+                workspace_id, workspace_path, rules, nocache=_request_nocache(),
+            )
         return json_response(payload, status)
     except Exception:
         _logger.exception("Failed to get workspace tabs")
@@ -209,6 +212,7 @@ def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, in
         workspace_id: Storage folder name, ``global`` for unassigned chats, or
             ``cli:<project_id>`` (CLI workspaces return 400).
         composer_id: Composer UUID to load.
+        nocache: When ``1`` or ``true``, bypass alias disk cache.
 
     Returns:
         Single-tab JSON from :func:`services.workspace_tabs.assemble_single_tab`
@@ -221,7 +225,13 @@ def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, in
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
-        payload, status = assemble_single_tab(workspace_id, composer_id, workspace_path, rules)
+        payload, status = assemble_single_tab(
+            workspace_id,
+            composer_id,
+            workspace_path,
+            rules,
+            nocache=_request_nocache(),
+        )
         return json_response(payload, status)
     except Exception:
         _logger.exception("Failed to get workspace tab")

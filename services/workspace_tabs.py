@@ -51,8 +51,8 @@ from services.summary_cache import (
     set_cached_tab_summaries,
 )
 from services.workspace_context import (
-    resolve_invalid_workspace_aliases_cached,
     resolve_workspace_context_cached,
+    with_invalid_workspace_aliases,
 )
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
@@ -453,9 +453,11 @@ def _build_workspace_tab_summaries_uncached(
 
         project_layouts_map = load_project_layouts_map(global_db)
 
+        # Full composerData roster still required for the summary tab loop;
+        # alias inference alone is fingerprint-cached across requests.
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+        ctx = with_invalid_workspace_aliases(
             ctx,
             global_db,
             workspace_path,
@@ -463,6 +465,7 @@ def _build_workspace_tab_summaries_uncached(
             nocache=nocache,
             project_layouts_map=project_layouts_map,
         )
+        invalid_workspace_aliases = ctx.invalid_workspace_aliases or {}
 
         for row in composer_rows:
             composer = parse_composer_data_row(
@@ -529,6 +532,8 @@ def assemble_single_tab(
     composer_id: str,
     workspace_path: str,
     rules: list[Any],
+    *,
+    nocache: bool = False,
 ) -> tuple[dict[str, Any], int]:
     """Assemble a single conversation tab for GET /api/workspaces/<id>/tabs/<composer_id>.
 
@@ -541,6 +546,7 @@ def assemble_single_tab(
         composer_id: UUID of the composer / conversation to assemble.
         workspace_path: Cursor ``workspaceStorage`` root.
         rules: Exclusion rule token lists.
+        nocache: When ``True``, bypass alias disk cache reads and writes.
 
     Returns:
         ``(payload, status)``.  On success (``200``), *payload* is
@@ -550,7 +556,9 @@ def assemble_single_tab(
     """
     parse_warnings = ParseWarningCollector()
 
-    ctx = resolve_workspace_context_cached(workspace_path, rules)
+    ctx = resolve_workspace_context_cached(
+        workspace_path, rules, nocache=nocache,
+    )
     workspace_entries = ctx.workspace_entries
     invalid_workspace_ids = ctx.invalid_workspace_ids
     project_name_map = ctx.project_name_to_workspace_id
@@ -583,12 +591,10 @@ def assemble_single_tab(
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
             global_db, composer_id,
         )
-        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
-            ctx,
-            global_db,
-            workspace_path,
-            rules,
+        ctx = with_invalid_workspace_aliases(
+            ctx, global_db, workspace_path, rules, nocache=nocache,
         )
+        invalid_workspace_aliases = ctx.invalid_workspace_aliases or {}
 
         bubble_map = load_bubbles_for_composer(
             global_db, composer_id, parse_warnings=parse_warnings,
@@ -633,6 +639,8 @@ def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
     rules: list[Any],
+    *,
+    nocache: bool = False,
 ) -> tuple[dict[str, Any], int]:
     """Build tabs payload for GET /api/workspaces/<id>/tabs (IDE workspaces).
 
@@ -640,6 +648,7 @@ def assemble_workspace_tabs(
         workspace_id: Workspace folder name, or ``"global"`` for unassigned chats.
         workspace_path: Cursor ``workspaceStorage`` root.
         rules: Exclusion rule token lists from :func:`utils.exclusion_rules.load_rules`.
+        nocache: When ``True``, bypass alias disk cache reads and writes.
 
     Returns:
         ``(payload, status)``. On success (``200``), *payload* contains ``tabs``
@@ -651,7 +660,9 @@ def assemble_workspace_tabs(
     parse_warnings = ParseWarningCollector()
     response: dict[str, Any] = {"tabs": []}
 
-    ctx = resolve_workspace_context_cached(workspace_path, rules)
+    ctx = resolve_workspace_context_cached(
+        workspace_path, rules, nocache=nocache,
+    )
     workspace_entries = ctx.workspace_entries
     invalid_workspace_ids = ctx.invalid_workspace_ids
     project_name_map = ctx.project_name_to_workspace_id
@@ -714,13 +725,15 @@ def assemble_workspace_tabs(
         # Get composer data entries with conversations
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
-        invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
+        ctx = with_invalid_workspace_aliases(
             ctx,
             global_db,
             workspace_path,
             rules,
+            nocache=nocache,
             project_layouts_map=project_layouts_map,
         )
+        invalid_workspace_aliases = ctx.invalid_workspace_aliases or {}
 
         for row in composer_rows:
             composer = parse_composer_data_row(
