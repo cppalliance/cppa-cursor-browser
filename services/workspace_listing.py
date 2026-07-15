@@ -8,7 +8,7 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 from utils.cli_chat_reader import list_cli_projects
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
@@ -49,7 +49,7 @@ from services.workspace_resolver import (
 
 def list_workspace_projects(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -102,7 +102,7 @@ def list_workspace_projects(
 
 def _build_workspace_projects_uncached(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     orch: WorkspaceOrchestration,
     *,
     nocache: bool = False,

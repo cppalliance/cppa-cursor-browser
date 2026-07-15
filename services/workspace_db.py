@@ -10,6 +10,8 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, cast
 
+from utils.exclusion_rules import RuleTokens
+
 _logger = logging.getLogger(__name__)
 
 from models import Bubble, ParseWarningCollector, SchemaError
@@ -428,7 +430,7 @@ def build_composer_id_to_workspace_id(
 def build_composer_id_to_workspace_id_cached(
     workspace_path: str,
     workspace_entries: list[dict[str, Any]],
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> dict[str, str]:

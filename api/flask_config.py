@@ -6,8 +6,10 @@ from typing import Any, overload
 
 from flask import Response, current_app, jsonify
 
+from utils.exclusion_rules import RuleTokens
 
-def exclusion_rules() -> list[list[Any]]:
+
+def exclusion_rules() -> list[RuleTokens]:
     """Return loaded exclusion rules from app config (empty list when unset)."""
     return current_app.config.get("EXCLUSION_RULES") or []
 

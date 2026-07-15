@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from services.workspace_resolver import determine_project_for_conversation
 
 _logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def composer_chat_title(composer: Composer) -> str:
 
 
 def is_composer_excluded(
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     project_name: str,
     composer: Composer,

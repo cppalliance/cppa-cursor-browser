@@ -39,6 +39,7 @@ from services.workspace_db import (
     open_global_db,
 )
 from utils.path_helpers import to_epoch_ms
+from utils.exclusion_rules import RuleTokens
 from utils.workspace_path import get_cli_chats_path
 
 __all__ = [
@@ -127,7 +128,7 @@ def index_search_enabled() -> bool:
     )
 
 
-def _storage_fingerprint(workspace_path: str, rules: list[Any]) -> dict[str, Any]:
+def _storage_fingerprint(workspace_path: str, rules: list[RuleTokens]) -> dict[str, Any]:
     entries = collect_workspace_entries(workspace_path)
     gdb = global_storage_db_path(workspace_path)
     cli_path = get_cli_chats_path()
@@ -228,7 +229,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
 
 def build_search_index(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     force: bool = False,
 ) -> bool:
@@ -358,7 +359,7 @@ def build_search_index(
             return False
 
 
-def ensure_search_index(workspace_path: str, rules: list[Any]) -> None:
+def ensure_search_index(workspace_path: str, rules: list[RuleTokens]) -> None:
     """Build index synchronously if missing or stale."""
     if not index_search_enabled():
         return
@@ -377,7 +378,7 @@ def ensure_search_index(workspace_path: str, rules: list[Any]) -> None:
 
 def start_search_index_background(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     poll_seconds: int = 60,
 ) -> None:
@@ -549,7 +550,7 @@ def query_composer_rows_in_window(
         return {row["composer_id"]: row for row in rows}
 
 
-def index_is_usable(workspace_path: str, rules: list[Any]) -> bool:
+def index_is_usable(workspace_path: str, rules: list[RuleTokens]) -> bool:
     """True when the on-disk index matches the current Cursor storage fingerprint."""
     if not index_search_enabled() or _resolve_active_index_db_path() is None:
         return False

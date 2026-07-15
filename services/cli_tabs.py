@@ -9,14 +9,14 @@ from flask import Response
 from api.flask_config import json_response
 
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.workspace_path import get_cli_chats_path
 
 _logger = logging.getLogger(__name__)
 
 
 def get_cli_workspace_tabs(
-    workspace_id: str, rules: list[Any],
+    workspace_id: str, rules: list[RuleTokens],
 ) -> Response | tuple[Response, int]:
     """Return Flask JSON response with tabs for a Cursor CLI project.
 
