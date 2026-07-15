@@ -1,32 +1,32 @@
 {
-  "_note": "Gated means from max of three ubuntu-latest CI runs, divided by 1.19 (targets ~1.19x on slowest runner). Sub-100us cache lookup benches excluded from gate.",
-  "updated": "2026-07-15T16:40:00Z",
+  "_note": "Gated means from max of three ubuntu-latest CI runs, divided by 1.19, then scaled by 1.26/1.19 after a slower runner tier (~1.26x uniform). Sub-100us cache lookup benches excluded from gate.",
+  "updated": "2026-07-15T20:28:11Z",
   "machine": "Linux",
   "groups": {
     "export": {
-      "test_post_export_zip[composers-10]": 0.006890030582232384,
-      "test_post_export_zip[composers-50]": 0.02651060126050394
+      "test_post_export_zip[composers-10]": 0.007295326498834289,
+      "test_post_export_zip[composers-50]": 0.02807004839347476
     },
     "parse": {
-      "test_list_workspace_projects_nocache[composers-10]": 0.010318600237016761,
-      "test_list_workspace_projects_nocache[composers-200]": 0.15541806190476232,
-      "test_list_workspace_projects_nocache[composers-50]": 0.04608288053221206
+      "test_list_workspace_projects_nocache[composers-10]": 0.010925576721547158,
+      "test_list_workspace_projects_nocache[composers-200]": 0.16456030084033657,
+      "test_list_workspace_projects_nocache[composers-50]": 0.04879363821057747
     },
     "search": {
-      "test_search_full_corpus_indexed": 0.035584541499678296,
-      "test_search_full_corpus_live_scan": 0.02765475991102243
+      "test_search_full_corpus_indexed": 0.037677749823188784,
+      "test_search_full_corpus_live_scan": 0.02928151049402375
     },
     "summary-cache": {
-      "test_composer_map_cache_lookup[hit]": 5.162541185094655e-05,
-      "test_composer_map_cache_lookup[miss]": 5.0766855798028954e-05,
-      "test_fingerprint_workspace_entries[10]": 0.0015340259698651347,
-      "test_fingerprint_workspace_entries[200]": 0.019140506097323155,
-      "test_fingerprint_workspace_entries[50]": 0.006636160535039493,
-      "test_summary_cache_lookup[hit]": 5.213728423690053e-05,
-      "test_summary_cache_lookup[miss]": 5.181927082383982e-05,
-      "test_summary_cache_round_trip": 0.0002906505793927613,
-      "test_tab_summary_cache_lookup[hit]": 5.963107194614513e-05,
-      "test_tab_summary_cache_lookup[miss]": 5.868233534912213e-05
+      "test_composer_map_cache_lookup[hit]": 5.466220078335517e-05,
+      "test_composer_map_cache_lookup[miss]": 5.375314143320713e-05,
+      "test_fingerprint_workspace_entries[10]": 0.0016242627916219074,
+      "test_fingerprint_workspace_entries[200]": 0.020266418220695106,
+      "test_fingerprint_workspace_entries[50]": 0.007026522919453581,
+      "test_summary_cache_lookup[hit]": 5.5204183309659385e-05,
+      "test_summary_cache_lookup[miss]": 5.486746322524216e-05,
+      "test_summary_cache_round_trip": 0.00030774767229821784,
+      "test_tab_summary_cache_lookup[hit]": 6.313878206062426e-05,
+      "test_tab_summary_cache_lookup[miss]": 6.213423742848226e-05
     }
   }
 }
