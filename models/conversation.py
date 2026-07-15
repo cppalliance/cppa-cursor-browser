@@ -27,6 +27,50 @@ from models.from_dict_validation import (
 _logger = logging.getLogger(__name__)
 
 
+def _filter_str_list_elements(
+    value: list[Any],
+    *,
+    model: str,
+    record_id: str,
+    field: str,
+) -> list[str]:
+    filtered: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            filtered.append(item)
+        else:
+            _logger.warning(
+                "Schema drift in %s %s: invalid %s element (expected str, got %s)",
+                model,
+                record_id,
+                field,
+                type(item).__name__,
+            )
+    return filtered
+
+
+def _filter_dict_list_elements(
+    value: list[Any],
+    *,
+    model: str,
+    record_id: str,
+    field: str,
+) -> list[FileUriDict]:
+    filtered: list[FileUriDict] = []
+    for item in value:
+        if isinstance(item, dict):
+            filtered.append(cast(FileUriDict, item))
+        else:
+            _logger.warning(
+                "Schema drift in %s %s: invalid %s element (expected dict, got %s)",
+                model,
+                record_id,
+                field,
+                type(item).__name__,
+            )
+    return filtered
+
+
 @dataclass(frozen=True)
 class Composer:
     """Cursor conversation row from globalStorage cursorDiskKV; requires fullConversationHeadersOnly + createdAt."""
@@ -287,7 +331,12 @@ class Bubble:
                 type(value).__name__,
             )
             return []
-        return cast(list[str], value)
+        return _filter_str_list_elements(
+            value,
+            model="Bubble",
+            record_id=self.bubble_id,
+            field="relevantFiles",
+        )
 
     @property
     def attached_file_code_chunks_uris(self) -> list[FileUriDict]:
@@ -301,7 +350,12 @@ class Bubble:
                 type(value).__name__,
             )
             return []
-        return cast(list[FileUriDict], value)
+        return _filter_dict_list_elements(
+            value,
+            model="Bubble",
+            record_id=self.bubble_id,
+            field="attachedFileCodeChunksUris",
+        )
 
     @property
     def context(self) -> BubbleContextDict:

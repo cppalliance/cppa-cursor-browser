@@ -46,6 +46,34 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         with self.assertNoLogs("models.conversation", level="WARNING"):
             self.assertEqual(bubble.relevant_files, [])
 
+    def test_bubble_relevant_files_skips_non_str_elements(self) -> None:
+        bubble = Bubble.from_dict(
+            {"relevantFiles": ["/good.py", 123, None, "/also.py"]},
+            bubble_id="b-rel",
+        )
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(bubble.relevant_files, ["/good.py", "/also.py"])
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_bubble_attached_file_uris_skips_non_dict_elements(self) -> None:
+        bubble = Bubble.from_dict(
+            {
+                "attachedFileCodeChunksUris": [
+                    {"path": "/a.py"},
+                    "bad",
+                    {"path": "/b.py"},
+                ]
+            },
+            bubble_id="b-uri",
+        )
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            uris = bubble.attached_file_code_chunks_uris
+        self.assertEqual(uris, [{"path": "/a.py"}, {"path": "/b.py"}])
+        self.assertTrue(
+            any("attachedFileCodeChunksUris" in m for m in logs.output),
+            logs.output,
+        )
+
     def test_project_layouts_silent_when_key_missing(self) -> None:
         with self.assertNoLogs("models.raw_access", level="WARNING"):
             layouts = message_request_context_project_layouts({}, composer_id="cmp-1")

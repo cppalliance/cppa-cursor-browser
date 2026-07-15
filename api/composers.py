@@ -98,12 +98,13 @@ def list_composers() -> tuple[Response, int] | Response:
                         # load-bearing, not just a filter (Brad's review): the
                         # sort key and the JSON's composerId both read off the
                         # validated values, not the raw dict.
-                        c["composerId"] = local.composer_id
-                        c["lastUpdatedAt"] = local.last_updated_at
-                        c["conversation"] = c.get("conversation") or []
-                        c["workspaceId"] = name
-                        c["workspaceFolder"] = workspace_folder
-                        composers.append((local, c))
+                        payload = local.cursor_storage_payload()
+                        payload["composerId"] = local.composer_id
+                        payload["lastUpdatedAt"] = local.last_updated_at
+                        payload["conversation"] = payload.get("conversation") or []
+                        payload["workspaceId"] = name
+                        payload["workspaceFolder"] = workspace_folder
+                        composers.append((local, payload))
             except SchemaError as e:
                 _logger.warning(
                     "Schema drift in %s: %s (%s)",

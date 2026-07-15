@@ -12,7 +12,12 @@ class FileUriDict(TypedDict, total=False):
 
 
 class BubbleMetadataDict(TypedDict, total=False):
-    """Storage ``metadata`` blob on a bubble row."""
+    """Storage ``metadata`` blob on a bubble row (subset we read here).
+
+    Rich display metadata (tool calls, token counts, thinking) is assembled in
+    :func:`utils.display_bubble.build_storage_bubble_metadata` from typed
+    bubble fields, not from this dict alone.
+    """
 
     modelName: str
 
