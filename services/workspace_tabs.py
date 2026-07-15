@@ -26,13 +26,12 @@ from utils.text_extract import extract_text_from_bubble
 from utils.workspace_descriptor import read_json_file
 from models import (
     Bubble,
-    BubbleMetadata,
-    BubbleRole,
     Composer,
     DisplayBubble,
     ParseWarningCollector,
     SchemaError,
 )
+from models.bubble_display import BubbleMetadata, BubbleRole
 from models.raw_access import (
     conversation_header_bubble_id,
     message_request_context_project_layouts,
