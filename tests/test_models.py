@@ -93,6 +93,38 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         self.assertEqual(entry.workspace, "ws-1")
 
 
+class CursorStoragePayloadContract(unittest.TestCase):
+    """cursor_storage_payload() must shallow-copy _raw for API passthrough."""
+
+    def _assert_shallow_copy(self, model: Composer | Bubble | WorkspaceLocalComposer, raw: dict) -> None:
+        raw["nested"] = {"k": 1}
+        payload = model.cursor_storage_payload()
+        self.assertIsNot(payload, raw)
+        self.assertEqual(payload, raw)
+        self.assertIs(payload["nested"], raw["nested"])
+        payload["__api_mutation__"] = True
+        self.assertNotIn("__api_mutation__", raw)
+
+    def test_composer_cursor_storage_payload_is_shallow_copy(self) -> None:
+        raw = dict(GOOD_COMPOSER_RAW)
+        composer = Composer.from_dict(raw, composer_id="cid-001")
+        self._assert_shallow_copy(composer, raw)
+
+    def test_bubble_cursor_storage_payload_is_shallow_copy(self) -> None:
+        raw = {"text": "hi", "metadata": {"model": "gpt-4"}}
+        bubble = Bubble.from_dict(raw, bubble_id="b-1")
+        self._assert_shallow_copy(bubble, raw)
+
+    def test_workspace_local_composer_cursor_storage_payload_is_shallow_copy(self) -> None:
+        raw = {
+            "composerId": "cid-local-1",
+            "lastUpdatedAt": 1_715_000_500_000,
+            "conversation": [{"bubbleId": "b-1"}],
+        }
+        local = WorkspaceLocalComposer.from_dict(raw)
+        self._assert_shallow_copy(local, raw)
+
+
 class ComposerMissingFieldSchema(unittest.TestCase):
     def test_missing_full_conversation_headers_only_raises(self) -> None:
         bad = {k: v for k, v in GOOD_COMPOSER_RAW.items() if k != "fullConversationHeadersOnly"}

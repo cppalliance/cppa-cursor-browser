@@ -7,6 +7,7 @@ import json
 import pytest
 
 from scripts.check_benchmark_regression import (
+    EXCLUDED_FROM_GATE,
     BenchmarkDataError,
     check_regression,
     load_baseline_means,
@@ -15,6 +16,17 @@ from scripts.check_benchmark_regression import (
 )
 
 GATED_BENCH = "test_fingerprint_workspace_entries[10]"
+
+# Pytest benchmark node IDs (parametrize ids) that must stay in EXCLUDED_FROM_GATE.
+EXPECTED_EXCLUDED_FROM_GATE = (
+    "test_summary_cache_round_trip",
+    "test_summary_cache_lookup[hit]",
+    "test_summary_cache_lookup[miss]",
+    "test_composer_map_cache_lookup[hit]",
+    "test_composer_map_cache_lookup[miss]",
+    "test_tab_summary_cache_lookup[hit]",
+    "test_tab_summary_cache_lookup[miss]",
+)
 
 
 def _write_results(path, benchmarks: list[dict]) -> None:
@@ -29,6 +41,43 @@ def _write_baselines(path, groups: dict[str, dict[str, float]]) -> None:
         json.dumps({"groups": groups}, indent=2),
         encoding="utf-8",
     )
+
+
+def test_excluded_from_gate_matches_benchmark_ids() -> None:
+    assert EXCLUDED_FROM_GATE == frozenset(EXPECTED_EXCLUDED_FROM_GATE)
+
+
+@pytest.mark.parametrize("excluded_bench", EXPECTED_EXCLUDED_FROM_GATE)
+def test_excluded_benchmark_skips_regression_gate(
+    tmp_path, excluded_bench: str
+) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(
+        results,
+        [{"name": excluded_bench, "stats": {"mean": 1.0}}],
+    )
+    _write_baselines(
+        baselines,
+        {"summary-cache": {excluded_bench: 0.1}},
+    )
+
+    assert check_regression(results, baselines) == 0
+
+
+@pytest.mark.parametrize("excluded_bench", EXPECTED_EXCLUDED_FROM_GATE)
+def test_excluded_benchmark_missing_result_does_not_fail(
+    tmp_path, excluded_bench: str
+) -> None:
+    results = tmp_path / "results.json"
+    baselines = tmp_path / "baselines.json"
+    _write_results(results, [])
+    _write_baselines(
+        baselines,
+        {"summary-cache": {excluded_bench: 0.1}},
+    )
+
+    assert check_regression(results, baselines) == 0
 
 
 def test_normalize_benchmark_name_strips_module_prefix() -> None:
