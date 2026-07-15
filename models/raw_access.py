@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from models.conversation_types import BubbleContextDict
+
 if TYPE_CHECKING:
     from models.conversation import Bubble, Composer
-    from models.conversation_types import BubbleContextDict, FileUriDict
+    from models.conversation_types import FileUriDict
 
 _logger = logging.getLogger(__name__)
 

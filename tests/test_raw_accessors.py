@@ -16,6 +16,7 @@ from models.conversation import Bubble, Composer
 from utils.display_bubble import bubble_display_timestamp_ms
 from models.raw_access import (
     bubble_attached_file_uris,
+    bubble_context,
     bubble_relevant_files,
     composer_newly_created_files,
     conversation_header_bubble_id,
@@ -175,6 +176,19 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
             )
         self.assertEqual(bubble.relevant_files, bubble_relevant_files(bubble, "b-bridge"))
         self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_dict_bridge_bubble_context_matches_bubble_property(self) -> None:
+        raw = {"context": {"fileSelections": [{"uri": {"path": "/a.py"}}]}}
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge-ctx")
+        self.assertEqual(
+            bubble_context(raw, "b-bridge-ctx"),
+            {"fileSelections": [{"uri": {"path": "/a.py"}}]},
+        )
+        self.assertEqual(bubble.context, bubble_context(bubble, "b-bridge-ctx"))
+
+    def test_dict_bridge_bubble_context_empty_when_key_missing(self) -> None:
+        with self.assertNoLogs("models.raw_access", level="WARNING"):
+            self.assertEqual(bubble_context({}, "b-no-ctx"), {})
 
     def test_dict_bridge_attached_file_uris_skips_non_dict_elements(self) -> None:
         raw = {
