@@ -53,8 +53,9 @@ def create_app(exclusion_rules_path: str | None = None) -> Flask:
     # Exclusion rules: optional path (CLI or default ~/.cursor-chat-browser/exclusion-rules.txt).
     # Rules are loaded once at startup; an app restart is required to pick up changes to the file.
     resolved = resolve_exclusion_rules_path(exclusion_rules_path)
+    loaded_rules = load_rules(resolved)
     app.config["EXCLUSION_RULES_PATH"] = resolved
-    app.config["EXCLUSION_RULES"] = load_rules(resolved)
+    app.config["EXCLUSION_RULES"] = loaded_rules
 
     @app.context_processor
     def inject_year() -> dict[str, int]:
@@ -75,7 +76,7 @@ def create_app(exclusion_rules_path: str | None = None) -> Flask:
 
         start_search_index_background(
             resolve_workspace_path(),
-            app.config["EXCLUSION_RULES"],
+            loaded_rules,
         )
     except Exception:
         logging.getLogger(__name__).exception("Failed to start search index background worker")
