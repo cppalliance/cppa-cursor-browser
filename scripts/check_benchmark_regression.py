@@ -20,6 +20,14 @@ EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
         # each round. OS page-cache state on shared runners causes 3–5x variation between
         # consecutive CI runs, making this ungatable with any reasonable slack.
         "test_summary_cache_round_trip",
+        # Sub-100µs in-memory cache lookups vary 2.5x+ between consecutive ubuntu-latest
+        # runs; gated ratio band (0.5x–1.2x) cannot bracket both without false failures.
+        "test_summary_cache_lookup[hit]",
+        "test_summary_cache_lookup[miss]",
+        "test_composer_map_cache_lookup[hit]",
+        "test_composer_map_cache_lookup[miss]",
+        "test_tab_summary_cache_lookup[hit]",
+        "test_tab_summary_cache_lookup[miss]",
     }
 )
 

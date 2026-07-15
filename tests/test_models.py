@@ -55,7 +55,7 @@ class ComposerKnownGoodSchema(unittest.TestCase):
         self.assertEqual(composer.last_updated_at, 1_715_000_500_000)
         self.assertEqual(len(composer.full_conversation_headers_only), 2)
         self.assertEqual(composer.model_config.get("modelName"), "claude-opus-4-7")
-        self.assertIs(composer.raw, GOOD_COMPOSER_RAW)
+        self.assertIs(composer._raw, GOOD_COMPOSER_RAW)
 
     def test_workspace_parses_with_optional_folder(self) -> None:
         ws = Workspace.from_dict({"folder": "/home/zilin/projects/x"}, workspace_id="ws-1")

@@ -184,7 +184,7 @@ def _assemble_workspace_bubble(bubble_id: object, value: object) -> dict | None:
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
     try:
-        return Bubble.from_dict(parsed, bubble_id=bubble_id).raw  # type: ignore[arg-type]
+        return Bubble.from_dict(parsed, bubble_id=bubble_id)._raw  # type: ignore[arg-type]
     except SchemaError:
         return None
 
@@ -205,7 +205,7 @@ class TestBubbleFromDictFuzz(unittest.TestCase):
         if bubble is None:
             return
         self.assertEqual(bubble.bubble_id, bubble_id)
-        self.assertIs(bubble.raw, raw)
+        self.assertIs(bubble._raw, raw)
 
     @given(raw=_BUBBLE_RAW_ANY, bubble_id=_BUBBLE_ID_ANY)
     @settings(max_examples=80, deadline=None)

@@ -137,7 +137,7 @@ def _assemble_tab_from_composer_data(
 
     Args:
         composer_id: Composer UUID.
-        composer: Validated composer model (typed field access on ``.raw``).
+        composer: Validated composer model (typed field access, not raw dict reads).
         bubble_map: ``{bubble_id: Bubble}`` — global or scoped.
         contexts: ``messageRequestContext`` entries for *this* composer
             (list of dicts, each with an injected ``contextId`` key and a

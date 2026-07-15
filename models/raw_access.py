@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from models.conversation import Bubble, Composer
+    from models.conversation_types import BubbleContextDict, FileUriDict
 
 _logger = logging.getLogger(__name__)
 
@@ -219,15 +223,13 @@ def message_request_context_project_layouts(
 
 
 def composer_headers(
-    data: Any,
+    data: Composer | dict[str, Any],
     composer_id: str,
 ) -> list[dict[str, Any]]:
     from models.conversation import Composer
 
     if isinstance(data, Composer):
         return data.full_conversation_headers_only
-    if not isinstance(data, dict):
-        return []
     return _optional_list_absent_ok(
         data,
         "fullConversationHeadersOnly",
@@ -236,13 +238,13 @@ def composer_headers(
     )
 
 
-def composer_newly_created_files(data: Any, composer_id: str) -> list[Any]:
+def composer_newly_created_files(
+    data: Composer | dict[str, Any], composer_id: str
+) -> list[Any]:
     from models.conversation import Composer
 
     if isinstance(data, Composer):
         return data.newly_created_files
-    if not isinstance(data, dict):
-        return []
     return _optional_list_absent_ok(
         data,
         "newlyCreatedFiles",
@@ -251,13 +253,13 @@ def composer_newly_created_files(data: Any, composer_id: str) -> list[Any]:
     )
 
 
-def composer_code_block_data(data: Any, composer_id: str) -> dict[str, Any] | None:
+def composer_code_block_data(
+    data: Composer | dict[str, Any], composer_id: str
+) -> dict[str, Any] | None:
     from models.conversation import Composer
 
     if isinstance(data, Composer):
         return data.code_block_data
-    if not isinstance(data, dict):
-        return None
     return _optional_dict_absent_ok(
         data,
         "codeBlockData",
@@ -266,47 +268,51 @@ def composer_code_block_data(data: Any, composer_id: str) -> dict[str, Any] | No
     )
 
 
-def bubble_relevant_files(bubble: Any, bubble_id: str = "") -> list[Any]:
+def bubble_relevant_files(
+    bubble: Bubble | dict[str, Any], bubble_id: str = ""
+) -> list[str]:
     from models.conversation import Bubble
 
     if isinstance(bubble, Bubble):
         return bubble.relevant_files
-    if isinstance(bubble, dict):
-        return _optional_list_absent_ok(
+    return cast(
+        list[str],
+        _optional_list_absent_ok(
             bubble,
             "relevantFiles",
             model="Bubble",
             entity_id=bubble_id,
-        )
-    return []
+        ),
+    )
 
 
-def bubble_attached_file_uris(bubble: Any, bubble_id: str = "") -> list[Any]:
+def bubble_attached_file_uris(
+    bubble: Bubble | dict[str, Any], bubble_id: str = ""
+) -> list[FileUriDict]:
     from models.conversation import Bubble
 
     if isinstance(bubble, Bubble):
         return bubble.attached_file_code_chunks_uris
-    if isinstance(bubble, dict):
-        return _optional_list_absent_ok(
+    return cast(
+        list[FileUriDict],
+        _optional_list_absent_ok(
             bubble,
             "attachedFileCodeChunksUris",
             model="Bubble",
             entity_id=bubble_id,
-        )
-    return []
+        ),
+    )
 
 
-def bubble_context(bubble: Any, bubble_id: str = "") -> dict[str, Any]:
+def bubble_context(bubble: Bubble | dict[str, Any], bubble_id: str = "") -> BubbleContextDict:
     from models.conversation import Bubble
 
     if isinstance(bubble, Bubble):
         return bubble.context
-    if isinstance(bubble, dict):
-        ctx = _optional_dict_absent_ok(
-            bubble,
-            "context",
-            model="Bubble",
-            entity_id=bubble_id,
-        )
-        return ctx if ctx is not None else {}
-    return {}
+    ctx = _optional_dict_absent_ok(
+        bubble,
+        "context",
+        model="Bubble",
+        entity_id=bubble_id,
+    )
+    return cast(BubbleContextDict, ctx if ctx is not None else {})

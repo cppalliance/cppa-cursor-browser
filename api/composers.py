@@ -201,7 +201,7 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                             # whether it's absent or None, so the response shape
                             # is identical regardless of which branch resolved
                             # the composer (CodeRabbit on PR #30).
-                            payload = dict(local.raw)
+                            payload = local.cursor_storage_payload()
                             payload["conversation"] = payload.get("conversation") or []
                             return json_response(payload)
             except SchemaError as e:
@@ -240,7 +240,7 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                             type(e).__name__,
                         )
                         return json_response({"error": "Composer schema drift"}, 404)
-                    payload = dict(composer.raw)
+                    payload = composer.cursor_storage_payload()
                     payload["conversation"] = payload.get("conversation") or []
                     return json_response(payload)
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):

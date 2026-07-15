@@ -274,7 +274,7 @@ class TestWorkspaceWiredAtReadSite(unittest.TestCase):
             return WorkspaceLocalComposer(
                 composer_id=cid,
                 last_updated_at=1000 if cid == "cmp-A" else 9000,
-                raw=raw,
+                _raw=raw,
             )
 
         app = create_app()

@@ -1,32 +1,32 @@
 {
-  "_note": "Gated means from ubuntu-latest CI benchmark-results.json. Values multiplied by 1.5x slack at generation time. Excluded from gate (recorded for reference): test_summary_cache_round_trip. Refresh after intentional speedups via reduce_baselines.py.",
-  "updated": "2026-06-25T23:36:11Z",
+  "_note": "Gated means from max of two ubuntu-latest CI runs (slow/1.19 margin). Sub-100us cache lookup benches excluded from gate due to runner variance.",
+  "updated": "2026-07-15T16:14:31Z",
   "machine": "Linux",
   "groups": {
     "parse": {
-      "test_list_workspace_projects_nocache[composers-10]": 0.016421750017237738,
-      "test_list_workspace_projects_nocache[composers-50]": 0.07185380692856874,
-      "test_list_workspace_projects_nocache[composers-200]": 0.2388664538571439
+      "test_list_workspace_projects_nocache[composers-10]": 0.009873695869187243,
+      "test_list_workspace_projects_nocache[composers-200]": 0.1458800642857019,
+      "test_list_workspace_projects_nocache[composers-50]": 0.04375626806723154
     },
     "export": {
-      "test_post_export_zip[composers-10]": 0.010621589857140498,
-      "test_post_export_zip[composers-50]": 0.03968703356250458
+      "test_post_export_zip[composers-10]": 0.006389603808617876,
+      "test_post_export_zip[composers-50]": 0.02472151171218505
     },
     "search": {
-      "test_search_full_corpus_live_scan": 0.04461661563157736,
-      "test_search_full_corpus_indexed": 0.05512249660713918
+      "test_search_full_corpus_indexed": 0.03357773425985082,
+      "test_search_full_corpus_live_scan": 0.02699565326798046
     },
     "summary-cache": {
-      "test_summary_cache_lookup[hit]": 7.249851343825762e-05,
-      "test_summary_cache_lookup[miss]": 7.193702095574013e-05,
-      "test_composer_map_cache_lookup[hit]": 7.151645086519804e-05,
-      "test_composer_map_cache_lookup[miss]": 7.112598943352091e-05,
-      "test_fingerprint_workspace_entries[10]": 0.0024127972424549185,
-      "test_fingerprint_workspace_entries[50]": 0.010196820941858245,
-      "test_fingerprint_workspace_entries[200]": 0.029070524094341035,
-      "test_summary_cache_round_trip": 0.0004703680658560554,
-      "test_tab_summary_cache_lookup[hit]": 7.844850562859133e-05,
-      "test_tab_summary_cache_lookup[miss]": 7.843399021512e-05
+      "test_composer_map_cache_lookup[hit]": 9.159433254539677e-05,
+      "test_composer_map_cache_lookup[miss]": 9.052273017297571e-05,
+      "test_fingerprint_workspace_entries[10]": 0.0014558767614049227,
+      "test_fingerprint_workspace_entries[200]": 0.01772436102941095,
+      "test_fingerprint_workspace_entries[50]": 0.006177960517756895,
+      "test_summary_cache_lookup[hit]": 9.256659141385228e-05,
+      "test_summary_cache_lookup[miss]": 9.249739842055407e-05,
+      "test_summary_cache_round_trip": 0.00051773609280467,
+      "test_tab_summary_cache_lookup[hit]": 0.00010446294267543434,
+      "test_tab_summary_cache_lookup[miss]": 0.00010424118202523503
     }
   }
 }
