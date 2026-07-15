@@ -15,6 +15,8 @@ if REPO_ROOT not in sys.path:
 from models.conversation import Bubble, Composer
 from utils.display_bubble import bubble_display_timestamp_ms
 from models.raw_access import (
+    bubble_attached_file_uris,
+    bubble_relevant_files,
     composer_newly_created_files,
     conversation_header_bubble_id,
     message_request_context_project_layouts,
@@ -161,6 +163,40 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         self.assertEqual(
             composer.newly_created_files,
             composer_newly_created_files(composer, "cid-bridge"),
+        )
+
+    def test_dict_bridge_relevant_files_skips_non_str_elements(self) -> None:
+        raw = {"relevantFiles": ["/good.py", 123, "/also.py"]}
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge")
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(
+                bubble_relevant_files(raw, "b-bridge"),
+                ["/good.py", "/also.py"],
+            )
+        self.assertEqual(bubble.relevant_files, bubble_relevant_files(bubble, "b-bridge"))
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_dict_bridge_attached_file_uris_skips_non_dict_elements(self) -> None:
+        raw = {
+            "attachedFileCodeChunksUris": [
+                {"path": "/a.py"},
+                "bad",
+                {"path": "/b.py"},
+            ]
+        }
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge-uri")
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(
+                bubble_attached_file_uris(raw, "b-bridge-uri"),
+                [{"path": "/a.py"}, {"path": "/b.py"}],
+            )
+        self.assertEqual(
+            bubble.attached_file_code_chunks_uris,
+            bubble_attached_file_uris(bubble, "b-bridge-uri"),
+        )
+        self.assertTrue(
+            any("attachedFileCodeChunksUris" in m for m in logs.output),
+            logs.output,
         )
 
     def test_optional_raw_list_no_warning_when_present(self) -> None:

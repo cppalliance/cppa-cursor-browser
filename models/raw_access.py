@@ -271,36 +271,40 @@ def composer_code_block_data(
 def bubble_relevant_files(
     bubble: Bubble | dict[str, Any], bubble_id: str = ""
 ) -> list[str]:
-    from models.conversation import Bubble
+    from models.conversation import Bubble, _filter_str_list_elements
 
     if isinstance(bubble, Bubble):
         return bubble.relevant_files
-    return cast(
-        list[str],
+    return _filter_str_list_elements(
         _optional_list_absent_ok(
             bubble,
             "relevantFiles",
             model="Bubble",
             entity_id=bubble_id,
         ),
+        model="Bubble",
+        record_id=bubble_id,
+        field="relevantFiles",
     )
 
 
 def bubble_attached_file_uris(
     bubble: Bubble | dict[str, Any], bubble_id: str = ""
 ) -> list[FileUriDict]:
-    from models.conversation import Bubble
+    from models.conversation import Bubble, _filter_dict_list_elements
 
     if isinstance(bubble, Bubble):
         return bubble.attached_file_code_chunks_uris
-    return cast(
-        list[FileUriDict],
+    return _filter_dict_list_elements(
         _optional_list_absent_ok(
             bubble,
             "attachedFileCodeChunksUris",
             model="Bubble",
             entity_id=bubble_id,
         ),
+        model="Bubble",
+        record_id=bubble_id,
+        field="attachedFileCodeChunksUris",
     )
 
 
