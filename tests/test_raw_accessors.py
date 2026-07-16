@@ -40,9 +40,42 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
             {**GOOD_COMPOSER_RAW, "newlyCreatedFiles": "not-a-list"},
             composer_id="cid-bad",
         )
-        with self.assertLogs("models.conversation", level="WARNING") as logs:
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
             self.assertEqual(bad.newly_created_files, [])
         self.assertTrue(any("newlyCreatedFiles" in m for m in logs.output), logs.output)
+
+    def test_composer_code_block_data_warns_on_wrong_type(self) -> None:
+        bad = Composer.from_dict(
+            {**GOOD_COMPOSER_RAW, "codeBlockData": "not-a-dict"},
+            composer_id="cid-bad",
+        )
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertIsNone(bad.code_block_data)
+        self.assertTrue(any("codeBlockData" in m for m in logs.output), logs.output)
+
+    def test_bubble_metadata_warns_on_wrong_type(self) -> None:
+        bubble = Bubble.from_dict({"metadata": "not-a-dict"}, bubble_id="b-meta")
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertEqual(bubble.metadata, {})
+        self.assertTrue(any("metadata" in m for m in logs.output), logs.output)
+
+    def test_bubble_token_count_warns_on_wrong_type(self) -> None:
+        bubble = Bubble.from_dict({"tokenCount": "not-a-dict"}, bubble_id="b-tok")
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertIsNone(bubble.token_count)
+        self.assertTrue(any("tokenCount" in m for m in logs.output), logs.output)
+
+    def test_bubble_tool_results_warns_on_wrong_type(self) -> None:
+        bubble = Bubble.from_dict({"toolResults": "not-a-list"}, bubble_id="b-tr")
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertIsNone(bubble.tool_results)
+        self.assertTrue(any("toolResults" in m for m in logs.output), logs.output)
+
+    def test_bubble_relevant_files_warns_on_wrong_list_type(self) -> None:
+        bubble = Bubble.from_dict({"relevantFiles": "not-a-list"}, bubble_id="b-rel-bad")
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertEqual(bubble.relevant_files, [])
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
 
     def test_bubble_relevant_files_empty_when_key_missing(self) -> None:
         bubble = Bubble.from_dict({"type": "user", "text": "hi"}, bubble_id="b-1")
@@ -175,6 +208,12 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
                 ["/good.py", "/also.py"],
             )
         self.assertEqual(bubble.relevant_files, bubble_relevant_files(bubble, "b-bridge"))
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_dict_bridge_relevant_files_warns_on_wrong_list_type(self) -> None:
+        raw = {"relevantFiles": "not-a-list"}
+        with self.assertLogs("models.raw_access", level="WARNING") as logs:
+            self.assertEqual(bubble_relevant_files(raw, "b-bridge"), [])
         self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
 
     def test_dict_bridge_bubble_context_matches_bubble_property(self) -> None:
