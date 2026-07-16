@@ -18,7 +18,10 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from utils.cursor_md_exporter import cursor_cli_session_to_markdown
+from utils.cursor_md_exporter import (
+    _build_ide_session_summary,
+    cursor_cli_session_to_markdown,
+)
 
 
 def _make_meta_hex(meta: dict) -> str:
@@ -240,6 +243,43 @@ class TestCursorCliSessionToMarkdown(unittest.TestCase):
         result = cursor_cli_session_to_markdown(db_path)
         # Frontmatter title must have embedded quotes escaped as \"
         self.assertIn('title: "He said \\"hello\\""', result)
+
+    def test_non_dict_meta_json_falls_back_to_empty_mapping(self):
+        """List/scalar meta JSON must not crash; agentId falls back to parent dir name."""
+        db_path = self._db_path("scalar-meta")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
+        conn.execute(
+            "INSERT INTO meta VALUES ('0', ?)",
+            (json.dumps(["not", "a", "dict"]).encode("utf-8").hex(),),
+        )
+        conn.commit()
+        conn.close()
+
+        result = cursor_cli_session_to_markdown(db_path)
+        self.assertIn(f'log_id: "{Path(db_path).parent.name}"', result)
+        self.assertIn("log_type: cli_agent", result)
+
+    def test_web_only_tool_stats_produce_session_summary(self):
+        """Search/web-only sessions still get a Tool Results summary block."""
+        summary = _build_ide_session_summary(
+            [],
+            [],
+            [],
+            {
+                "terminal_success": 0,
+                "terminal_error": 0,
+                "file_reads": 0,
+                "file_edits": 0,
+                "searches": 0,
+                "web": 2,
+            },
+        )
+        self.assertIn("## Session Summary", summary)
+        self.assertIn("### Tool Results", summary)
+        self.assertIn("Web Fetches: 2", summary)
 
 
 if __name__ == "__main__":
