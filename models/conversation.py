@@ -23,6 +23,13 @@ from models.from_dict_validation import (
     require_non_empty_str_field,
     require_type,
 )
+from models.raw_access import (
+    _optional_dict_absent_ok,
+    _optional_dict_default_empty,
+    _optional_list_absent_none,
+    _optional_list_absent_ok,
+    _optional_number_absent_ok,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -146,61 +153,39 @@ class Composer:
 
     @property
     def newly_created_files(self) -> list[Any]:
-        value = self._raw.get("newlyCreatedFiles")
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            _logger.warning(
-                "Schema drift in Composer %s: invalid type for newlyCreatedFiles (expected list, got %s)",
-                self.composer_id,
-                type(value).__name__,
-            )
-            return []
-        return value
+        return _optional_list_absent_ok(
+            self._raw,
+            "newlyCreatedFiles",
+            model="Composer",
+            entity_id=self.composer_id,
+        )
 
     @property
     def code_block_data(self) -> dict[str, Any] | None:
-        value = self._raw.get("codeBlockData")
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Composer %s: invalid type for codeBlockData (expected dict, got %s)",
-                self.composer_id,
-                type(value).__name__,
-            )
-            return None
-        return value
+        return _optional_dict_absent_ok(
+            self._raw,
+            "codeBlockData",
+            model="Composer",
+            entity_id=self.composer_id,
+        )
 
     @property
     def usage_data(self) -> dict[str, Any]:
         """Composer cost rollup; empty dict when absent (common)."""
-        value = self._raw.get("usageData")
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            suffix = f" {self.composer_id}" if self.composer_id else ""
-            _logger.warning(
-                "Schema drift in Composer%s: invalid type for usageData (expected dict, got %s)",
-                suffix,
-                type(value).__name__,
-            )
-            return {}
-        return value
+        return _optional_dict_default_empty(
+            self._raw,
+            "usageData",
+            model="Composer",
+            entity_id=self.composer_id,
+        )
 
     def _optional_counter(self, key: str) -> int | float:
-        value = self._raw.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            if key in self._raw:
-                suffix = f" {self.composer_id}" if self.composer_id else ""
-                _logger.warning(
-                    "Schema drift in Composer%s: invalid type for %s (expected number, got %s)",
-                    suffix,
-                    key,
-                    type(value).__name__,
-                )
-            return 0
-        return cast(int | float, value)
+        return _optional_number_absent_ok(
+            self._raw,
+            key,
+            model="Composer",
+            entity_id=self.composer_id,
+        )
 
     @property
     def total_lines_added(self) -> int | float:
@@ -307,32 +292,25 @@ class Bubble:
 
     @property
     def metadata(self) -> BubbleMetadataDict:
-        value = self._raw.get("metadata")
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for metadata (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return {}
-        return cast(BubbleMetadataDict, value)
+        return cast(
+            BubbleMetadataDict,
+            _optional_dict_default_empty(
+                self._raw,
+                "metadata",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
+        )
 
     @property
     def relevant_files(self) -> list[str]:
-        value = self._raw.get("relevantFiles")
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for relevantFiles (expected list, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return []
         return _filter_str_list_elements(
-            value,
+            _optional_list_absent_ok(
+                self._raw,
+                "relevantFiles",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
             model="Bubble",
             record_id=self.bubble_id,
             field="relevantFiles",
@@ -340,18 +318,13 @@ class Bubble:
 
     @property
     def attached_file_code_chunks_uris(self) -> list[FileUriDict]:
-        value = self._raw.get("attachedFileCodeChunksUris")
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for attachedFileCodeChunksUris (expected list, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return []
         return _filter_dict_list_elements(
-            value,
+            _optional_list_absent_ok(
+                self._raw,
+                "attachedFileCodeChunksUris",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
             model="Bubble",
             record_id=self.bubble_id,
             field="attachedFileCodeChunksUris",
@@ -359,62 +332,51 @@ class Bubble:
 
     @property
     def context(self) -> BubbleContextDict:
-        value = self._raw.get("context")
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for context (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return {}
-        return cast(BubbleContextDict, value)
+        return cast(
+            BubbleContextDict,
+            _optional_dict_default_empty(
+                self._raw,
+                "context",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
+        )
 
     @property
     def token_count(self) -> TokenCountDict | None:
-        value = self._raw.get("tokenCount")
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for tokenCount (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return None
-        return cast(TokenCountDict, value)
+        value = _optional_dict_absent_ok(
+            self._raw,
+            "tokenCount",
+            model="Bubble",
+            entity_id=self.bubble_id,
+        )
+        return cast(TokenCountDict, value) if value is not None else None
 
     @property
     def tool_former_data(self) -> ToolFormerDataDict | None:
-        value = self._raw.get("toolFormerData")
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for toolFormerData (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return None
-        return cast(ToolFormerDataDict, value)
+        value = _optional_dict_absent_ok(
+            self._raw,
+            "toolFormerData",
+            model="Bubble",
+            entity_id=self.bubble_id,
+        )
+        return cast(ToolFormerDataDict, value) if value is not None else None
 
     @property
     def model_info(self) -> ModelInfoDict:
-        value = self._raw.get("modelInfo")
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for modelInfo (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return {}
-        return cast(ModelInfoDict, value)
+        return cast(
+            ModelInfoDict,
+            _optional_dict_default_empty(
+                self._raw,
+                "modelInfo",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
+        )
 
     @property
     def thinking(self) -> str | ThinkingDict | None:
+        # Inline: accepts str | dict; no raw_access helper for that union.
         value = self._raw.get("thinking")
         if value is None:
             return None
@@ -429,6 +391,7 @@ class Bubble:
 
     @property
     def thinking_duration_ms(self) -> int | float | None:
+        # Inline: absent -> None (not 0); bool guard before numeric check.
         value = self._raw.get("thinkingDurationMs")
         if value is None:
             return None
@@ -443,31 +406,25 @@ class Bubble:
 
     @property
     def context_window_status_at_creation(self) -> ContextWindowStatusDict:
-        value = self._raw.get("contextWindowStatusAtCreation")
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for contextWindowStatusAtCreation (expected dict, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return {}
-        return cast(ContextWindowStatusDict, value)
+        return cast(
+            ContextWindowStatusDict,
+            _optional_dict_default_empty(
+                self._raw,
+                "contextWindowStatusAtCreation",
+                model="Bubble",
+                entity_id=self.bubble_id,
+            ),
+        )
 
     @property
     def tool_results(self) -> list[ToolResultEntry] | None:
-        value = self._raw.get("toolResults")
-        if value is None:
-            return None
-        if not isinstance(value, list):
-            _logger.warning(
-                "Schema drift in Bubble %s: invalid type for toolResults (expected list, got %s)",
-                self.bubble_id,
-                type(value).__name__,
-            )
-            return None
-        return cast(list[ToolResultEntry], value)
+        value = _optional_list_absent_none(
+            self._raw,
+            "toolResults",
+            model="Bubble",
+            entity_id=self.bubble_id,
+        )
+        return cast(list[ToolResultEntry], value) if value is not None else None
 
     def bubble_timestamp_ms(self) -> int | float | None:
         """``createdAt`` or ``timestamp`` in milliseconds when present."""

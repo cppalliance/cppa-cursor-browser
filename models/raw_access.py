@@ -1,4 +1,10 @@
-"""Optional-key reads from Cursor JSON blobs with schema-drift logging."""
+"""Optional-key reads from Cursor JSON blobs with schema-drift logging.
+
+Underscore-prefixed ``_optional_*`` helpers are package-internal shared
+implementation used by ``conversation.py`` property accessors and dict-bridge
+functions here. They are not re-exported from ``models``; the prefix marks
+intra-package reuse, not single-module privacy.
+"""
 
 from __future__ import annotations
 
@@ -152,6 +158,68 @@ def _optional_dict_absent_ok(
         )
         return None
     return value
+
+
+def _optional_dict_default_empty(
+    raw: dict[str, Any],
+    key: str,
+    *,
+    model: str,
+    entity_id: str = "",
+) -> dict[str, Any]:
+    """Like :func:`_optional_dict_absent_ok` but returns ``{}`` when absent."""
+    value = _optional_dict_absent_ok(
+        raw, key, model=model, entity_id=entity_id
+    )
+    return value if value is not None else {}
+
+
+def _optional_list_absent_none(
+    raw: dict[str, Any],
+    key: str,
+    *,
+    model: str,
+    entity_id: str = "",
+) -> list[Any] | None:
+    """List field often omitted; warn only on wrong type; ``None`` when absent or drifted."""
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        suffix = f" {entity_id}" if entity_id else ""
+        _logger.warning(
+            "Schema drift in %s%s: invalid type for %s (expected list, got %s)",
+            model,
+            suffix,
+            key,
+            type(value).__name__,
+        )
+        return None
+    return value
+
+
+def _optional_number_absent_ok(
+    raw: dict[str, Any],
+    key: str,
+    *,
+    model: str,
+    entity_id: str = "",
+    default: int | float = 0,
+) -> int | float:
+    """Numeric counter field; ``default`` when absent; warn only on wrong type when present."""
+    value = raw.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if key in raw:
+            suffix = f" {entity_id}" if entity_id else ""
+            _logger.warning(
+                "Schema drift in %s%s: invalid type for %s (expected number, got %s)",
+                model,
+                suffix,
+                key,
+                type(value).__name__,
+            )
+        return default
+    return cast(int | float, value)
 
 
 def optional_raw_str(
@@ -315,10 +383,12 @@ def bubble_context(bubble: Bubble | dict[str, Any], bubble_id: str = "") -> Bubb
 
     if isinstance(bubble, Bubble):
         return bubble.context
-    ctx = _optional_dict_absent_ok(
-        bubble,
-        "context",
-        model="Bubble",
-        entity_id=bubble_id,
+    return cast(
+        BubbleContextDict,
+        _optional_dict_default_empty(
+            bubble,
+            "context",
+            model="Bubble",
+            entity_id=bubble_id,
+        ),
     )
-    return cast(BubbleContextDict, ctx if ctx is not None else {})
