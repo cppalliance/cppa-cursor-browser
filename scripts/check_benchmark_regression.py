@@ -17,9 +17,17 @@ STALE_FLOOR = 0.50
 EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
     {
         # round_trip calls set_cached_projects (file write) + get_cached_projects (file read)
-        # each round. OS page-cache state on shared runners causes 3–5x variation between
+        # each round. OS page-cache state on shared runners causes 3-5x variation between
         # consecutive CI runs, making this ungatable with any reasonable slack.
         "test_summary_cache_round_trip",
+        # Sub-100µs in-memory cache lookups vary 2.5x+ between consecutive ubuntu-latest
+        # runs; gated ratio band (0.5x to 1.2x) cannot bracket both without false failures.
+        "test_summary_cache_lookup[hit]",
+        "test_summary_cache_lookup[miss]",
+        "test_composer_map_cache_lookup[hit]",
+        "test_composer_map_cache_lookup[miss]",
+        "test_tab_summary_cache_lookup[hit]",
+        "test_tab_summary_cache_lookup[miss]",
     }
 )
 

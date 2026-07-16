@@ -274,7 +274,7 @@ class TestWorkspaceWiredAtReadSite(unittest.TestCase):
             return WorkspaceLocalComposer(
                 composer_id=cid,
                 last_updated_at=1000 if cid == "cmp-A" else 9000,
-                raw=raw,
+                _raw=raw,
             )
 
         app = create_app()
@@ -291,6 +291,38 @@ class TestWorkspaceWiredAtReadSite(unittest.TestCase):
                     "WorkspaceLocalComposer.last_updated_at — typed model "
                     "is back to being just a filter.",
             )
+
+    def test_list_composers_response_fields_do_not_mutate_storage_raw(self):
+        from app import create_app
+        from models import WorkspaceLocalComposer
+        import api.composers as composers_mod
+
+        captured: list[WorkspaceLocalComposer] = []
+        original_from_dict = WorkspaceLocalComposer.from_dict
+
+        def capturing_from_dict(raw):  # type: ignore[no-untyped-def]
+            local = original_from_dict(raw)
+            captured.append(local)
+            return local
+
+        app = create_app()
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+        with patch.object(
+            composers_mod.WorkspaceLocalComposer,
+            "from_dict",
+            side_effect=capturing_from_dict,
+        ):
+            client = app.test_client()
+            response = client.get("/api/composers")
+            self.assertEqual(response.status_code, 200)
+            rows = response.get_json()
+            row = next(c for c in rows if c["composerId"] == COMPOSER_ID)
+            self.assertEqual(row["workspaceId"], WORKSPACE_ID)
+
+        local = next(c for c in captured if c.composer_id == COMPOSER_ID)
+        self.assertNotIn("workspaceId", local._raw)
+        self.assertNotIn("workspaceFolder", local._raw)
 
 
 class TestGetComposerValidatesSchema(unittest.TestCase):

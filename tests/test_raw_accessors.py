@@ -15,6 +15,9 @@ if REPO_ROOT not in sys.path:
 from models.conversation import Bubble, Composer
 from utils.display_bubble import bubble_display_timestamp_ms
 from models.raw_access import (
+    bubble_attached_file_uris,
+    bubble_context,
+    bubble_relevant_files,
     composer_newly_created_files,
     conversation_header_bubble_id,
     message_request_context_project_layouts,
@@ -45,6 +48,34 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         bubble = Bubble.from_dict({"type": "user", "text": "hi"}, bubble_id="b-1")
         with self.assertNoLogs("models.conversation", level="WARNING"):
             self.assertEqual(bubble.relevant_files, [])
+
+    def test_bubble_relevant_files_skips_non_str_elements(self) -> None:
+        bubble = Bubble.from_dict(
+            {"relevantFiles": ["/good.py", 123, None, "/also.py"]},
+            bubble_id="b-rel",
+        )
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(bubble.relevant_files, ["/good.py", "/also.py"])
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_bubble_attached_file_uris_skips_non_dict_elements(self) -> None:
+        bubble = Bubble.from_dict(
+            {
+                "attachedFileCodeChunksUris": [
+                    {"path": "/a.py"},
+                    "bad",
+                    {"path": "/b.py"},
+                ]
+            },
+            bubble_id="b-uri",
+        )
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            uris = bubble.attached_file_code_chunks_uris
+        self.assertEqual(uris, [{"path": "/a.py"}, {"path": "/b.py"}])
+        self.assertTrue(
+            any("attachedFileCodeChunksUris" in m for m in logs.output),
+            logs.output,
+        )
 
     def test_project_layouts_silent_when_key_missing(self) -> None:
         with self.assertNoLogs("models.raw_access", level="WARNING"):
@@ -133,6 +164,53 @@ class TestRawAccessorDriftLogging(unittest.TestCase):
         self.assertEqual(
             composer.newly_created_files,
             composer_newly_created_files(composer, "cid-bridge"),
+        )
+
+    def test_dict_bridge_relevant_files_skips_non_str_elements(self) -> None:
+        raw = {"relevantFiles": ["/good.py", 123, "/also.py"]}
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge")
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(
+                bubble_relevant_files(raw, "b-bridge"),
+                ["/good.py", "/also.py"],
+            )
+        self.assertEqual(bubble.relevant_files, bubble_relevant_files(bubble, "b-bridge"))
+        self.assertTrue(any("relevantFiles" in m for m in logs.output), logs.output)
+
+    def test_dict_bridge_bubble_context_matches_bubble_property(self) -> None:
+        raw = {"context": {"fileSelections": [{"uri": {"path": "/a.py"}}]}}
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge-ctx")
+        self.assertEqual(
+            bubble_context(raw, "b-bridge-ctx"),
+            {"fileSelections": [{"uri": {"path": "/a.py"}}]},
+        )
+        self.assertEqual(bubble.context, bubble_context(bubble, "b-bridge-ctx"))
+
+    def test_dict_bridge_bubble_context_empty_when_key_missing(self) -> None:
+        with self.assertNoLogs("models.raw_access", level="WARNING"):
+            self.assertEqual(bubble_context({}, "b-no-ctx"), {})
+
+    def test_dict_bridge_attached_file_uris_skips_non_dict_elements(self) -> None:
+        raw = {
+            "attachedFileCodeChunksUris": [
+                {"path": "/a.py"},
+                "bad",
+                {"path": "/b.py"},
+            ]
+        }
+        bubble = Bubble.from_dict(raw, bubble_id="b-bridge-uri")
+        with self.assertLogs("models.conversation", level="WARNING") as logs:
+            self.assertEqual(
+                bubble_attached_file_uris(raw, "b-bridge-uri"),
+                [{"path": "/a.py"}, {"path": "/b.py"}],
+            )
+        self.assertEqual(
+            bubble.attached_file_code_chunks_uris,
+            bubble_attached_file_uris(bubble, "b-bridge-uri"),
+        )
+        self.assertTrue(
+            any("attachedFileCodeChunksUris" in m for m in logs.output),
+            logs.output,
         )
 
     def test_optional_raw_list_no_warning_when_present(self) -> None:

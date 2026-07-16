@@ -8,10 +8,9 @@ from typing import Any, Protocol
 
 
 class HasBubbleRaw(Protocol):
-    """Bubble model or any object exposing a Cursor JSON ``raw`` dict."""
+    """Bubble model or any object exposing stored Cursor JSON for text extraction."""
 
-    @property
-    def raw(self) -> dict[str, Any]: ...
+    def cursor_storage_payload(self) -> dict[str, Any]: ...
 
 
 def extract_text_from_rich_text(children: list[Any]) -> str:
@@ -33,7 +32,9 @@ def extract_text_from_rich_text(children: list[Any]) -> str:
 
 def extract_text_from_bubble(bubble: HasBubbleRaw | dict[str, Any]) -> str:
     """Extract displayable text from a bubble object (text, richText, codeBlocks)."""
-    payload: dict[str, Any] = bubble if isinstance(bubble, dict) else bubble.raw
+    payload: dict[str, Any] = (
+        bubble if isinstance(bubble, dict) else bubble.cursor_storage_payload()
+    )
     if not payload:
         return ""
 

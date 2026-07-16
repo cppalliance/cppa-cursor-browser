@@ -4,6 +4,17 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from models.conversation_types import (
+    BubbleContextDict,
+    BubbleMetadataDict,
+    ContextWindowStatusDict,
+    FileUriDict,
+    ModelInfoDict,
+    ThinkingDict,
+    TokenCountDict,
+    ToolFormerDataDict,
+    ToolResultEntry,
+)
 from models.errors import SchemaError
 from models.from_dict_validation import (
     require_dict,
@@ -16,6 +27,50 @@ from models.from_dict_validation import (
 _logger = logging.getLogger(__name__)
 
 
+def _filter_str_list_elements(
+    value: list[Any],
+    *,
+    model: str,
+    record_id: str,
+    field: str,
+) -> list[str]:
+    filtered: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            filtered.append(item)
+        else:
+            _logger.warning(
+                "Schema drift in %s %s: invalid %s element (expected str, got %s)",
+                model,
+                record_id,
+                field,
+                type(item).__name__,
+            )
+    return filtered
+
+
+def _filter_dict_list_elements(
+    value: list[Any],
+    *,
+    model: str,
+    record_id: str,
+    field: str,
+) -> list[FileUriDict]:
+    filtered: list[FileUriDict] = []
+    for item in value:
+        if isinstance(item, dict):
+            filtered.append(cast(FileUriDict, item))
+        else:
+            _logger.warning(
+                "Schema drift in %s %s: invalid %s element (expected dict, got %s)",
+                model,
+                record_id,
+                field,
+                type(item).__name__,
+            )
+    return filtered
+
+
 @dataclass(frozen=True)
 class Composer:
     """Cursor conversation row from globalStorage cursorDiskKV; requires fullConversationHeadersOnly + createdAt."""
@@ -26,7 +81,7 @@ class Composer:
     name: str | None = None
     last_updated_at: Any = None
     model_config: dict[str, Any] = field(default_factory=dict)
-    raw: dict[str, Any] = field(default_factory=dict)
+    _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, composer_id: str) -> "Composer":
@@ -79,12 +134,19 @@ class Composer:
             name=raw.get("name"),
             last_updated_at=raw.get("lastUpdatedAt"),
             model_config=model_config,
-            raw=raw,
+            _raw=raw,
         )
+
+    def cursor_storage_payload(self) -> dict[str, Any]:
+        """Shallow copy of stored Cursor JSON for API passthrough.
+
+        Prefer typed accessors for field reads.
+        """
+        return dict(self._raw)
 
     @property
     def newly_created_files(self) -> list[Any]:
-        value = self.raw.get("newlyCreatedFiles")
+        value = self._raw.get("newlyCreatedFiles")
         if value is None:
             return []
         if not isinstance(value, list):
@@ -98,7 +160,7 @@ class Composer:
 
     @property
     def code_block_data(self) -> dict[str, Any] | None:
-        value = self.raw.get("codeBlockData")
+        value = self._raw.get("codeBlockData")
         if value is None:
             return None
         if not isinstance(value, dict):
@@ -113,7 +175,7 @@ class Composer:
     @property
     def usage_data(self) -> dict[str, Any]:
         """Composer cost rollup; empty dict when absent (common)."""
-        value = self.raw.get("usageData")
+        value = self._raw.get("usageData")
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -127,9 +189,9 @@ class Composer:
         return value
 
     def _optional_counter(self, key: str) -> int | float:
-        value = self.raw.get(key, 0)
+        value = self._raw.get(key, 0)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            if key in self.raw:
+            if key in self._raw:
                 suffix = f" {self.composer_id}" if self.composer_id else ""
                 _logger.warning(
                     "Schema drift in Composer%s: invalid type for %s (expected number, got %s)",
@@ -172,7 +234,7 @@ class WorkspaceLocalComposer:
 
     composer_id: str
     last_updated_at: Any = None
-    raw: dict[str, Any] = field(default_factory=dict)
+    _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "WorkspaceLocalComposer":
@@ -194,8 +256,12 @@ class WorkspaceLocalComposer:
         return cls(
             composer_id=composer_id,
             last_updated_at=raw.get("lastUpdatedAt"),
-            raw=raw,
+            _raw=raw,
         )
+
+    def cursor_storage_payload(self) -> dict[str, Any]:
+        """Shallow copy of stored Cursor JSON for API passthrough."""
+        return dict(self._raw)
 
 
 @dataclass(frozen=True)
@@ -206,7 +272,7 @@ class Bubble:
     """
 
     bubble_id: str
-    raw: dict[str, Any] = field(default_factory=dict)
+    _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, bubble_id: str) -> "Bubble":
@@ -224,17 +290,24 @@ class Bubble:
         """
         raw = require_dict(raw, model="Bubble", field="bubble")
         require_non_empty_str(bubble_id, model="Bubble", field="bubbleId")
-        return cls(bubble_id=bubble_id, raw=raw)
+        return cls(bubble_id=bubble_id, _raw=raw)
+
+    def cursor_storage_payload(self) -> dict[str, Any]:
+        """Shallow copy of stored Cursor JSON for API passthrough.
+
+        Prefer typed accessors for field reads.
+        """
+        return dict(self._raw)
 
     @property
     def text(self) -> str | None:
         """Plain ``text`` field; richText is handled by :func:`extract_text_from_bubble`."""
-        value = self.raw.get("text")
+        value = self._raw.get("text")
         return value if isinstance(value, str) else None
 
     @property
-    def metadata(self) -> dict[str, Any]:
-        value = self.raw.get("metadata")
+    def metadata(self) -> BubbleMetadataDict:
+        value = self._raw.get("metadata")
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -244,11 +317,11 @@ class Bubble:
                 type(value).__name__,
             )
             return {}
-        return value
+        return cast(BubbleMetadataDict, value)
 
     @property
-    def relevant_files(self) -> list[Any]:
-        value = self.raw.get("relevantFiles")
+    def relevant_files(self) -> list[str]:
+        value = self._raw.get("relevantFiles")
         if value is None:
             return []
         if not isinstance(value, list):
@@ -258,11 +331,16 @@ class Bubble:
                 type(value).__name__,
             )
             return []
-        return value
+        return _filter_str_list_elements(
+            value,
+            model="Bubble",
+            record_id=self.bubble_id,
+            field="relevantFiles",
+        )
 
     @property
-    def attached_file_code_chunks_uris(self) -> list[Any]:
-        value = self.raw.get("attachedFileCodeChunksUris")
+    def attached_file_code_chunks_uris(self) -> list[FileUriDict]:
+        value = self._raw.get("attachedFileCodeChunksUris")
         if value is None:
             return []
         if not isinstance(value, list):
@@ -272,11 +350,16 @@ class Bubble:
                 type(value).__name__,
             )
             return []
-        return value
+        return _filter_dict_list_elements(
+            value,
+            model="Bubble",
+            record_id=self.bubble_id,
+            field="attachedFileCodeChunksUris",
+        )
 
     @property
-    def context(self) -> dict[str, Any]:
-        value = self.raw.get("context")
+    def context(self) -> BubbleContextDict:
+        value = self._raw.get("context")
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -286,11 +369,11 @@ class Bubble:
                 type(value).__name__,
             )
             return {}
-        return value
+        return cast(BubbleContextDict, value)
 
     @property
-    def token_count(self) -> dict[str, Any] | None:
-        value = self.raw.get("tokenCount")
+    def token_count(self) -> TokenCountDict | None:
+        value = self._raw.get("tokenCount")
         if value is None:
             return None
         if not isinstance(value, dict):
@@ -300,11 +383,11 @@ class Bubble:
                 type(value).__name__,
             )
             return None
-        return value
+        return cast(TokenCountDict, value)
 
     @property
-    def tool_former_data(self) -> dict[str, Any] | None:
-        value = self.raw.get("toolFormerData")
+    def tool_former_data(self) -> ToolFormerDataDict | None:
+        value = self._raw.get("toolFormerData")
         if value is None:
             return None
         if not isinstance(value, dict):
@@ -314,11 +397,11 @@ class Bubble:
                 type(value).__name__,
             )
             return None
-        return value
+        return cast(ToolFormerDataDict, value)
 
     @property
-    def model_info(self) -> dict[str, Any]:
-        value = self.raw.get("modelInfo")
+    def model_info(self) -> ModelInfoDict:
+        value = self._raw.get("modelInfo")
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -328,15 +411,15 @@ class Bubble:
                 type(value).__name__,
             )
             return {}
-        return value
+        return cast(ModelInfoDict, value)
 
     @property
-    def thinking(self) -> str | dict[str, Any] | None:
-        value = self.raw.get("thinking")
+    def thinking(self) -> str | ThinkingDict | None:
+        value = self._raw.get("thinking")
         if value is None:
             return None
         if isinstance(value, (str, dict)):
-            return value
+            return cast(str | ThinkingDict, value)
         _logger.warning(
             "Schema drift in Bubble %s: invalid type for thinking (expected str or dict, got %s)",
             self.bubble_id,
@@ -346,7 +429,7 @@ class Bubble:
 
     @property
     def thinking_duration_ms(self) -> int | float | None:
-        value = self.raw.get("thinkingDurationMs")
+        value = self._raw.get("thinkingDurationMs")
         if value is None:
             return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -359,8 +442,8 @@ class Bubble:
         return cast(int | float, value)
 
     @property
-    def context_window_status_at_creation(self) -> dict[str, Any]:
-        value = self.raw.get("contextWindowStatusAtCreation")
+    def context_window_status_at_creation(self) -> ContextWindowStatusDict:
+        value = self._raw.get("contextWindowStatusAtCreation")
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -370,11 +453,11 @@ class Bubble:
                 type(value).__name__,
             )
             return {}
-        return value
+        return cast(ContextWindowStatusDict, value)
 
     @property
-    def tool_results(self) -> list[Any] | None:
-        value = self.raw.get("toolResults")
+    def tool_results(self) -> list[ToolResultEntry] | None:
+        value = self._raw.get("toolResults")
         if value is None:
             return None
         if not isinstance(value, list):
@@ -384,12 +467,12 @@ class Bubble:
                 type(value).__name__,
             )
             return None
-        return value
+        return cast(list[ToolResultEntry], value)
 
     def bubble_timestamp_ms(self) -> int | float | None:
         """``createdAt`` or ``timestamp`` in milliseconds when present."""
         for key in ("createdAt", "timestamp"):
-            value = self.raw.get(key)
+            value = self._raw.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return value
         return None
