@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from models import Bubble, DisplayBubble
 from models.bubble_display import BubbleMetadata, BubbleRole
@@ -37,7 +37,7 @@ def extract_thinking_text(
 def build_storage_bubble_metadata(
     bubble: Bubble,
     role: BubbleRole,
-) -> dict[str, Any] | None:
+) -> BubbleMetadata | None:
     """Metadata dict for tabs/export — tool calls, tokens, thinking, context."""
     model_info = bubble.model_info
     model_name = model_info.get("modelName")
@@ -52,7 +52,7 @@ def build_storage_bubble_metadata(
         elif ctx_window.get("percentageRemaining") is not None:
             ctx_pct = ctx_window.get("percentageRemaining")
 
-    meta: dict[str, Any] = {}
+    meta: BubbleMetadata = {}
     if model_name:
         meta["modelName"] = model_name
     if ctx_pct is not None:
@@ -126,7 +126,7 @@ def build_display_bubble_from_storage(
     }
     metadata = build_storage_bubble_metadata(bubble, role)
     if metadata:
-        entry["metadata"] = cast(BubbleMetadata, metadata)
+        entry["metadata"] = metadata
     return entry
 
 
@@ -155,6 +155,6 @@ def annotate_response_times(bubbles: list[DisplayBubble]) -> None:
             continue
         bts = bub.get("timestamp")
         if bts and bts > last_user_ts:
-            meta = dict(display_bubble_metadata(bub))
+            meta: BubbleMetadata = {**display_bubble_metadata(bub)}
             meta["responseTimeMs"] = bts - last_user_ts
-            bub["metadata"] = cast(BubbleMetadata, meta)
+            bub["metadata"] = meta

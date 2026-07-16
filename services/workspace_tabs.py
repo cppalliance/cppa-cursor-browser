@@ -5,9 +5,9 @@ import json
 import logging
 import os
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ from utils.path_helpers import (
 )
 from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.display_bubble import (
+    annotate_response_times,
     bubble_display_timestamp_ms,
     build_storage_bubble_metadata,
 )
@@ -29,9 +30,8 @@ from models import (
     Composer,
     DisplayBubble,
     ParseWarningCollector,
-    SchemaError,
 )
-from models.bubble_display import BubbleMetadata, BubbleRole
+from models.bubble_display import BubbleRole
 from models.raw_access import (
     conversation_header_bubble_id,
     message_request_context_project_layouts,
@@ -73,6 +73,10 @@ from services.workspace_resolver import (
     matching_workspace_ids_for_folder,
 )
 
+
+ERR_CONVERSATION_NOT_FOUND = "Conversation not found"
+ERR_GLOBAL_STORAGE_NOT_FOUND = "Global storage not found"
+_COMPOSER_ROW_ERRORS = (KeyError, TypeError, ValueError, json.JSONDecodeError)
 
 
 def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
@@ -122,38 +126,63 @@ def _kv_payload_log_meta(value: object | None) -> tuple[int, str | None]:
     return len(payload), hashlib.sha256(payload).hexdigest()[:12]
 
 
-def _assemble_tab_from_composer_data(
+def _context_text_for_bubble(
+    bubble_id: str,
+    contexts: list[dict[str, Any]],
+) -> str:
+    """Append message-request context blocks for one bubble."""
+    parts: list[str] = []
+    for ctx in contexts:
+        if ctx.get("bubbleId") != bubble_id:
+            continue
+        if ctx.get("gitStatusRaw"):
+            parts.append(f"\n\n**Git Status:**\n```\n{ctx['gitStatusRaw']}\n```")
+        tf = ctx.get("terminalFiles")
+        if isinstance(tf, list) and tf:
+            parts.append("\n\n**Terminal Files:**")
+            for f in tf:
+                if not isinstance(f, dict):
+                    continue
+                parts.append(f"\n- {f.get('path', '')}")
+        af = ctx.get("attachedFoldersListDirResults")
+        if isinstance(af, list) and af:
+            parts.append("\n\n**Attached Folders:**")
+            for fld in af:
+                if not isinstance(fld, dict):
+                    continue
+                files = fld.get("files")
+                if isinstance(files, list) and files:
+                    parts.append(f"\n\n**Folder:** {fld.get('path', 'Unknown')}")
+                    for fi in files:
+                        if not isinstance(fi, dict):
+                            continue
+                        parts.append(f"\n- {fi.get('name', '')} ({fi.get('type', '')})")
+        cr = ctx.get("cursorRules")
+        if isinstance(cr, list) and cr:
+            parts.append("\n\n**Cursor Rules:**")
+            for rule in cr:
+                if not isinstance(rule, dict):
+                    continue
+                parts.append(f"\n- {rule.get('name') or rule.get('description') or 'Rule'}")
+        sc = ctx.get("summarizedComposers")
+        if isinstance(sc, list) and sc:
+            parts.append("\n\n**Related Conversations:**")
+            for comp in sc:
+                if not isinstance(comp, dict):
+                    continue
+                parts.append(f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}")
+    return "".join(parts)
+
+
+def _build_tab_display_bubbles(
     composer_id: str,
     composer: Composer,
     bubble_map: Mapping[str, Bubble],
     contexts: list[dict[str, Any]],
-    code_block_diffs: list[dict[str, Any]],
-    workspace_display_name: str,
-    rules: list[RuleTokens],
-    parse_warnings: ParseWarningCollector,
-) -> dict[str, Any] | None:
-    """Assemble a single tab dict from a validated :class:`Composer`.
-
-    Args:
-        composer_id: Composer UUID.
-        composer: Validated composer model (typed field access, not raw dict reads).
-        bubble_map: ``{bubble_id: Bubble}`` — global or scoped.
-        contexts: ``messageRequestContext`` entries for *this* composer
-            (list of dicts, each with an injected ``contextId`` key and a
-            ``bubbleId`` field from the JSON value).
-        code_block_diffs: ``codeBlockDiff`` entries for *this* composer.
-        workspace_display_name: Human-readable workspace name for rule matching.
-        rules: Exclusion rule token lists.
-        parse_warnings: Collector for skipped-bubble warnings.
-
-    Returns:
-        A tab dict on success, or ``None`` when the tab should be omitted
-        (no renderable bubbles or excluded by rules).
-    """
-    headers = composer.full_conversation_headers_only
-
+) -> list[DisplayBubble]:
+    """Build renderable display bubbles from composer headers and storage."""
     bubbles: list[DisplayBubble] = []
-    for header in headers:
+    for header in composer.full_conversation_headers_only:
         if not isinstance(header, dict):
             continue
         bubble_id = conversation_header_bubble_id(header, composer_id=composer_id)
@@ -166,48 +195,7 @@ def _assemble_tab_from_composer_data(
         is_user = header.get("type") == 1
         msg_type: BubbleRole = "user" if is_user else "ai"
         text = extract_text_from_bubble(bubble)
-
-        context_text = ""
-        for ctx in contexts:
-            if ctx.get("bubbleId") == bubble_id:
-                if ctx.get("gitStatusRaw"):
-                    context_text += f"\n\n**Git Status:**\n```\n{ctx['gitStatusRaw']}\n```"
-                tf = ctx.get("terminalFiles")
-                if isinstance(tf, list) and tf:
-                    context_text += "\n\n**Terminal Files:**"
-                    for f in tf:
-                        if not isinstance(f, dict):
-                            continue
-                        context_text += f"\n- {f.get('path', '')}"
-                af = ctx.get("attachedFoldersListDirResults")
-                if isinstance(af, list) and af:
-                    context_text += "\n\n**Attached Folders:**"
-                    for fld in af:
-                        if not isinstance(fld, dict):
-                            continue
-                        files = fld.get("files")
-                        if isinstance(files, list) and files:
-                            context_text += f"\n\n**Folder:** {fld.get('path', 'Unknown')}"
-                            for fi in files:
-                                if not isinstance(fi, dict):
-                                    continue
-                                context_text += f"\n- {fi.get('name', '')} ({fi.get('type', '')})"
-                cr = ctx.get("cursorRules")
-                if isinstance(cr, list) and cr:
-                    context_text += "\n\n**Cursor Rules:**"
-                    for rule in cr:
-                        if not isinstance(rule, dict):
-                            continue
-                        context_text += f"\n- {rule.get('name') or rule.get('description') or 'Rule'}"
-                sc = ctx.get("summarizedComposers")
-                if isinstance(sc, list) and sc:
-                    context_text += "\n\n**Related Conversations:**"
-                    for comp in sc:
-                        if not isinstance(comp, dict):
-                            continue
-                        context_text += f"\n- {comp.get('name') or comp.get('composerId') or 'Conversation'}"
-
-        full_text = text + context_text
+        full_text = text + _context_text_for_bubble(bubble_id, contexts)
         metadata = build_storage_bubble_metadata(bubble, msg_type)
         tool_calls = (metadata or {}).get("toolCalls")
         thinking = (metadata or {}).get("thinking")
@@ -231,12 +219,17 @@ def _assemble_tab_from_composer_data(
             "timestamp": bubble_display_timestamp_ms(bubble),
         }
         if metadata:
-            b_entry["metadata"] = cast(BubbleMetadata, metadata)
+            b_entry["metadata"] = metadata
         bubbles.append(b_entry)
+    return bubbles
 
-    if not bubbles:
-        return None
 
+def _derive_composer_tab_title(
+    composer_id: str,
+    composer: Composer,
+    bubbles: list[DisplayBubble],
+) -> str:
+    """Derive sidebar title from composer name or first user message."""
     title = composer.name or f"Conversation {composer_id[:8]}"
     if not composer.name and bubbles:
         first_msg = bubbles[0].get("text", "")
@@ -246,28 +239,14 @@ def _assemble_tab_from_composer_data(
                 title = first_lines[0][:100]
                 if len(title) == 100:
                     title += "..."
+    return title
 
-    _early_model_name = composer.model_name_from_config()
-    _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
-    if is_excluded_by_rules(rules, build_searchable_text(
-        project_name=workspace_display_name,
-        chat_title=title,
-        model_names=_early_model_names,
-    )):
-        return None
 
-    bubbles.sort(key=lambda b: b.get("timestamp") or 0)
-
-    last_user_ts = None
-    for b in bubbles:
-        if b["type"] == "user":
-            last_user_ts = b.get("timestamp")
-        elif b["type"] == "ai" and last_user_ts is not None:
-            ts = b.get("timestamp")
-            if ts and ts > last_user_ts:
-                meta = b.setdefault("metadata", {})
-                meta["responseTimeMs"] = ts - last_user_ts
-
+def _aggregate_tab_metadata(
+    bubbles: list[DisplayBubble],
+    composer: Composer,
+) -> dict[str, Any] | None:
+    """Aggregate bubble metadata into tab-level usage statistics."""
     total_input = 0
     total_output = 0
     total_cached = 0
@@ -276,6 +255,8 @@ def _assemble_tab_from_composer_data(
     total_tool_calls = 0
     total_thinking_ms = 0.0
     models_set: set[str] = set()
+    max_ctx_tokens = 0
+    ctx_token_limit = 0
     for b in bubbles:
         m = b.get("metadata") or {}
         if m.get("inputTokens"):
@@ -294,6 +275,10 @@ def _assemble_tab_from_composer_data(
             total_tool_calls += len(m["toolCalls"])
         if m.get("thinkingDurationMs"):
             total_thinking_ms += m["thinkingDurationMs"]
+        if m.get("contextTokensUsed", 0) > max_ctx_tokens:
+            max_ctx_tokens = m["contextTokensUsed"]
+        if m.get("contextTokenLimit", 0) > ctx_token_limit:
+            ctx_token_limit = m["contextTokenLimit"]
 
     usage = composer.usage_data
     composer_cost = usage.get("cost") or usage.get("estimatedCost")
@@ -305,21 +290,15 @@ def _assemble_tab_from_composer_data(
     files_added = composer.added_files
     files_removed = composer.removed_files
 
-    max_ctx_tokens = 0
-    ctx_token_limit = 0
-    for b in bubbles:
-        m = b.get("metadata") or {}
-        if m.get("contextTokensUsed", 0) > max_ctx_tokens:
-            max_ctx_tokens = m["contextTokensUsed"]
-        if m.get("contextTokenLimit", 0) > ctx_token_limit:
-            ctx_token_limit = m["contextTokenLimit"]
-
-    tab_meta = None
-    has_any = any([total_input, total_output, total_cached, total_response_ms,
-                  total_cost, models_set, total_tool_calls, total_thinking_ms,
-                  lines_added, lines_removed, files_added, files_removed,
-                  max_ctx_tokens])
-    if has_any:
+    has_any = any([
+        total_input, total_output, total_cached, total_response_ms,
+        total_cost, models_set, total_tool_calls, total_thinking_ms,
+        lines_added, lines_removed, files_added, files_removed,
+        max_ctx_tokens,
+    ])
+    if not has_any:
+        tab_meta: dict[str, Any] | None = None
+    else:
         tab_meta_raw = {
             "totalInputTokens": total_input or None,
             "totalOutputTokens": total_output or None,
@@ -348,6 +327,18 @@ def _assemble_tab_from_composer_data(
         elif model_name_from_config not in models_used:
             models_used.insert(0, model_name_from_config)
 
+    return tab_meta
+
+
+def _build_tab_dict(
+    composer_id: str,
+    title: str,
+    composer: Composer,
+    bubbles: list[DisplayBubble],
+    code_block_diffs: list[dict[str, Any]],
+    tab_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Assemble the final tab payload dict."""
     tab: dict[str, Any] = {
         "id": composer_id,
         "title": title,
@@ -363,6 +354,106 @@ def _assemble_tab_from_composer_data(
     if tab_meta:
         tab["metadata"] = tab_meta
     return tab
+
+
+def _iter_assigned_workspace_composers(
+    composer_rows: list[sqlite3.Row],
+    *,
+    parse_warnings: ParseWarningCollector,
+    project_layouts_map: dict[str, list[str]],
+    project_name_map: dict[str, str],
+    workspace_path_map: dict[str, str],
+    workspace_entries: list[dict[str, Any]],
+    composer_id_to_ws: dict[str, str],
+    invalid_workspace_ids: set[str],
+    invalid_workspace_aliases: dict[str, str],
+    matching_ws_ids: set[str],
+    bubble_map: Mapping[str, Bubble],
+) -> Iterator[tuple[Composer, str]]:
+    """Yield composers assigned to the requested workspace, skipping parse failures."""
+    for row in composer_rows:
+        composer = parse_composer_data_row(
+            row["key"], row["value"], parse_warnings=parse_warnings,
+        )
+        if composer is None:
+            continue
+        composer_id = composer.composer_id
+        try:
+            assigned = assign_composer_workspace(
+                composer,
+                project_layouts_map=project_layouts_map,
+                project_name_map=project_name_map,
+                workspace_path_map=workspace_path_map,
+                workspace_entries=workspace_entries,
+                bubble_map=bubble_map,
+                composer_id_to_ws=composer_id_to_ws,
+                invalid_workspace_ids=invalid_workspace_ids,
+                invalid_workspace_aliases=invalid_workspace_aliases,
+            )
+            if assigned not in matching_ws_ids:
+                continue
+            yield composer, composer_id
+        except _COMPOSER_ROW_ERRORS as e:
+            _logger.warning(
+                "Failed to process Composer from composerData:%s: %s",
+                composer_id,
+                e,
+            )
+            parse_warnings.record_composer_processing_failure()
+
+
+def _assemble_tab_from_composer_data(
+    composer_id: str,
+    composer: Composer,
+    bubble_map: Mapping[str, Bubble],
+    contexts: list[dict[str, Any]],
+    code_block_diffs: list[dict[str, Any]],
+    workspace_display_name: str,
+    rules: list[RuleTokens],
+    parse_warnings: ParseWarningCollector,
+) -> dict[str, Any] | None:
+    """Assemble a single tab dict from a validated :class:`Composer`.
+
+    Args:
+        composer_id: Composer UUID.
+        composer: Validated composer model (typed field access, not raw dict reads).
+        bubble_map: ``{bubble_id: Bubble}`` — global or scoped.
+        contexts: ``messageRequestContext`` entries for *this* composer
+            (list of dicts, each with an injected ``contextId`` key and a
+            ``bubbleId`` field from the JSON value).
+        code_block_diffs: ``codeBlockDiff`` entries for *this* composer.
+        workspace_display_name: Human-readable workspace name for rule matching.
+        rules: Exclusion rule token lists.
+        parse_warnings: Collector for skipped-bubble warnings.
+
+    Returns:
+        A tab dict on success, or ``None`` when the tab should be omitted
+        (no renderable bubbles or excluded by rules).
+    """
+    bubbles = _build_tab_display_bubbles(
+        composer_id, composer, bubble_map, contexts,
+    )
+    if not bubbles:
+        return None
+
+    title = _derive_composer_tab_title(composer_id, composer, bubbles)
+
+    _early_model_name = composer.model_name_from_config()
+    _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
+    if is_excluded_by_rules(rules, build_searchable_text(
+        project_name=workspace_display_name,
+        chat_title=title,
+        model_names=_early_model_names,
+    )):
+        return None
+
+    bubbles.sort(key=lambda b: b.get("timestamp") or 0)
+    annotate_response_times(bubbles)
+
+    tab_meta = _aggregate_tab_metadata(bubbles, composer)
+    return _build_tab_dict(
+        composer_id, title, composer, bubbles, code_block_diffs, tab_meta,
+    )
 
 
 def _build_matching_ws_ids(
@@ -446,14 +537,12 @@ def _build_workspace_tab_summaries_uncached(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": "Global storage not found"}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
         project_layouts_map = load_project_layouts_map(global_db)
 
-        # Full composerData roster still required for the summary tab loop;
-        # alias inference alone is fingerprint-cached across requests.
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         ctx = with_invalid_workspace_aliases(
@@ -466,61 +555,43 @@ def _build_workspace_tab_summaries_uncached(
         )
         invalid_workspace_aliases = ctx.invalid_workspace_aliases or {}
 
-        for row in composer_rows:
-            composer = parse_composer_data_row(
-                row["key"], row["value"], parse_warnings=parse_warnings,
-            )
-            if composer is None:
+        for composer, composer_id in _iter_assigned_workspace_composers(
+            composer_rows,
+            parse_warnings=parse_warnings,
+            project_layouts_map=project_layouts_map,
+            project_name_map=project_name_map,
+            workspace_path_map=workspace_path_map,
+            workspace_entries=workspace_entries,
+            composer_id_to_ws=composer_id_to_ws,
+            invalid_workspace_ids=invalid_workspace_ids,
+            invalid_workspace_aliases=invalid_workspace_aliases,
+            matching_ws_ids=matching_ws_ids,
+            bubble_map={},
+        ):
+            if is_composer_excluded(
+                rules,
+                project_name=workspace_display_name,
+                composer=composer,
+            ):
                 continue
-            composer_id = composer.composer_id
-            try:
-                assigned = assign_composer_workspace(
-                    composer,
-                    project_layouts_map=project_layouts_map,
-                    project_name_map=project_name_map,
-                    workspace_path_map=workspace_path_map,
-                    workspace_entries=workspace_entries,
-                    bubble_map={},
-                    composer_id_to_ws=composer_id_to_ws,
-                    invalid_workspace_ids=invalid_workspace_ids,
-                    invalid_workspace_aliases=invalid_workspace_aliases,
-                )
 
-                if assigned not in matching_ws_ids:
-                    continue
+            headers = composer.full_conversation_headers_only
+            title = composer_chat_title(composer)
 
-                if is_composer_excluded(
-                    rules,
-                    project_name=workspace_display_name,
-                    composer=composer,
-                ):
-                    continue
+            _early_model_names = composer_model_names(composer)
+            tab_meta: dict[str, Any] | None = None
+            if _early_model_names:
+                tab_meta = {"modelsUsed": _early_model_names}
 
-                headers = composer.full_conversation_headers_only
-                title = composer_chat_title(composer)
-
-                _early_model_names = composer_model_names(composer)
-                tab_meta: dict[str, Any] | None = None
-                if _early_model_names:
-                    tab_meta = {"modelsUsed": _early_model_names}
-
-                tab_entry: dict[str, Any] = {
-                    "id": composer_id,
-                    "title": title,
-                    "timestamp": _composer_tab_timestamp_ms(composer),
-                    "messageCount": len(headers),
-                }
-                if tab_meta:
-                    tab_entry["metadata"] = tab_meta
-                response["tabs"].append(tab_entry)
-
-            except Exception as e:
-                _logger.warning(
-                    "Failed to process Composer from composerData:%s: %s",
-                    composer_id,
-                    e,
-                )
-                parse_warnings.record_composer_processing_failure()
+            tab_entry: dict[str, Any] = {
+                "id": composer_id,
+                "title": title,
+                "timestamp": _composer_tab_timestamp_ms(composer),
+                "messageCount": len(headers),
+            }
+            if tab_meta:
+                tab_entry["metadata"] = tab_meta
+            response["tabs"].append(tab_entry)
 
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
         return parse_warnings.attach_to(response), 200
@@ -567,7 +638,7 @@ def assemble_single_tab(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": "Global storage not found"}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
@@ -577,14 +648,14 @@ def assemble_single_tab(
             (f"composerData:{composer_id}",),
         )
         if not rows:
-            return {"error": "Conversation not found"}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
 
         row = rows[0]
         composer = parse_composer_data_row(
             row["key"], row["value"], parse_warnings=parse_warnings,
         )
         if composer is None:
-            return {"error": "Conversation not found"}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
 
         project_layouts_map: dict[str, list[str]] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
@@ -611,7 +682,7 @@ def assemble_single_tab(
         )
 
         if assigned not in matching_ws_ids:
-            return {"error": "Conversation not found"}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
 
         contexts = load_message_request_context_for_composer(global_db, composer_id)
         code_block_diffs = load_code_block_diffs_for_composer(global_db, composer_id)
@@ -628,7 +699,7 @@ def assemble_single_tab(
         )
 
         if tab is None:
-            return {"error": "Conversation not found"}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
 
         response: dict[str, Any] = {"tab": tab}
         return parse_warnings.attach_to(response), 200
@@ -674,17 +745,14 @@ def assemble_workspace_tabs(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": "Global storage not found"}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
         bubble_map = load_bubble_map(global_db, parse_warnings=parse_warnings)
 
-        # Load codeBlockDiffs
         code_block_diff_map = load_code_block_diff_map(global_db)
 
-        # Load messageRequestContext rows once; build both
-        # message_request_context_map and project_layouts_map from the same pass.
         project_layouts_map: dict[str, list[str]] = {}
         for row in safe_fetchall(
             global_db,
@@ -721,7 +789,6 @@ def assemble_workspace_tabs(
                     if isinstance(layout, dict) and layout.get("rootPath"):
                         project_layouts_map[chat_id].append(layout["rootPath"])
 
-        # Get composer data entries with conversations
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         ctx = with_invalid_workspace_aliases(
@@ -734,52 +801,32 @@ def assemble_workspace_tabs(
         )
         invalid_workspace_aliases = ctx.invalid_workspace_aliases or {}
 
-        for row in composer_rows:
-            composer = parse_composer_data_row(
-                row["key"], row["value"], parse_warnings=parse_warnings,
+        for composer, composer_id in _iter_assigned_workspace_composers(
+            composer_rows,
+            parse_warnings=parse_warnings,
+            project_layouts_map=project_layouts_map,
+            project_name_map=project_name_map,
+            workspace_path_map=workspace_path_map,
+            workspace_entries=workspace_entries,
+            composer_id_to_ws=composer_id_to_ws,
+            invalid_workspace_ids=invalid_workspace_ids,
+            invalid_workspace_aliases=invalid_workspace_aliases,
+            matching_ws_ids=matching_ws_ids,
+            bubble_map={},
+        ):
+            tab = _assemble_tab_from_composer_data(
+                composer_id=composer_id,
+                composer=composer,
+                bubble_map=bubble_map,
+                contexts=message_request_context_map.get(composer_id, []),
+                code_block_diffs=code_block_diff_map.get(composer_id, []),
+                workspace_display_name=workspace_display_name,
+                rules=rules,
+                parse_warnings=parse_warnings,
             )
-            if composer is None:
-                continue
-            composer_id = composer.composer_id
-            try:
-                assigned = assign_composer_workspace(
-                    composer,
-                    project_layouts_map=project_layouts_map,
-                    project_name_map=project_name_map,
-                    workspace_path_map=workspace_path_map,
-                    workspace_entries=workspace_entries,
-                    # Assignment matches summary path; bubble_map used only for tab body.
-                    bubble_map={},
-                    composer_id_to_ws=composer_id_to_ws,
-                    invalid_workspace_ids=invalid_workspace_ids,
-                    invalid_workspace_aliases=invalid_workspace_aliases,
-                )
+            if tab is not None:
+                response["tabs"].append(tab)
 
-                if assigned not in matching_ws_ids:
-                    continue
-
-                tab = _assemble_tab_from_composer_data(
-                    composer_id=composer_id,
-                    composer=composer,
-                    bubble_map=bubble_map,
-                    contexts=message_request_context_map.get(composer_id, []),
-                    code_block_diffs=code_block_diff_map.get(composer_id, []),
-                    workspace_display_name=workspace_display_name,
-                    rules=rules,
-                    parse_warnings=parse_warnings,
-                )
-                if tab is not None:
-                    response["tabs"].append(tab)
-
-            except Exception as e:
-                _logger.warning(
-                    "Failed to process Composer from composerData:%s: %s",
-                    composer_id,
-                    e,
-                )
-                parse_warnings.record_composer_processing_failure()
-
-        # Sort tabs by timestamp descending (newest first)
         response["tabs"].sort(key=lambda t: t.get("timestamp") or 0, reverse=True)
 
         return parse_warnings.attach_to(response), 200
