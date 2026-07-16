@@ -1,4 +1,10 @@
-"""Optional-key reads from Cursor JSON blobs with schema-drift logging."""
+"""Optional-key reads from Cursor JSON blobs with schema-drift logging.
+
+Underscore-prefixed ``_optional_*`` helpers are package-internal shared
+implementation used by ``conversation.py`` property accessors and dict-bridge
+functions here. They are not re-exported from ``models``; the prefix marks
+intra-package reuse, not single-module privacy.
+"""
 
 from __future__ import annotations
 

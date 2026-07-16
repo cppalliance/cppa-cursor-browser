@@ -376,6 +376,7 @@ class Bubble:
 
     @property
     def thinking(self) -> str | ThinkingDict | None:
+        # Inline: accepts str | dict; no raw_access helper for that union.
         value = self._raw.get("thinking")
         if value is None:
             return None
@@ -390,6 +391,7 @@ class Bubble:
 
     @property
     def thinking_duration_ms(self) -> int | float | None:
+        # Inline: absent -> None (not 0); bool guard before numeric check.
         value = self._raw.get("thinkingDurationMs")
         if value is None:
             return None
