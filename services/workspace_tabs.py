@@ -294,7 +294,7 @@ def _aggregate_tab_metadata(
         total_input, total_output, total_cached, total_response_ms,
         total_cost, models_set, total_tool_calls, total_thinking_ms,
         lines_added, lines_removed, files_added, files_removed,
-        max_ctx_tokens,
+        max_ctx_tokens, ctx_token_limit,
     ])
     if not has_any:
         tab_meta: dict[str, Any] | None = None
@@ -438,12 +438,10 @@ def _assemble_tab_from_composer_data(
 
     title = _derive_composer_tab_title(composer_id, composer, bubbles)
 
-    _early_model_name = composer.model_name_from_config()
-    _early_model_names = [_early_model_name] if _early_model_name and _early_model_name != "default" else None
     if is_excluded_by_rules(rules, build_searchable_text(
         project_name=workspace_display_name,
         chat_title=title,
-        model_names=_early_model_names,
+        model_names=composer_model_names(composer),
     )):
         return None
 

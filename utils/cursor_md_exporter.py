@@ -137,7 +137,8 @@ def cursor_cli_session_to_markdown(
             # commit/rollback, not close. See issue #17.
             with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
                 row = conn.execute("SELECT value FROM meta WHERE key = '0'").fetchone()
-            session_meta = json.loads(bytes.fromhex(row[0]).decode()) if row else {}
+            decoded = json.loads(bytes.fromhex(row[0]).decode()) if row else {}
+            session_meta = decoded if isinstance(decoded, dict) else {}
         except _CLI_META_READ_ERRORS:
             session_meta = {}
 
@@ -439,7 +440,8 @@ def _build_ide_session_summary(
     tool_result_stats: dict[str, int],
 ) -> str:
     """Optional session summary section for IDE export."""
-    if not (files_read_list or files_written_list or commands_run_list):
+    has_tool_stats = any(v > 0 for v in tool_result_stats.values())
+    if not (files_read_list or files_written_list or commands_run_list or has_tool_stats):
         return ""
     parts: list[str] = ["## Session Summary\n\n"]
     if files_written_list or files_read_list:
