@@ -21,7 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from models import Bubble, BubbleRole, DisplayBubble
+from models import Bubble, DisplayBubble
+from models.bubble_display import BubbleRole
 from utils.cli_chat_reader import traverse_blobs, messages_to_bubbles
 from utils.display_bubble import (
     annotate_response_times,

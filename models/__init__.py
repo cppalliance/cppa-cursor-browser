@@ -1,4 +1,4 @@
-from models.bubble_display import BubbleMetadata, BubbleRole, DisplayBubble
+from models.bubble_display import DisplayBubble
 from models.cli_session import CliSessionMeta
 from models.conversation import Bubble, Composer, Conversation, WorkspaceLocalComposer
 from models.errors import SchemaError
@@ -9,8 +9,6 @@ from models.workspace import Workspace
 
 __all__ = [
     "Bubble",
-    "BubbleMetadata",
-    "BubbleRole",
     "CliSessionMeta",
     "DisplayBubble",
     "Composer",

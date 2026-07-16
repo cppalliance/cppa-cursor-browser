@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from models import Bubble, BubbleMetadata, BubbleRole, DisplayBubble
+from models import Bubble, DisplayBubble
+from models.bubble_display import BubbleMetadata, BubbleRole
 from utils.path_helpers import to_epoch_ms
 from utils.text_extract import extract_text_from_bubble
 from utils.tool_parser import parse_tool_call
