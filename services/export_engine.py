@@ -40,7 +40,7 @@ from utils.cursor_md_exporter import (
     cursor_cli_session_to_markdown,
     cursor_ide_chat_to_markdown,
 )
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.path_helpers import to_epoch_ms
 from utils.text_extract import extract_text_from_bubble, slug
 from utils.workspace_path import get_cli_chats_path
@@ -130,7 +130,7 @@ def build_workspace_display_maps(
 
 def prepare_workspace_orchestration(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
     workspace_entries: list[dict[str, Any]] | None = None,
@@ -169,7 +169,7 @@ def prepare_workspace_orchestration(
 
 def load_global_db_export_data(
     orch: WorkspaceOrchestration,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> GlobalDbExportData | None:
@@ -222,7 +222,7 @@ def _collect_ide_export_entries(
     *,
     orch: WorkspaceOrchestration,
     db_data: GlobalDbExportData,
-    exclusion_rules: list[Any],
+    exclusion_rules: list[RuleTokens],
     since: SinceMode,
     last_export_ms: int,
     today: str,
@@ -363,7 +363,7 @@ def _collect_ide_export_entries(
 
 def _collect_cli_export_entries(
     *,
-    exclusion_rules: list[Any],
+    exclusion_rules: list[RuleTokens],
     since: SinceMode,
     last_export_ms: int,
     today: str,
@@ -487,7 +487,7 @@ def _collect_cli_export_entries(
 def collect_export_entries(
     *,
     workspace_path: str,
-    exclusion_rules: list[Any],
+    exclusion_rules: list[RuleTokens],
     since: SinceMode,
     last_export_ms: int,
     out_dir: str,

@@ -7,6 +7,8 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Any
 
+from utils.exclusion_rules import RuleTokens
+
 from models import Bubble
 from services.workspace_db import (
     COMPOSER_ROWS_WITH_HEADERS_SQL,
@@ -86,7 +88,7 @@ def resolve_workspace_context(
 
 def resolve_workspace_context_cached(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     workspace_entries: list[dict[str, Any]] | None = None,
     nocache: bool = False,
@@ -147,7 +149,7 @@ def resolve_invalid_workspace_aliases_cached(
     ctx: WorkspaceContext,
     global_db: sqlite3.Connection,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
     project_layouts_map: dict[str, list[str]] | None = None,
@@ -223,7 +225,7 @@ def with_invalid_workspace_aliases(
     ctx: WorkspaceContext,
     global_db: sqlite3.Connection,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
     project_layouts_map: dict[str, list[str]] | None = None,

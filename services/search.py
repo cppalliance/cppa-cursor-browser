@@ -51,7 +51,7 @@ from services.workspace_db import (
 )
 from services.workspace_resolver import infer_invalid_workspace_aliases
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
 from utils.path_helpers import (
     get_workspace_display_name,
@@ -368,7 +368,7 @@ class _SearchWorkspaceAssigner:
 
 def _load_search_workspace_assigner(
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     workspace_entries: list[dict[str, Any]],
 ) -> _SearchWorkspaceAssigner | None:
     ctx = resolve_workspace_context_cached(
@@ -428,7 +428,7 @@ def search_global_storage(
     workspace_path: str,
     query: str,
     query_lower: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     parse_warnings: ParseWarningCollector,
     *,
     since_ms: int | None = None,
@@ -478,7 +478,7 @@ def _search_global_storage_via_index(
     workspace_path: str,
     query: str,
     query_lower: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     parse_warnings: ParseWarningCollector,
     *,
     since_ms: int | None = None,
@@ -651,7 +651,7 @@ def _search_global_storage_live_scan(
     workspace_path: str,
     query: str,
     query_lower: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     parse_warnings: ParseWarningCollector,
     *,
     since_ms: int | None = None,
@@ -828,7 +828,7 @@ def search_legacy_workspaces(
     query: str,
     query_lower: str,
     search_type: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     since_ms: int | None = None,
 ) -> list[SearchResult]:
@@ -961,7 +961,7 @@ def search_cli_sessions(
     cli_chats_path: str,
     query: str,
     query_lower: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     parse_warnings: ParseWarningCollector | None = None,
     *,
     since_ms: int | None = None,

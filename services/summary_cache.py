@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from utils.exclusion_rules import RuleTokens
+
 _logger = logging.getLogger(__name__)
 
 CACHE_VERSION = 1
@@ -46,7 +48,7 @@ def nocache_enabled(*, request_nocache: bool = False) -> bool:
     )
 
 
-def _rules_digest(rules: list[Any]) -> str:
+def _rules_digest(rules: list[RuleTokens]) -> str:
     try:
         payload = json.dumps(rules, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
@@ -68,7 +70,7 @@ def fingerprint_workspace_storage(
     workspace_entries: list[dict[str, Any]],
     *,
     global_db_path: str | None,
-    rules: list[Any],
+    rules: list[RuleTokens],
     cli_chats_path: str | None = None,
 ) -> dict[str, Any]:
     """Build a fingerprint dict for cache invalidation."""

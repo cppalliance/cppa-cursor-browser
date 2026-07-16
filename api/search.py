@@ -11,9 +11,9 @@ import re
 import sqlite3
 from typing import Any
 
-from flask import Blueprint, Response, current_app, request
+from flask import Blueprint, Response, request
 
-from api.flask_config import json_response
+from api.flask_config import exclusion_rules, json_response
 
 from models import ParseWarningCollector, SearchResult
 from services.search import (
@@ -138,7 +138,7 @@ def search() -> tuple[Response, int] | Response:
         if workspace_filter and not _workspace_exists(workspace_filter, workspace_path):
             return _search_error("Workspace not found", "workspace_not_found", 404)
 
-        rules = current_app.config.get("EXCLUSION_RULES") or []
+        rules = exclusion_rules()
         all_history = request.args.get("all_history") in ("1", "true")
         since_ms = resolve_search_since_ms(
             all_history=all_history,

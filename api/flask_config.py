@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, overload
+from typing import Any, cast, overload
 
 from flask import Response, current_app, jsonify
 
+from utils.exclusion_rules import RuleTokens
 
-def exclusion_rules() -> list[list[Any]]:
+
+def exclusion_rules() -> list[RuleTokens]:
     """Return loaded exclusion rules from app config (empty list when unset)."""
-    return current_app.config.get("EXCLUSION_RULES") or []
+    return cast(list[RuleTokens], current_app.config.get("EXCLUSION_RULES") or [])
 
 
 @overload

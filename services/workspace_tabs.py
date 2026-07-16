@@ -17,7 +17,7 @@ from utils.path_helpers import (
     to_epoch_ms,
     warn_workspace_json_read,
 )
-from utils.exclusion_rules import build_searchable_text, is_excluded_by_rules
+from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.display_bubble import (
     bubble_display_timestamp_ms,
     build_storage_bubble_metadata,
@@ -130,7 +130,7 @@ def _assemble_tab_from_composer_data(
     contexts: list[dict[str, Any]],
     code_block_diffs: list[dict[str, Any]],
     workspace_display_name: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     parse_warnings: ParseWarningCollector,
 ) -> dict[str, Any] | None:
     """Assemble a single tab dict from a validated :class:`Composer`.
@@ -378,7 +378,7 @@ def _build_matching_ws_ids(
 def list_workspace_tab_summaries(
     workspace_id: str,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> tuple[dict[str, Any], int]:
@@ -425,7 +425,7 @@ def list_workspace_tab_summaries(
 def _build_workspace_tab_summaries_uncached(
     workspace_id: str,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     workspace_entries: list[dict[str, Any]],
     *,
     nocache: bool,
@@ -531,7 +531,7 @@ def assemble_single_tab(
     workspace_id: str,
     composer_id: str,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> tuple[dict[str, Any], int]:
@@ -638,7 +638,7 @@ def assemble_single_tab(
 def assemble_workspace_tabs(
     workspace_id: str,
     workspace_path: str,
-    rules: list[Any],
+    rules: list[RuleTokens],
     *,
     nocache: bool = False,
 ) -> tuple[dict[str, Any], int]:
