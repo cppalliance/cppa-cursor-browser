@@ -7,10 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-17
+
 ### Added
 - **Strict mypy** — `strict = true` in `pyproject.toml`; core TypedDict models
   (`SearchResult`, `ConversationSummary`) and full annotations on API routes and
-  `utils/` (#100)
+  `utils/` (#100, #103)
+- **Shared export engine** — web `POST /api/export` and CLI `cursor-chat-export`
+  share `services/export_engine.py`; CLI wired to summary cache (#112)
+- **FTS search index** — faster workspace listing and search on large global DBs (#113)
+- **pytest-benchmark suite** with CI regression gate and stored baselines (#120, #121)
+- **Bubble typed accessors** — `Bubble`/`Composer` boundary tightened with typed
+  field access instead of raw dict reads (#133)
+- **`RuleTokens` typing** — exclusion-rules consumers threaded end-to-end; mypy
+  strict verifies the filter boundary (#134)
+- **`raw_access` helpers** — shared `_optional_*` parsers for Bubble/Composer
+  optional properties (#137)
+- **Google-style docstrings** on public `api/`, `services/`, `utils/`, and
+  `models/` surfaces (#119)
+- **Flask API test coverage** for search, workspaces, and export routes (#101, #104)
+
+### Changed
+- CI typecheck job runs `mypy .` using pyproject config (strict production code;
+  per-module overrides for `scripts/export.py` and `tests.*`) (#100)
+- **Search handler** decomposed from a monolithic module into per-source functions (#99, #102)
+- **`models/__init__.py` exports trimmed** — `BubbleRole` and `BubbleMetadata`
+  import from `models.bubble_display` (#135)
+- **`workspace_tabs` / `cursor_md_exporter` / `display_bubble` hygiene** — phase
+  helpers, shared loops, narrowed exception handling, typed metadata returns (#138)
+- **Invalid-workspace alias cache** keyed by storage fingerprint (#116, #125)
+- Desktop optional dep `pywebview` range widened to `>=5.0,<7` (#58)
+
+### Fixed
+- Export workspace path override when `CURSOR_WORKSPACE_PATH` is set (#114)
+- Search UI tooltip and distinct `/api/search` error codes (#117, #126)
+- Per-composer tab assembly skips drifted metadata instead of 500ing the listing (#138)
+- Tab metadata aggregation edge cases (`ctx_token_limit`, CLI meta guard,
+  `tool_result_stats` for search/web-only sessions) (#138)
+
+## [0.1.0] - 2026-06-04
+
+### Added
 - **Summary disk cache (Phase 3)** — project list and tab summaries cached under
   `~/.cache/cursor-chat-browser/`, invalidated when global or per-workspace DB
   mtimes change; bypass with `?nocache=1` or `CURSOR_CHAT_BROWSER_NOCACHE=1` (#84)
@@ -41,8 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for `determine_project_for_conversation` fallback chain (#87, #89)
 
 ### Changed
-- CI typecheck job runs `mypy .` using pyproject config (strict production code;
-  per-module overrides for `scripts/export.py` and `tests.*`)
 - **List-path performance** — skip full `messageRequestContext` scan unless
   invalid workspace aliases are needed; filter `composerData` in SQL; skip
   `Composer.from_dict` on list/summary paths; cache `composer_id_to_ws` mapping (#84)
@@ -75,5 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace silent `except Exception: pass` with structured logging in workspace and bubble load paths (#66, #76)
 - Decouple API handlers from private `_`-prefixed service internals (#73)
 
-[Unreleased]: https://github.com/cppalliance/cppa-cursor-browser/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cppalliance/cppa-cursor-browser/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cppalliance/cppa-cursor-browser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cppalliance/cppa-cursor-browser/releases/tag/v0.1.0
