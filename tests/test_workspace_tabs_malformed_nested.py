@@ -213,5 +213,84 @@ class TestParseToolCallNonDictReturn(unittest.TestCase):
         self.assertIn("cmp-t", ids)
 
 
+def _seed_workspace_with_string_token_counts(parent: str) -> str:
+    ws_root = os.path.join(parent, "workspaceStorage")
+    global_root = os.path.join(parent, "globalStorage")
+    os.makedirs(ws_root, exist_ok=True)
+    os.makedirs(global_root, exist_ok=True)
+    ws_dir = os.path.join(ws_root, "ws-a")
+    os.makedirs(ws_dir, exist_ok=True)
+    with open(os.path.join(ws_dir, "workspace.json"), "w") as f:
+        json.dump({"folder": "/tmp/proj"}, f)
+    sqlite3.connect(os.path.join(ws_dir, "state.vscdb")).close()
+
+    conn = sqlite3.connect(os.path.join(global_root, "state.vscdb"))
+    conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "composerData:cmp-bad-tokens",
+            json.dumps({
+                "name": "Tab with string token counts",
+                "createdAt": 1_715_000_000_000,
+                "lastUpdatedAt": 1_715_000_500_000,
+                "fullConversationHeadersOnly": [{"bubbleId": "b-bad", "type": 2}],
+            }),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "bubbleId:cmp-bad-tokens:b-bad",
+            json.dumps({
+                "text": "assistant with drifted tokens",
+                "tokenCount": {"inputTokens": "1500", "outputTokens": "500"},
+            }),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        (
+            "composerData:cmp-good",
+            json.dumps({
+                "name": "Healthy tab",
+                "createdAt": 1_715_000_000_000,
+                "lastUpdatedAt": 1_715_000_600_000,
+                "fullConversationHeadersOnly": [{"bubbleId": "b-good", "type": 1}],
+            }),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO cursorDiskKV VALUES (?, ?)",
+        ("bubbleId:cmp-good:b-good", json.dumps({"text": "hello"})),
+    )
+    conn.commit()
+    conn.close()
+    return ws_root
+
+
+class TestStringTokenCountsDoNot500Listing(unittest.TestCase):
+    def test_drifted_token_metadata_skips_composer_not_whole_listing(self) -> None:
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["EXCLUSION_RULES"] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws_root = _seed_workspace_with_string_token_counts(tmp)
+            with self.assertLogs("services.workspace_tabs", level="WARNING") as cm:
+                with app.test_request_context("/api/workspaces/global/tabs"):
+                    payload, status = assemble_workspace_tabs("global", ws_root, rules=[])
+
+        self.assertEqual(status, 200)
+        ids = [t["id"] for t in payload.get("tabs", [])]
+        self.assertNotIn("cmp-bad-tokens", ids)
+        self.assertIn("cmp-good", ids)
+        messages = [r.getMessage() for r in cm.records]
+        self.assertTrue(
+            any("cmp-bad-tokens" in m for m in messages),
+            f"expected composer processing warning for cmp-bad-tokens, got: {messages}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

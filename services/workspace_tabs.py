@@ -79,6 +79,20 @@ ERR_GLOBAL_STORAGE_NOT_FOUND = "Global storage not found"
 _COMPOSER_ROW_ERRORS = (KeyError, TypeError, ValueError, json.JSONDecodeError)
 
 
+def _record_composer_processing_failure(
+    composer_id: str,
+    exc: BaseException,
+    *,
+    parse_warnings: ParseWarningCollector,
+) -> None:
+    _logger.warning(
+        "Failed to process Composer from composerData:%s: %s",
+        composer_id,
+        exc,
+    )
+    parse_warnings.record_composer_processing_failure()
+
+
 def _loads_kv_value_logged(key: str, raw: object | None) -> Any | None:
     """Parse a cursorDiskKV ``value``; log and return ``None`` on decode failure."""
     if raw is None:
@@ -394,12 +408,9 @@ def _iter_assigned_workspace_composers(
                 continue
             yield composer, composer_id
         except _COMPOSER_ROW_ERRORS as e:
-            _logger.warning(
-                "Failed to process Composer from composerData:%s: %s",
-                composer_id,
-                e,
+            _record_composer_processing_failure(
+                composer_id, e, parse_warnings=parse_warnings,
             )
-            parse_warnings.record_composer_processing_failure()
 
 
 def _assemble_tab_from_composer_data(
@@ -452,6 +463,35 @@ def _assemble_tab_from_composer_data(
     return _build_tab_dict(
         composer_id, title, composer, bubbles, code_block_diffs, tab_meta,
     )
+
+
+def _safe_assemble_tab_from_composer_data(
+    composer_id: str,
+    composer: Composer,
+    bubble_map: Mapping[str, Bubble],
+    contexts: list[dict[str, Any]],
+    code_block_diffs: list[dict[str, Any]],
+    workspace_display_name: str,
+    rules: list[RuleTokens],
+    parse_warnings: ParseWarningCollector,
+) -> dict[str, Any] | None:
+    """Like :func:`_assemble_tab_from_composer_data`, but skip+log on drift errors."""
+    try:
+        return _assemble_tab_from_composer_data(
+            composer_id=composer_id,
+            composer=composer,
+            bubble_map=bubble_map,
+            contexts=contexts,
+            code_block_diffs=code_block_diffs,
+            workspace_display_name=workspace_display_name,
+            rules=rules,
+            parse_warnings=parse_warnings,
+        )
+    except Exception as e:
+        _record_composer_processing_failure(
+            composer_id, e, parse_warnings=parse_warnings,
+        )
+        return None
 
 
 def _build_matching_ws_ids(
@@ -812,7 +852,7 @@ def assemble_workspace_tabs(
             matching_ws_ids=matching_ws_ids,
             bubble_map={},
         ):
-            tab = _assemble_tab_from_composer_data(
+            tab = _safe_assemble_tab_from_composer_data(
                 composer_id=composer_id,
                 composer=composer,
                 bubble_map=bubble_map,
