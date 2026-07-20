@@ -105,7 +105,7 @@ def validate_path() -> tuple[Response, int] | Response:
         unexpected failure.
     """
     try:
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return _validate_path_error("invalid JSON body", "invalid_json_body")
         raw = body.get("path", "")
