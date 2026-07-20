@@ -296,9 +296,11 @@ function renderChat(tab) {
 
   main.innerHTML = html;
 
-  main.querySelectorAll('pre code').forEach(block => {
-    hljs.highlightElement(block);
-  });
+  if (typeof hljs !== 'undefined') {
+    main.querySelectorAll('pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+  }
 }
 
 function renderToolCall(tc) {
