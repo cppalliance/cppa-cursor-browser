@@ -76,6 +76,8 @@ from services.workspace_resolver import (
 
 ERR_CONVERSATION_NOT_FOUND = "Conversation not found"
 ERR_GLOBAL_STORAGE_NOT_FOUND = "Global storage not found"
+CODE_CONVERSATION_NOT_FOUND = "conversation_not_found"
+CODE_GLOBAL_STORAGE_NOT_FOUND = "global_storage_not_found"
 _COMPOSER_ROW_ERRORS = (KeyError, TypeError, ValueError, json.JSONDecodeError)
 
 
@@ -575,7 +577,7 @@ def _build_workspace_tab_summaries_uncached(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND, "code": CODE_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
@@ -676,7 +678,7 @@ def assemble_single_tab(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND, "code": CODE_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 
@@ -686,14 +688,14 @@ def assemble_single_tab(
             (f"composerData:{composer_id}",),
         )
         if not rows:
-            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         row = rows[0]
         composer = parse_composer_data_row(
             row["key"], row["value"], parse_warnings=parse_warnings,
         )
         if composer is None:
-            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         project_layouts_map: dict[str, list[str]] = {}
         project_layouts_map[composer_id] = load_project_layouts_for_composer(
@@ -720,7 +722,7 @@ def assemble_single_tab(
         )
 
         if assigned not in matching_ws_ids:
-            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         contexts = load_message_request_context_for_composer(global_db, composer_id)
         code_block_diffs = load_code_block_diffs_for_composer(global_db, composer_id)
@@ -737,7 +739,7 @@ def assemble_single_tab(
         )
 
         if tab is None:
-            return {"error": ERR_CONVERSATION_NOT_FOUND}, 404
+            return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         response: dict[str, Any] = {"tab": tab}
         return parse_warnings.attach_to(response), 200
@@ -783,7 +785,7 @@ def assemble_workspace_tabs(
 
     with open_global_db(workspace_path) as (global_db, _):
         if global_db is None:
-            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND}, 404
+            return {"error": ERR_GLOBAL_STORAGE_NOT_FOUND, "code": CODE_GLOBAL_STORAGE_NOT_FOUND}, 404
 
         workspace_display_name = lookup_workspace_display_name(workspace_path, workspace_id)
 

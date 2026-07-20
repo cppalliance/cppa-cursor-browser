@@ -13,7 +13,7 @@ from typing import Any
 
 from flask import Blueprint, Response
 
-from api.flask_config import json_response
+from api.flask_config import api_error, json_response
 
 from utils.workspace_path import resolve_workspace_path
 from utils.path_helpers import to_epoch_ms
@@ -27,6 +27,25 @@ def _read_json_file(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
+def _parse_workspace_composer_rows(data: Any) -> list[Any]:
+    """Validate ``composer.composerData`` envelope and return ``allComposers``."""
+    if not isinstance(data, dict):
+        raise SchemaError(
+            "WorkspaceComposers",
+            "composer.composerData",
+            hint=f"expected object, got {type(data).__name__}",
+        )
+    if "allComposers" not in data:
+        raise SchemaError("WorkspaceComposers", "allComposers")
+    all_composers = data.get("allComposers")
+    if not isinstance(all_composers, list):
+        raise SchemaError(
+            "WorkspaceComposers",
+            "allComposers",
+            hint=f"expected list, got {type(all_composers).__name__}",
+        )
+    return all_composers
 
 @bp.route("/api/composers")
 def list_composers() -> tuple[Response, int] | Response:
@@ -67,22 +86,7 @@ def list_composers() -> tuple[Response, int] | Response:
                     ).fetchone()
 
                 if row and row[0]:
-                    data = json.loads(row[0])
-                    if not isinstance(data, dict):
-                        raise SchemaError(
-                            "WorkspaceComposers",
-                            "composer.composerData",
-                            hint=f"expected object, got {type(data).__name__}",
-                        )
-                    if "allComposers" not in data:
-                        raise SchemaError("WorkspaceComposers", "allComposers")
-                    all_composers = data.get("allComposers")
-                    if not isinstance(all_composers, list):
-                        raise SchemaError(
-                            "WorkspaceComposers",
-                            "allComposers",
-                            hint=f"expected list, got {type(all_composers).__name__}",
-                        )
+                    all_composers = _parse_workspace_composer_rows(json.loads(row[0]))
                     for c in all_composers:
                         try:
                             local = WorkspaceLocalComposer.from_dict(c)
@@ -126,7 +130,7 @@ def list_composers() -> tuple[Response, int] | Response:
 
     except Exception:
         _logger.exception("Failed to get composers")
-        return json_response({"error": "Failed to get composers"}, 500)
+        return api_error("Failed to get composers", "composers_list_failed", 500)
 
 
 @bp.route("/api/composers/<composer_id>")
@@ -163,25 +167,7 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                     ).fetchone()
 
                 if row and row[0]:
-                    data = json.loads(row[0])
-                    # Mirror the envelope guards list_composers() applies at line 60–74
-                    # so a drifted local row (data not a dict, or allComposers missing
-                    # / non-list) surfaces as a logged SchemaError, not a 500.
-                    if not isinstance(data, dict):
-                        raise SchemaError(
-                            "WorkspaceComposers",
-                            "composer.composerData",
-                            hint=f"expected object, got {type(data).__name__}",
-                        )
-                    if "allComposers" not in data:
-                        raise SchemaError("WorkspaceComposers", "allComposers")
-                    all_composers = data.get("allComposers")
-                    if not isinstance(all_composers, list):
-                        raise SchemaError(
-                            "WorkspaceComposers",
-                            "allComposers",
-                            hint=f"expected list, got {type(all_composers).__name__}",
-                        )
+                    all_composers = _parse_workspace_composer_rows(json.loads(row[0]))
                     for c in all_composers:
                         if isinstance(c, dict) and c.get("composerId") == composer_id:
                             try:
@@ -240,14 +226,14 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
                             e,
                             type(e).__name__,
                         )
-                        return json_response({"error": "Composer schema drift"}, 404)
+                        return api_error("Composer schema drift", "composer_schema_drift", 404)
                     payload = composer.cursor_storage_payload()
                     payload["conversation"] = payload.get("conversation") or []
                     return json_response(payload)
             except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError):
                 pass
 
-        return json_response({"error": "Composer not found"}, 404)
+        return api_error("Composer not found", "composer_not_found", 404)
     except Exception:
         _logger.exception("Failed to get composer")
-        return json_response({"error": "Failed to get composer"}, 500)
+        return api_error("Failed to get composer", "composer_get_failed", 500)

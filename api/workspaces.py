@@ -14,7 +14,7 @@ from typing import Any
 
 from flask import Blueprint, Response, request
 
-from api.flask_config import exclusion_rules, json_response
+from api.flask_config import api_error, exclusion_rules, json_response
 
 from utils.workspace_path import resolve_workspace_path, get_cli_chats_path
 from utils.cli_chat_reader import list_cli_projects
@@ -41,8 +41,16 @@ _logger = logging.getLogger(__name__)
 # GET /api/workspaces
 # ---------------------------------------------------------------------------
 
+def _truthy_query_param(name: str) -> bool:
+    return request.args.get(name) in ("1", "true")
+
+
 def _request_nocache() -> bool:
-    return request.args.get("nocache") in ("1", "true")
+    return _truthy_query_param("nocache")
+
+
+def _request_summary() -> bool:
+    return _truthy_query_param("summary")
 
 
 @bp.route("/api/workspaces")
@@ -67,7 +75,7 @@ def list_workspaces() -> tuple[Response, int] | Response:
         return json_response(payload)
     except Exception:
         _logger.exception("Failed to get workspaces")
-        return json_response({"error": "Failed to get workspaces"}, 500)
+        return api_error("Failed to get workspaces", "workspaces_list_failed", 500)
 
 
 # ---------------------------------------------------------------------------
@@ -115,13 +123,13 @@ def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
                     ),
                     "source": "cli",
                 })
-            return json_response({"error": "CLI project not found"}, 404)
+            return api_error("CLI project not found", "cli_project_not_found", 404)
         workspace_path = resolve_workspace_path()
         db_path = os.path.join(workspace_path, workspace_id, "state.vscdb")
         wj_path = os.path.join(workspace_path, workspace_id, "workspace.json")
 
         if not os.path.isfile(db_path):
-            return json_response({"error": "Workspace not found"}, 404)
+            return api_error("Workspace not found", "workspace_not_found", 404)
         mtime = os.path.getmtime(db_path)
         folder = None
         workspace_name = workspace_id
@@ -152,7 +160,7 @@ def get_workspace(workspace_id: str) -> tuple[Response, int] | Response:
 
     except Exception:
         _logger.exception("Failed to get workspace")
-        return json_response({"error": "Failed to get workspace"}, 500)
+        return api_error("Failed to get workspace", "workspace_get_failed", 500)
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +189,11 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
             return get_cli_workspace_tabs(workspace_id, exclusion_rules())
         except Exception:
             _logger.exception("Failed to get CLI workspace tabs")
-            return json_response({"error": "Failed to get workspace tabs"}, 500)
+            return api_error("Failed to get workspace tabs", "cli_workspace_tabs_failed", 500)
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
-        summary = request.args.get("summary") in ("1", "true")
+        summary = _request_summary()
         if summary:
             payload, status = list_workspace_tab_summaries(
                 workspace_id, workspace_path, rules, nocache=_request_nocache(),
@@ -197,7 +205,7 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
         return json_response(payload, status)
     except Exception:
         _logger.exception("Failed to get workspace tabs")
-        return json_response({"error": "Failed to get workspace tabs"}, 500)
+        return api_error("Failed to get workspace tabs", "workspace_tabs_failed", 500)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +229,11 @@ def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, in
         or it is not assigned to *workspace_id*; 500 on unexpected failure.
     """
     if workspace_id.startswith("cli:"):
-        return json_response({"error": "Per-tab lazy load is not supported for CLI workspaces"}, 400)
+        return api_error(
+            "Per-tab lazy load is not supported for CLI workspaces",
+            "cli_tab_lazy_load_unsupported",
+            400,
+        )
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
@@ -235,4 +247,4 @@ def get_workspace_tab(workspace_id: str, composer_id: str) -> tuple[Response, in
         return json_response(payload, status)
     except Exception:
         _logger.exception("Failed to get workspace tab")
-        return json_response({"error": "Failed to get workspace tab"}, 500)
+        return api_error("Failed to get workspace tab", "workspace_tab_get_failed", 500)

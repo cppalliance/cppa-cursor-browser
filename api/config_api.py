@@ -13,13 +13,36 @@ import sys
 
 from flask import Blueprint, Response, request
 
-from api.flask_config import json_response
+from api.flask_config import api_error, json_response
 
 from utils.path_validation import WorkspacePathError, validate_workspace_path
 from utils.workspace_path import set_workspace_path_override
 
 bp = Blueprint("config_api", __name__)
 _logger = logging.getLogger(__name__)
+
+_WORKSPACE_PATH_ERROR_CODES: dict[str, str] = {
+    "path is required": "path_required",
+    "path does not exist": "path_not_found",
+    "path is not a directory": "path_not_directory",
+    (
+        "path does not look like a Cursor workspaceStorage directory "
+        "(no immediate subdirectory contains state.vscdb)"
+    ): "path_not_workspace_storage",
+}
+
+
+def _workspace_path_error_code(message: str) -> str:
+    return _WORKSPACE_PATH_ERROR_CODES.get(message, "invalid_workspace_path")
+
+
+def _validate_path_error(
+    message: str,
+    code: str,
+) -> Response | tuple[Response, int]:
+    return json_response(
+        {"valid": False, "error": message, "code": code, "workspaceCount": 0},
+    )
 
 
 @bp.route("/api/detect-environment")
@@ -84,14 +107,13 @@ def validate_path() -> tuple[Response, int] | Response:
     try:
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            return json_response(
-                {"valid": False, "error": "invalid JSON body", "workspaceCount": 0}
-            )
+            return _validate_path_error("invalid JSON body", "invalid_json_body")
         raw = body.get("path", "")
         try:
             canonical = validate_workspace_path(raw)
         except WorkspacePathError as e:
-            return json_response({"valid": False, "error": str(e), "workspaceCount": 0})
+            message = str(e)
+            return _validate_path_error(message, _workspace_path_error_code(message))
 
         workspace_count = 0
         for name in os.listdir(canonical):
@@ -116,7 +138,10 @@ def validate_path() -> tuple[Response, int] | Response:
             type(e).__name__,
             exc_info=True,
         )
-        return json_response({"valid": False, "error": "Failed to validate path"}, 500)
+        return json_response(
+            {"valid": False, "error": "Failed to validate path", "code": "validate_path_failed", "workspaceCount": 0},
+            500,
+        )
 
 
 @bp.route("/api/set-workspace", methods=["POST"])
@@ -139,7 +164,7 @@ def set_workspace() -> tuple[Response, int] | Response:
     # instead of a 400 client error. (CodeRabbit on PR #16.)
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
-        return json_response({"error": "request body must be a JSON object"}, 400)
+        return api_error("request body must be a JSON object", "invalid_json_body", 400)
     raw = body.get("path", "")
     # Validate the supplied path BEFORE storing the override (issue #15).
     # validate_workspace_path collapses `..` traversal AND resolves symlinks
@@ -149,13 +174,14 @@ def set_workspace() -> tuple[Response, int] | Response:
     try:
         canonical = validate_workspace_path(raw)
     except WorkspacePathError as e:
-        return json_response({"error": str(e)}, 400)
+        message = str(e)
+        return api_error(message, _workspace_path_error_code(message), 400)
     except Exception:  # noqa: BLE001 — only here as a fallback
-        return json_response({"error": "Failed to validate workspace path"}, 500)
+        return api_error("Failed to validate workspace path", "validate_workspace_path_failed", 500)
     try:
         set_workspace_path_override(canonical)
     except Exception:  # noqa: BLE001 — keep the response shape structured JSON
-        return json_response({"error": "Failed to set workspace path"}, 500)
+        return api_error("Failed to set workspace path", "set_workspace_path_failed", 500)
     return json_response({"success": True, "path": canonical})
 
 

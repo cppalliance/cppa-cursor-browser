@@ -236,6 +236,7 @@ class TestSetWorkspaceApi(unittest.TestCase):
         data = resp.get_json()
         self.assertFalse(data["valid"])
         self.assertEqual(data["error"], "invalid JSON body")
+        self.assertEqual(data["code"], "invalid_json_body")
         self.assertEqual(data["workspaceCount"], 0)
 
 

@@ -113,7 +113,10 @@ class TestGeneratePdfErrors:
         ):
             response = _post_pdf(pdf_client, markdown="Hello", title="Fail")
         assert response.status_code == 500
-        assert response.get_json() == {"error": "Failed to generate PDF"}
+        assert response.get_json() == {
+            "error": "Failed to generate PDF",
+            "code": "pdf_generation_failed",
+        }
 
     def test_invalid_export_payload_returns_500(self, pdf_client):
         # Conversation IDs are resolved client-side (tabs API) before markdown is
@@ -123,4 +126,7 @@ class TestGeneratePdfErrors:
             json_data={"markdown": ["not", "a", "string"], "title": "Bad payload"},
         )
         assert response.status_code == 500
-        assert response.get_json() == {"error": "Failed to generate PDF"}
+        assert response.get_json() == {
+            "error": "Failed to generate PDF",
+            "code": "pdf_generation_failed",
+        }
