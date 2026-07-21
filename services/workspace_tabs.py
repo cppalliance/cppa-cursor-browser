@@ -662,7 +662,8 @@ def assemble_single_tab(
         ``(payload, status)``.  On success (``200``), *payload* is
         ``{"tab": {...}}``, optionally with ``"warnings"``.  ``404`` when the
         global DB is missing, the composer is not found, or it is not assigned
-        to *workspace_id*.
+        to *workspace_id* (``{"error", "code"}`` with
+        ``global_storage_not_found`` or ``conversation_not_found``).
     """
     parse_warnings = ParseWarningCollector()
 
@@ -765,7 +766,7 @@ def assemble_workspace_tabs(
         (list of tab dicts with ``id``, ``title``, ``timestamp``, ``bubbles``,
         optional ``metadata`` / ``codeBlockDiffs``) and optional ``warnings``
         when parse failures were skipped. On failure (``404``), *payload* is
-        ``{"error": "Global storage not found"}``.
+        ``{"error": "...", "code": "global_storage_not_found"}``.
     """
     parse_warnings = ParseWarningCollector()
     response: dict[str, Any] = {"tabs": []}

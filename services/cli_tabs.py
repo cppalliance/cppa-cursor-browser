@@ -27,8 +27,9 @@ def get_cli_workspace_tabs(
     Returns:
         ``flask.Response | tuple[flask.Response, int]`` suitable for a Flask route
         handler. Success returns ``json_response({"tabs": ...})`` (plain ``Response``,
-        status 200). Errors return ``(json_response({"error": ...}), status)`` with
-        404 when the project is missing or 500 on unexpected failure.
+        status 200). Errors return structured ``{"error", "code"}`` JSON with
+        404 when the project is missing (``cli_project_not_found``) or 500 on
+        unexpected failure (``cli_workspace_tabs_failed``).
     """
     try:
         project_id = workspace_id[4:]

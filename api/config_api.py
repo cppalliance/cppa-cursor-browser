@@ -99,10 +99,12 @@ def validate_path() -> tuple[Response, int] | Response:
         JSON with ``valid``, ``workspaceCount``, and canonical ``path`` on success.
         ``valid`` is ``false`` when the path fails validation or contains no
         workspace folders with ``state.vscdb``. Invalid JSON body returns
-        ``{"valid": false, "error": "invalid JSON body", "workspaceCount": 0}``.
-        Path validation errors return ``{"valid": false, "error": "...", "workspaceCount": 0}``.
-        500 with ``{"valid": false, "error": "Failed to validate path"}`` on
-        unexpected failure.
+        ``{"valid": false, "error": "invalid JSON body", "code": "invalid_json_body", "workspaceCount": 0}``.
+        Path validation errors return
+        ``{"valid": false, "error": "...", "code": "...", "workspaceCount": 0}``.
+        500 with
+        ``{"valid": false, "error": "Failed to validate path", "code": "validate_path_failed", "workspaceCount": 0}``
+        on unexpected failure.
     """
     try:
         body = request.get_json(silent=True)

@@ -143,9 +143,11 @@ def get_composer(composer_id: str) -> tuple[Response, int] | Response:
     Returns:
         Composer JSON from per-workspace storage or global fallback. Per-workspace
         schema drift is logged and skipped before global fallback is attempted.
-        404 when the composer is absent from both stores (``{"error": "Composer not found"}``)
-        or when the global row fails validation (``{"error": "Composer schema drift"}``).
-        500 on unexpected failure.
+        404 when the composer is absent from both stores
+        (``{"error": "Composer not found", "code": "composer_not_found"}``)
+        or when the global row fails validation
+        (``{"error": "Composer schema drift", "code": "composer_schema_drift"}``).
+        500 on unexpected failure (``{"error", "code"}`` via :func:`api_error`).
     """
     try:
         workspace_path = resolve_workspace_path()
