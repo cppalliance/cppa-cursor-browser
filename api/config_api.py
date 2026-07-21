@@ -16,7 +16,10 @@ from flask import Blueprint, Response, request
 from api.flask_config import api_error, json_response
 
 from utils.path_validation import WorkspacePathError, validate_workspace_path
-from utils.workspace_path import set_workspace_path_override
+from utils.workspace_path import (
+    is_multi_worker_process_deployment,
+    set_workspace_path_override,
+)
 
 bp = Blueprint("config_api", __name__)
 _logger = logging.getLogger(__name__)
@@ -172,7 +175,8 @@ def set_workspace() -> tuple[Response, int] | Response:
 
     Returns:
         ``{"success": true, "path": "..."}`` on success. 400 for invalid path or
-        body; 500 when override storage fails.
+        body; 409 when multiple WSGI worker processes are in use (override cannot
+        apply fleet-wide); 500 when override storage fails.
     """
     # Reject non-dict JSON bodies (array / string / number / null). Without
     # this, get_json returns the value directly, the truthy fallback `or {}`
@@ -194,6 +198,14 @@ def set_workspace() -> tuple[Response, int] | Response:
         return api_error("Failed to validate workspace path", "validate_workspace_path_failed", 500)
     if message is not None:
         return api_error(message, _workspace_path_error_code(message), 400)
+    if is_multi_worker_process_deployment():
+        return api_error(
+            "POST /api/set-workspace only updates this worker process. "
+            "Set WORKSPACE_PATH or pass --base-dir at startup when using "
+            "multiple gunicorn workers.",
+            "set_workspace_multi_worker_unsupported",
+            409,
+        )
     try:
         set_workspace_path_override(canonical)
     except Exception:  # noqa: BLE001 — keep the response shape structured JSON
