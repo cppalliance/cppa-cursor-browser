@@ -6,7 +6,7 @@ from typing import Any
 
 from flask import Response
 
-from api.flask_config import json_response
+from api.flask_config import api_error, json_response
 
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
 from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
@@ -27,8 +27,9 @@ def get_cli_workspace_tabs(
     Returns:
         ``flask.Response | tuple[flask.Response, int]`` suitable for a Flask route
         handler. Success returns ``json_response({"tabs": ...})`` (plain ``Response``,
-        status 200). Errors return ``(json_response({"error": ...}), status)`` with
-        404 when the project is missing or 500 on unexpected failure.
+        status 200). Errors return structured ``{"error", "code"}`` JSON with
+        404 when the project is missing (``cli_project_not_found``) or 500 on
+        unexpected failure (``cli_workspace_tabs_failed``).
     """
     try:
         project_id = workspace_id[4:]
@@ -41,7 +42,7 @@ def get_cli_workspace_tabs(
             None,
         )
         if project is None:
-            return json_response({"error": "CLI project not found"}, 404)
+            return api_error("CLI project not found", "cli_project_not_found", 404)
         ws_name = project.get("workspace_name") or project_id[:12]
         sessions = project.get("sessions") or []
         if not isinstance(sessions, list):
@@ -86,7 +87,7 @@ def get_cli_workspace_tabs(
 
             # Derive title from first user bubble when name is generic
             title = session_name
-            if not title or title.startswith("New Agent"):
+            if title.startswith("New Agent"):
                 for b in bubbles:
                     if b["type"] == "user" and b.get("text"):
                         first_lines = [ln for ln in b["text"].split("\n") if ln.strip()]
@@ -149,4 +150,4 @@ def get_cli_workspace_tabs(
             type(e).__name__,
             exc_info=True,
         )
-        return json_response({"error": "Failed to get CLI workspace tabs"}, 500)
+        return api_error("Failed to get CLI workspace tabs", "cli_workspace_tabs_failed", 500)

@@ -13,7 +13,7 @@ from typing import Any
 
 from flask import Blueprint, Response, request
 
-from api.flask_config import exclusion_rules, json_response
+from api.flask_config import api_error, exclusion_rules, json_response
 
 from models import ParseWarningCollector, SearchResult
 from services.search import (
@@ -53,7 +53,7 @@ def _search_error(
     code: str,
     status: int,
 ) -> tuple[Response, int]:
-    return json_response({"error": message, "code": code}, status)
+    return api_error(message, code, status)
 
 
 def _is_safe_workspace_folder_id(workspace_id: str) -> bool:

@@ -98,12 +98,16 @@ class TestExportErrorResponses:
             content_type="application/json",
         )
         assert response.status_code == 400
-        assert response.get_json().get("error") == "request body must be a JSON object"
+        body = response.get_json()
+        assert body.get("error") == "request body must be a JSON object"
+        assert body.get("code") == "invalid_json_body"
 
     def test_missing_global_storage_returns_404(self, empty_workspace_client):
         response = _post_export(empty_workspace_client)
         assert response.status_code == 404
-        assert response.get_json().get("error") == "Cursor global storage not found"
+        body = response.get_json()
+        assert body.get("error") == "Cursor global storage not found"
+        assert body.get("code") == "global_storage_not_found"
 
     def test_no_conversations_returns_404(self, workspace_storage, export_state_dir):
         """Global DB exists but has no exportable composer rows."""
@@ -121,6 +125,7 @@ class TestExportErrorResponses:
         assert response.status_code == 404
         body = response.get_json()
         assert body.get("error") == "No conversations to export"
+        assert body.get("code") == "no_conversations_to_export"
 
     def test_internal_failure_returns_500(self, client, export_state_dir):
         with patch(
@@ -129,7 +134,9 @@ class TestExportErrorResponses:
         ):
             response = _post_export(client)
         assert response.status_code == 500
-        assert response.get_json().get("error") == "Export failed"
+        body = response.get_json()
+        assert body.get("error") == "Export failed"
+        assert body.get("code") == "export_failed"
 
 
 class TestExportEdgeCases:
@@ -152,6 +159,7 @@ class TestExportEdgeCases:
         assert second.status_code == 404
         body = second.get_json()
         assert body.get("error") == "No conversations to export since last export"
+        assert body.get("code") == "no_conversations_since_last_export"
 
     def test_empty_json_body_defaults_to_export_all(
         self, client, export_state_dir

@@ -236,7 +236,23 @@ class TestSetWorkspaceApi(unittest.TestCase):
         data = resp.get_json()
         self.assertFalse(data["valid"])
         self.assertEqual(data["error"], "invalid JSON body")
+        self.assertEqual(data["code"], "invalid_json_body")
         self.assertEqual(data["workspaceCount"], 0)
+
+    def test_validate_path_falsey_non_dict_json_returns_invalid_json_body(self):
+        for payload in ("[]", "null", "0", '""'):
+            with self.subTest(payload=payload):
+                resp = self.client.post(
+                    "/api/validate-path",
+                    data=payload,
+                    content_type="application/json",
+                )
+                self.assertEqual(resp.status_code, 200)
+                data = resp.get_json()
+                self.assertFalse(data["valid"])
+                self.assertEqual(data["error"], "invalid JSON body")
+                self.assertEqual(data["code"], "invalid_json_body")
+                self.assertEqual(data["workspaceCount"], 0)
 
 
 if __name__ == "__main__":

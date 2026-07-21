@@ -43,7 +43,9 @@ class TestListWorkspaces:
         ):
             response = client.get("/api/workspaces")
         assert response.status_code == 500
-        assert response.get_json().get("error") == "Failed to get workspaces"
+        body = response.get_json()
+        assert body.get("error") == "Failed to get workspaces"
+        assert body.get("code") == "workspaces_list_failed"
 
 
 class TestGetWorkspace:

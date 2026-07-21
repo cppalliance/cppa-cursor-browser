@@ -32,3 +32,12 @@ def json_response(
     if status is None:
         return response
     return response, status
+
+
+def api_error(
+    message: str,
+    code: str,
+    status: int,
+) -> tuple[Response, int]:
+    """Return a structured ``{"error", "code"}`` JSON body with *status*."""
+    return json_response({"error": message, "code": code}, status)

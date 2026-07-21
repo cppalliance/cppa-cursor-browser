@@ -10,7 +10,7 @@ from typing import Any
 
 from flask import Blueprint, Response, request
 
-from api.flask_config import json_response
+from api.flask_config import api_error
 
 bp = Blueprint("pdf", __name__)
 _logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ def generate_pdf() -> tuple[Response, int] | Response:
             type(e).__name__,
             exc_info=True,
         )
-        return json_response({"error": "Failed to generate PDF"}, 500)
+        return api_error("Failed to generate PDF", "pdf_generation_failed", 500)
 def _render_code_block(pdf: Any, code_text: str) -> None:
     """Render a code block with a dark background."""
     pdf.ln(3)
