@@ -70,6 +70,15 @@ def test_html_page_has_content_security_policy_header(client) -> None:
     _assert_expected_csp_directives(csp, nonce)
 
 
+def test_config_page_has_content_security_policy_header(client) -> None:
+    response = client.get("/config")
+    assert response.status_code == 200
+    csp = response.headers.get("Content-Security-Policy")
+    assert csp
+    nonce = _extract_csp_nonce(csp)
+    _assert_expected_csp_directives(csp, nonce)
+
+
 def test_html_page_nonce_matches_inline_script(client) -> None:
     first = client.get("/search")
     second = client.get("/search")
