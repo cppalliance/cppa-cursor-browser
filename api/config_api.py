@@ -45,6 +45,23 @@ def _validate_path_error(
     )
 
 
+def _parse_workspace_path_from_body(body: object) -> object | None:
+    """Return the raw ``path`` field when *body* is a JSON object; else ``None``."""
+    if not isinstance(body, dict):
+        return None
+    path: object = body.get("path", "")
+    return path
+
+
+def _canonicalize_workspace_path(raw: object) -> tuple[str | None, str | None]:
+    """Return ``(canonical, None)`` or ``(None, error_message)`` on validation failure."""
+    try:
+        # validate_workspace_path raises WorkspacePathError for non-str/empty input.
+        return validate_workspace_path(raw), None  # type: ignore[arg-type]
+    except WorkspacePathError as e:
+        return None, str(e)
+
+
 @bp.route("/api/detect-environment")
 def detect_environment() -> Response:
     """Detect runtime OS, WSL, and SSH-remote context (GET /api/detect-environment).
@@ -107,15 +124,13 @@ def validate_path() -> tuple[Response, int] | Response:
         on unexpected failure.
     """
     try:
-        body = request.get_json(silent=True)
-        if not isinstance(body, dict):
+        raw = _parse_workspace_path_from_body(request.get_json(silent=True))
+        if raw is None:
             return _validate_path_error("invalid JSON body", "invalid_json_body")
-        raw = body.get("path", "")
-        try:
-            canonical = validate_workspace_path(raw)
-        except WorkspacePathError as e:
-            message = str(e)
+        canonical, message = _canonicalize_workspace_path(raw)
+        if message is not None:
             return _validate_path_error(message, _workspace_path_error_code(message))
+        assert canonical is not None  # paired with successful validation above
 
         workspace_count = 0
         for name in os.listdir(canonical):
@@ -165,21 +180,20 @@ def set_workspace() -> tuple[Response, int] | Response:
     # the outer Exception handler then mis-reports as a 500 server error
     # instead of a 400 client error. (CodeRabbit on PR #16.)
     body = request.get_json(silent=True)
-    if not isinstance(body, dict):
+    raw = _parse_workspace_path_from_body(body)
+    if raw is None:
         return api_error("request body must be a JSON object", "invalid_json_body", 400)
-    raw = body.get("path", "")
     # Validate the supplied path BEFORE storing the override (issue #15).
     # validate_workspace_path collapses `..` traversal AND resolves symlinks
     # via realpath, then enforces that the canonical target is an existing
     # directory containing Cursor workspace markers. Returns the canonical
     # path so we store that, not whatever the caller sent.
     try:
-        canonical = validate_workspace_path(raw)
-    except WorkspacePathError as e:
-        message = str(e)
-        return api_error(message, _workspace_path_error_code(message), 400)
+        canonical, message = _canonicalize_workspace_path(raw)
     except Exception:  # noqa: BLE001 — only here as a fallback
         return api_error("Failed to validate workspace path", "validate_workspace_path_failed", 500)
+    if message is not None:
+        return api_error(message, _workspace_path_error_code(message), 400)
     try:
         set_workspace_path_override(canonical)
     except Exception:  # noqa: BLE001 — keep the response shape structured JSON

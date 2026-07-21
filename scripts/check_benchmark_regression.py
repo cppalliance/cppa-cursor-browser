@@ -28,6 +28,17 @@ EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
         "test_composer_map_cache_lookup[miss]",
         "test_tab_summary_cache_lookup[hit]",
         "test_tab_summary_cache_lookup[miss]",
+        # POST /api/export ZIP over 10 composers: observed ~4x spread on ubuntu-latest
+        # (e.g. 0.008s vs 0.031s on the same branch). Environmental — cold page cache /
+        # first ZIP write — not an application regression. Baseline refresh cannot fix
+        # this: a high baseline passes slow runs but marks fast runs STALE (<50%).
+        # composers-50 (~30ms) stays gated and is stable (~1.2x spread).
+        #
+        # Scope note: this exclusion is CI-gate maintenance only. It does not change
+        # export behavior and is unrelated to feature PRs that happen to hit the flaky
+        # gate (e.g. structured {error, code} bodies). Prefer EXCLUDED_FROM_GATE over
+        # baselines.json churn when the failure is runner variance, not a code slowdown.
+        "test_post_export_zip[composers-10]",
     }
 )
 

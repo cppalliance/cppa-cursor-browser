@@ -49,10 +49,6 @@ def _request_nocache() -> bool:
     return _truthy_query_param("nocache")
 
 
-def _request_summary() -> bool:
-    return _truthy_query_param("summary")
-
-
 @bp.route("/api/workspaces")
 def list_workspaces() -> tuple[Response, int] | Response:
     """List workspace projects for the sidebar (GET /api/workspaces).
@@ -193,7 +189,7 @@ def get_workspace_tabs(workspace_id: str) -> tuple[Response, int] | Response:
     try:
         workspace_path = resolve_workspace_path()
         rules = exclusion_rules()
-        summary = _request_summary()
+        summary = _truthy_query_param("summary")
         if summary:
             payload, status = list_workspace_tab_summaries(
                 workspace_id, workspace_path, rules, nocache=_request_nocache(),
