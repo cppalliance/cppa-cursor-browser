@@ -59,7 +59,9 @@ def is_multi_worker_process_deployment() -> bool:
     for key in ("WEB_CONCURRENCY", "GUNICORN_WORKERS"):
         raw = os.environ.get(key, "").strip()
         if raw.isdigit():
-            return int(raw) > 1
+            count = int(raw)
+            if count > 1:
+                return True
     cmd_args = os.environ.get("GUNICORN_CMD_ARGS", "")
     if cmd_args:
         for pattern in (

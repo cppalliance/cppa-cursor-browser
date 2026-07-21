@@ -89,6 +89,12 @@ document.addEventListener('DOMContentLoaded', async () => {  document.getElement
           window.location.href = '/';
           return;
         }
+        const statusEl = document.getElementById('status-msg');
+        statusEl.className = 'alert alert-danger';
+        statusEl.textContent = saved.message;
+        statusEl.style.display = 'block';
+        document.getElementById('workspace-path').value = detected;
+        return;
       }
     }
     document.getElementById('workspace-path').value = detected;

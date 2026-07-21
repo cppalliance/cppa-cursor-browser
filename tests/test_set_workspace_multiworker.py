@@ -90,3 +90,28 @@ class TestMultiWorkerDetection(unittest.TestCase):
             clear=False,
         ):
             self.assertTrue(is_multi_worker_process_deployment())
+
+    def test_web_concurrency_one_does_not_block_later_multi_worker_signals(self):
+        from utils.workspace_path import is_multi_worker_process_deployment
+
+        with patch.dict(
+            os.environ,
+            {
+                "WEB_CONCURRENCY": "1",
+                "GUNICORN_WORKERS": "4",
+                "CURSOR_BROWSER_MULTI_WORKER": "",
+            },
+            clear=False,
+        ):
+            self.assertTrue(is_multi_worker_process_deployment())
+
+        with patch.dict(
+            os.environ,
+            {
+                "WEB_CONCURRENCY": "1",
+                "GUNICORN_CMD_ARGS": "app:create_app --workers 2",
+                "CURSOR_BROWSER_MULTI_WORKER": "",
+            },
+            clear=False,
+        ):
+            self.assertTrue(is_multi_worker_process_deployment())
