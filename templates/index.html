@@ -8,11 +8,11 @@
   </div>
   <div class="btn-group" style="flex-direction:column;align-items:flex-end;gap:0.25rem">
     <div style="display:flex;gap:0.5rem">
-      <button class="btn btn-outline btn-sm" id="btn-export-all" onclick="runExport('all')">
+      <button class="btn btn-outline btn-sm" id="btn-export-all" type="button">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Export all
       </button>
-      <button class="btn btn-outline btn-sm" id="btn-export-new" onclick="runExport('last')">
+      <button class="btn btn-outline btn-sm" id="btn-export-new" type="button">
         Export new since last
       </button>
     </div>
@@ -29,8 +29,11 @@
 <div id="parse-warnings-host"></div>
 <div id="projects-container" style="display:none"></div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('btn-export-all')?.addEventListener('click', () => runExport('all'));
+  document.getElementById('btn-export-new')?.addEventListener('click', () => runExport('last'));
+
   try {
     // Fetch projects and export state in parallel
     const [projRes, stateRes] = await Promise.all([
