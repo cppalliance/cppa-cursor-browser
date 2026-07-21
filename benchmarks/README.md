@@ -39,7 +39,7 @@ The `benchmarks` job on **ubuntu-latest** runs the full `tests/benchmarks/` suit
 
 Pinned runner: `ubuntu-latest`, `--benchmark-min-rounds=5`.
 
-Sub-millisecond cache lookups (`test_summary_cache_lookup`, `test_composer_map_cache_lookup`, `test_tab_summary_cache_lookup`) are already listed in `EXCLUDED_FROM_GATE` because shared runners show 2–4x spread. For remaining gated benches that turn flaky, raise `--slack` at baseline refresh time or add a targeted `EXCLUDED_FROM_GATE` entry.
+Sub-millisecond cache lookups (`test_summary_cache_lookup`, `test_composer_map_cache_lookup`, `test_tab_summary_cache_lookup`) are already listed in `EXCLUDED_FROM_GATE` because shared runners show 2-4x spread. When another gated bench turns flaky from runner variance, add a targeted `EXCLUDED_FROM_GATE` entry in `scripts/check_benchmark_regression.py`. Use `--slack` only when intentionally recalibrating all baselines via `scripts/reduce_baselines.py`, not to patch a single flaky benchmark.
 
 `test_summary_cache_round_trip` is intentionally excluded from the gate: it calls `set_cached_projects` (file write) + `get_cached_projects` (file read) each round, so OS page-cache state on shared runners causes 3–5x variation between consecutive CI runs. The baseline entry is kept for observation only.
 

@@ -32,7 +32,7 @@ EXCLUDED_FROM_GATE: frozenset[str] = frozenset(
         # ZIP writes on ubuntu-latest (e.g. composers-10 ~4x spread; composers-50 hit
         # 1.6x vs Jul-15 baseline on master after unrelated merges). Not an application
         # regression. Baseline-only fixes fail when slow and fast runs cannot both sit
-        # inside the 0.5x–1.2x gate.
+        # inside the 0.5x-1.2x gate.
         #
         # CI-gate maintenance only; prefer EXCLUDED_FROM_GATE over baselines.json churn
         # when the failure is runner variance, not a code slowdown.
