@@ -132,6 +132,36 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.python-version == '3.12'
         run: dist\CursorChatBrowser\CursorChatBrowser.exe --help
 
+  # ── Browser XSS: Playwright (sprint item #3) ─────────────────────────────
+  browser-xss:
+    name: Browser XSS (Playwright)
+    needs: [lockfile]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime + browser test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+          python -m pip install 'pytest>=8,<9' 'playwright==1.50.0'
+
+      - name: Install Chromium for Playwright
+        run: python -m playwright install chromium --with-deps
+
+      - name: Run headless XSS browser tests
+        run: python -m pytest tests/test_xss_browser.py -v --tb=short -o addopts=
+
+      - name: Run static XSS grep backstop
+        run: python -m unittest tests.test_xss_sanitization -v
+
   # ── Typecheck: mypy ───────────────────────────────────────────────────────
   # strict = true in pyproject.toml (issue #100). Per-module overrides skip
   # scripts/export.py and tests/ until those surfaces are fully annotated.
