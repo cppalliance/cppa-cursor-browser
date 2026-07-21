@@ -95,6 +95,10 @@ def test_html_page_nonce_matches_inline_script(client) -> None:
     _assert_expected_csp_directives(first_csp, first_nonce)
     _assert_inline_script_nonce(html, first_nonce)
 
+    second_html = second.get_data(as_text=True)
+    _assert_expected_csp_directives(second_csp, second_nonce)
+    _assert_inline_script_nonce(second_html, second_nonce)
+
 
 def test_json_api_response_has_no_content_security_policy_header(client) -> None:
     response = client.get("/api/workspaces")
@@ -105,4 +109,7 @@ def test_json_api_response_has_no_content_security_policy_header(client) -> None
 def test_workspace_page_has_content_security_policy_header(client) -> None:
     response = client.get("/workspace/global")
     assert response.status_code == 200
-    assert response.headers.get("Content-Security-Policy")
+    csp = response.headers.get("Content-Security-Policy")
+    assert csp
+    nonce = _extract_csp_nonce(csp)
+    _assert_expected_csp_directives(csp, nonce)
