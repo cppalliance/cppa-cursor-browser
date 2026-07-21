@@ -19,9 +19,8 @@ GATED_BENCH = "test_fingerprint_workspace_entries[10]"
 
 # Pytest benchmark node IDs (parametrize ids) that must stay in EXCLUDED_FROM_GATE.
 # Keep in sync with scripts/check_benchmark_regression.py — see that file for rationale
-# per exclusion. composers-10 export: ungatable CI variance on shared runners, not an
-# app perf regression; safe to land in a feature PR only as CI-gate maintenance (see
-# benchmarks/README.md § "Out-of-scope CI fixes in feature PRs").
+# per exclusion. Export ZIP benches (composers-10/50): ungatable CI variance; see
+# benchmarks/README.md § "Export ZIP benchmarks".
 EXPECTED_EXCLUDED_FROM_GATE = (
     "test_summary_cache_round_trip",
     "test_summary_cache_lookup[hit]",
@@ -31,6 +30,7 @@ EXPECTED_EXCLUDED_FROM_GATE = (
     "test_tab_summary_cache_lookup[hit]",
     "test_tab_summary_cache_lookup[miss]",
     "test_post_export_zip[composers-10]",
+    "test_post_export_zip[composers-50]",
 )
 
 
