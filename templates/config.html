@@ -13,12 +13,14 @@
   <div id="status-msg" style="display:none"></div>
 
   <div class="btn-group" style="margin-top:1rem">
-    <button class="btn btn-primary" onclick="validateAndSave()">Save Configuration</button>
+    <button class="btn btn-primary" id="btn-save-config" type="button">Save Configuration</button>
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('btn-save-config')?.addEventListener('click', validateAndSave);
+
   const stored = localStorage.getItem('workspacePath');
   if (stored) {
     document.getElementById('workspace-path').value = stored;

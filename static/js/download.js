@@ -288,7 +288,7 @@ function copyAllMarkdown() {
   const md = convertChatToMarkdown(selectedTab, true);
   navigator.clipboard.writeText(md).then(function() {
     // Brief feedback (you could show a toast)
-    const btn = document.querySelector('[onclick="copyAllMarkdown()"]');
+    const btn = document.getElementById('btn-copy-all');
     if (btn) {
       const orig = btn.innerHTML;
       btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied!';

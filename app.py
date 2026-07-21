@@ -6,12 +6,13 @@ from the Cursor editor's AI chat feature.
 
 import logging
 import os
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import cast
 
-from flask import Flask, Response, render_template, send_from_directory
+from flask import Flask, Response, g, render_template, send_from_directory
 
 from utils.debug_flag import resolve_debug_flag
 
@@ -23,6 +24,31 @@ from api.export_api import bp as export_bp
 from api.pdf import bp as pdf_bp
 from api.config_api import bp as config_bp
 from utils.exclusion_rules import resolve_exclusion_rules_path, load_rules
+
+_CDNJS_ORIGIN = "https://cdnjs.cloudflare.com"
+
+
+def build_content_security_policy(nonce: str) -> str:
+    """Build a restrictive CSP for served HTML pages.
+
+    script-src allows self-hosted JS, SRI-pinned cdnjs assets, and one
+    per-response nonce for inline page scripts. style-src keeps
+    'unsafe-inline' because highlight.js themes apply inline styles.
+    """
+    return "; ".join(
+        [
+            "default-src 'self'",
+            f"script-src 'self' {_CDNJS_ORIGIN} 'nonce-{nonce}'",
+            f"style-src 'self' 'unsafe-inline' {_CDNJS_ORIGIN}",
+            "img-src 'self' data:",
+            "connect-src 'self'",
+            "font-src 'self'",
+            "object-src 'none'",
+            "form-action 'self'",
+            "base-uri 'self'",
+            "frame-ancestors 'none'",
+        ]
+    )
 
 
 def _get_base_path() -> Path:
@@ -58,8 +84,24 @@ def create_app(exclusion_rules_path: str | None = None) -> Flask:
     app.config["EXCLUSION_RULES"] = loaded_rules
 
     @app.context_processor
-    def inject_year() -> dict[str, int]:
-        return {"current_year": datetime.now().year}
+    def inject_year() -> dict[str, int | str]:
+        return {
+            "current_year": datetime.now().year,
+            "csp_nonce": getattr(g, "csp_nonce", ""),
+        }
+
+    @app.before_request
+    def _assign_csp_nonce() -> None:
+        g.csp_nonce = secrets.token_urlsafe(16)
+
+    @app.after_request
+    def _set_content_security_policy(response: Response) -> Response:
+        content_type = response.content_type or ""
+        if content_type.startswith("text/html"):
+            nonce = getattr(g, "csp_nonce", "")
+            if nonce:
+                response.headers["Content-Security-Policy"] = build_content_security_policy(nonce)
+        return response
 
     # Register API blueprints
     app.register_blueprint(workspaces_bp)

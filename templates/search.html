@@ -5,9 +5,9 @@
   <div class="page-header">
     <h1>Search</h1>
     <div class="btn-group" style="align-self:center">
-      <button class="btn" id="filter-all" onclick="setFilter('all')">All</button>
-      <button class="btn btn-outline" id="filter-chat" onclick="setFilter('chat')">Ask Logs</button>
-      <button class="btn btn-outline" id="filter-composer" onclick="setFilter('composer')">Agent Logs</button>
+      <button class="btn" id="filter-all" type="button">All</button>
+      <button class="btn btn-outline" id="filter-chat" type="button">Ask Logs</button>
+      <button class="btn btn-outline" id="filter-composer" type="button">Agent Logs</button>
     </div>
   </div>
 
@@ -28,10 +28,10 @@
           Check &ldquo;Include chats older than 30 days&rdquo; to search full history.
         </span>
       </button>
-      <button class="btn btn-primary" onclick="doSearch()">Search</button>
+      <button class="btn btn-primary" id="btn-search" type="button">Search</button>
     </div>
     <label class="text-sm" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;cursor:pointer">
-      <input type="checkbox" id="all-history" onchange="doSearch()">
+      <input type="checkbox" id="all-history">
       Include chats older than 30 days <span class="text-muted">(searches all history — slower)</span>
     </label>
   </div>
@@ -46,10 +46,16 @@
   <div id="results-container"></div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 let currentFilter = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('filter-all')?.addEventListener('click', () => setFilter('all'));
+  document.getElementById('filter-chat')?.addEventListener('click', () => setFilter('chat'));
+  document.getElementById('filter-composer')?.addEventListener('click', () => setFilter('composer'));
+  document.getElementById('btn-search')?.addEventListener('click', doSearch);
+  document.getElementById('all-history')?.addEventListener('change', doSearch);
+
   const params = new URLSearchParams(window.location.search);
   const q = params.get('q');
   const t = params.get('type') || 'all';

@@ -9,22 +9,22 @@
       Back to Projects
     </a>
     <div class="btn-group" id="action-buttons" style="display:none">
-      <button class="btn btn-outline btn-sm" onclick="copyAllMarkdown()" title="Copy all as Markdown">
+      <button class="btn btn-outline btn-sm" id="btn-copy-all" type="button" title="Copy all as Markdown">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         Copy All
       </button>
       <div class="dropdown">
-        <button class="btn btn-outline btn-sm dropdown-toggle" onclick="this.parentElement.classList.toggle('open')">
+        <button class="btn btn-outline btn-sm dropdown-toggle" id="btn-download-toggle" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Download
         </button>
         <div class="dropdown-menu">
-          <a class="dropdown-item" href="#" onclick="downloadAs('md'); return false;">Download as Markdown</a>
-          <a class="dropdown-item" href="#" onclick="downloadAs('html'); return false;">Download as HTML</a>
-          <a class="dropdown-item" href="#" onclick="downloadAs('pdf'); return false;">Download as PDF</a>
-          <a class="dropdown-item" href="#" onclick="downloadAs('json'); return false;">Download as JSON</a>
-          <a class="dropdown-item" href="#" onclick="downloadAs('csv'); return false;">Download as CSV</a>
-          <a class="dropdown-item" href="#" id="dl-code-edits" onclick="downloadAs('csv-code'); return false;" style="display:none">Download code edits (CSV)</a>
+          <a class="dropdown-item" href="#" data-download-format="md">Download as Markdown</a>
+          <a class="dropdown-item" href="#" data-download-format="html">Download as HTML</a>
+          <a class="dropdown-item" href="#" data-download-format="pdf">Download as PDF</a>
+          <a class="dropdown-item" href="#" data-download-format="json">Download as JSON</a>
+          <a class="dropdown-item" href="#" data-download-format="csv">Download as CSV</a>
+          <a class="dropdown-item" href="#" id="dl-code-edits" data-download-format="csv-code" style="display:none">Download code edits (CSV)</a>
         </div>
       </div>
     </div>
@@ -55,13 +55,34 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const WORKSPACE_ID = "{{ workspace_id }}";
 let allTabs = [];        // summary tabs (no bubbles) from ?summary=1
 let tabCache = {};       // id → full tab (with bubbles), populated on first open
 let selectedTab = null;  // always a full tab once a conversation is opened
 
+function wireWorkspaceActions() {
+  document.getElementById('btn-copy-all')?.addEventListener('click', copyAllMarkdown);
+  document.getElementById('btn-download-toggle')?.addEventListener('click', function () {
+    this.parentElement.classList.toggle('open');
+  });
+  document.querySelectorAll('[data-download-format]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      downloadAs(el.dataset.downloadFormat);
+    });
+  });
+  document.getElementById('sidebar')?.addEventListener('click', (e) => {
+    const item = e.target.closest('.sidebar-item');
+    if (item?.dataset.id) {
+      selectTab(item.dataset.id);
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  wireWorkspaceActions();
+
   try {
     const [wsRes, tabsRes] = await Promise.all([
       fetch(`/api/workspaces/${WORKSPACE_ID}`),
@@ -110,7 +131,7 @@ function renderSidebar() {
     const ts = formatDate(tab.timestamp);
     const model = (tab.metadata && tab.metadata.modelsUsed && tab.metadata.modelsUsed[0]) || '';
     const modelBadge = model ? `<span style="font-size:0.65rem;opacity:0.5;display:block;margin-top:1px">${escapeHtml(model)}</span>` : '';
-    html += `<button class="sidebar-item" data-id="${tab.id}" onclick="selectTab('${tab.id}')" title="${title}">
+    html += `<button class="sidebar-item" data-id="${tab.id}" type="button" title="${title}">
       <div class="sidebar-item-title">${title}</div>
       <div class="sidebar-item-time">${ts}${modelBadge}</div>
     </button>`;

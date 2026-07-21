@@ -36,6 +36,10 @@ function toggleTheme() {
 // Apply on load
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getStoredTheme());
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', toggleTheme);
+  }
 });
 
 
