@@ -42,6 +42,10 @@ class TestSetWorkspaceMultiWorker(unittest.TestCase):
         self.assertEqual(body["code"], "set_workspace_multi_worker_unsupported")
         self.assertIn("WORKSPACE_PATH", body["error"])
 
+        from utils.workspace_path import get_workspace_path_override
+
+        self.assertIsNone(get_workspace_path_override())
+
     def test_single_process_still_succeeds_when_not_multi_worker(self):
         with patch(
             "api.config_api.is_multi_worker_process_deployment",

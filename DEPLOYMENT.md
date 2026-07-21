@@ -12,7 +12,9 @@ pip install gunicorn                     # Linux / macOS
 # pip install waitress                   # Windows-friendly alternative (see below)
 
 # Multi-process (recommended): one thread per worker avoids any per-worker state surprises.
-gunicorn --factory --bind 127.0.0.1:3000 --workers 2 --threads 1 app:create_app
+# WEB_CONCURRENCY (or CURSOR_BROWSER_MULTI_WORKER=1) lets the app detect multi-worker mode so
+# POST /api/set-workspace returns 409 instead of a misleading 200 on a single worker.
+WEB_CONCURRENCY=2 gunicorn --factory --bind 127.0.0.1:3000 --workers 2 --threads 1 app:create_app
 
 # Single-process, multi-threaded: safe after the #43 lock; useful for lighter deployments.
 gunicorn --factory --bind 127.0.0.1:3000 --workers 1 --threads 4 app:create_app
