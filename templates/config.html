@@ -18,8 +18,36 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
-document.addEventListener('DOMContentLoaded', async () => {
-  document.getElementById('btn-save-config')?.addEventListener('click', validateAndSave);
+async function postSetWorkspace(path) {
+  const res = await fetch('/api/set-workspace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  });
+  let body = {};
+  try {
+    body = await res.json();
+  } catch (e) {
+    body = {};
+  }
+  if (res.status === 409) {
+    return {
+      ok: false,
+      message: body.error || 'Workspace path cannot be changed in this deployment.',
+      code: body.code
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: body.error || 'Failed to save workspace path.',
+      code: body.code
+    };
+  }
+  return { ok: true, body };
+}
+
+document.addEventListener('DOMContentLoaded', async () => {  document.getElementById('btn-save-config')?.addEventListener('click', validateAndSave);
 
   const stored = localStorage.getItem('workspacePath');
   if (stored) {
@@ -55,13 +83,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       const valData = await valRes.json();
       if (valData.valid) {
-        localStorage.setItem('workspacePath', detected);
-        await fetch('/api/set-workspace', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: detected })
-        });
-        window.location.href = '/';
+        const saved = await postSetWorkspace(detected);
+        if (saved.ok) {
+          localStorage.setItem('workspacePath', detected);
+          window.location.href = '/';
+          return;
+        }
+        const statusEl = document.getElementById('status-msg');
+        statusEl.className = 'alert alert-danger';
+        statusEl.textContent = saved.message;
+        statusEl.style.display = 'block';
+        document.getElementById('workspace-path').value = detected;
         return;
       }
     }
@@ -86,12 +118,14 @@ async function validateAndSave() {
     const data = await res.json();
 
     if (data.valid) {
+      const saved = await postSetWorkspace(path);
+      if (!saved.ok) {
+        statusEl.className = 'alert alert-danger';
+        statusEl.textContent = saved.message;
+        statusEl.style.display = 'block';
+        return;
+      }
       localStorage.setItem('workspacePath', path);
-      await fetch('/api/set-workspace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path })
-      });
       statusEl.className = 'alert alert-success';
       statusEl.textContent = `Found ${data.workspaceCount} workspaces in the specified location`;
       statusEl.style.display = 'block';

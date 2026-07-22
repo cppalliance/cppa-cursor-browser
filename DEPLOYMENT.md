@@ -12,7 +12,9 @@ pip install gunicorn                     # Linux / macOS
 # pip install waitress                   # Windows-friendly alternative (see below)
 
 # Multi-process (recommended): one thread per worker avoids any per-worker state surprises.
-gunicorn --factory --bind 127.0.0.1:3000 --workers 2 --threads 1 app:create_app
+# WEB_CONCURRENCY (or CURSOR_BROWSER_MULTI_WORKER=1) lets the app detect multi-worker mode so
+# POST /api/set-workspace returns 409 instead of a misleading 200 on a single worker.
+WEB_CONCURRENCY=2 gunicorn --factory --bind 127.0.0.1:3000 --workers 2 --threads 1 app:create_app
 
 # Single-process, multi-threaded: safe after the #43 lock; useful for lighter deployments.
 gunicorn --factory --bind 127.0.0.1:3000 --workers 1 --threads 4 app:create_app
@@ -66,10 +68,10 @@ gunicorn and waitress are **not** runtime dependencies; install them only when d
 
 When gunicorn runs with `--workers 2` (or more), each worker is an independent Python process:
 
-- **`POST /api/set-workspace`** only updates the worker that handled that request. Other workers keep their previous override (usually `None`). Prefer setting `WORKSPACE_PATH` or passing `--base-dir` at process start so every worker sees the same path.
+- **`POST /api/set-workspace`** cannot update every worker from a single request (each process has its own override). The API returns **HTTP 409** with code `set_workspace_multi_worker_unsupported` instead of success when multiple workers are detected (`WEB_CONCURRENCY`, `GUNICORN_WORKERS`, gunicorn `--workers` in `GUNICORN_CMD_ARGS`, or `CURSOR_BROWSER_MULTI_WORKER=1`). Set `WORKSPACE_PATH` or pass `--base-dir` at process start so every worker sees the same path.
 - **Exclusion rules** (`EXCLUSION_RULES` in app config) are loaded once at worker startup from `--exclude-rules` or the default file. Changing the rules file requires restarting workers.
 
-For a single-user localhost deployment with multiple workers, set the workspace path via environment variable rather than the Configuration page.
+For a single-user localhost deployment with multiple workers, set the workspace path via environment variable or `--base-dir` at startup; do not rely on the Configuration page `set-workspace` call.
 
 ## Path configuration
 

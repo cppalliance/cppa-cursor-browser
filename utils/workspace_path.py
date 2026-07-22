@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import subprocess
 import threading
@@ -38,6 +39,39 @@ def get_workspace_path_override() -> str | None:
     """
     with _workspace_path_lock:
         return _workspace_path_override
+
+
+def is_multi_worker_process_deployment() -> bool:
+    """Return True when multiple WSGI worker processes may serve requests.
+
+    Used by POST /api/set-workspace to fail loud instead of updating only one
+    process. Single-process and multi-threaded deployments return False.
+
+    Operators can force True/False with ``CURSOR_BROWSER_MULTI_WORKER``. Otherwise
+    ``WEB_CONCURRENCY``, ``GUNICORN_WORKERS``, or ``--workers`` / ``-w`` in
+    ``GUNICORN_CMD_ARGS`` are consulted when present.
+    """
+    flag = os.environ.get("CURSOR_BROWSER_MULTI_WORKER", "").strip().lower()
+    if flag in ("1", "true", "yes"):
+        return True
+    if flag in ("0", "false", "no"):
+        return False
+    for key in ("WEB_CONCURRENCY", "GUNICORN_WORKERS"):
+        raw = os.environ.get(key, "").strip()
+        if raw.isdigit():
+            count = int(raw)
+            if count > 1:
+                return True
+    cmd_args = os.environ.get("GUNICORN_CMD_ARGS", "")
+    if cmd_args:
+        for pattern in (
+            r"(?:--workers|-w)\s+(\d+)",
+            r"(?:--workers|-w)=(\d+)",
+        ):
+            for match in re.finditer(pattern, cmd_args):
+                if int(match.group(1)) > 1:
+                    return True
+    return False
 
 
 def get_default_workspace_path() -> str:
