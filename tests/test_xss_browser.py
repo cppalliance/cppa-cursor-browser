@@ -35,6 +35,10 @@ XSS_VECTORS: list[tuple[str, str]] = [
     ("script_tag", "<script>window.__xssProbe=1</script>"),
     ("javascript_uri", "[x](javascript:window.__xssProbe=1)"),
     (
+        "data_uri",
+        "[x](data:text/html,<script>window.__xssProbe=1</script>)",
+    ),
+    (
         "svg_onload",
         '<svg xmlns="http://www.w3.org/2000/svg" onload="window.__xssProbe=1"></svg>',
     ),
@@ -80,6 +84,7 @@ async ({{ payload, useSafeRender }}) => {{
       onerrorAttr: el.querySelector('[onerror]') !== null,
       scriptTag: el.querySelector('script') !== null,
       jsHref: el.querySelector('[href^="javascript:"]') !== null,
+      dataHref: el.querySelector('[href^="data:"]') !== null,
       svgOnload: el.querySelector('svg[onload]') !== null,
       sanitizeCalls: useSafeRender ? sanitizeCalls : 0,
     }};
@@ -109,6 +114,9 @@ def _assert_sink_neutralized(result: dict[str, Any], vector_name: str) -> None:
     )
     assert not result["jsHref"], (
         f"javascript: URI survived sanitization for {vector_name!r}"
+    )
+    assert not result["dataHref"], (
+        f"data: URI survived sanitization for {vector_name!r}"
     )
     assert not result["svgOnload"], (
         f"svg onload survived sanitization for {vector_name!r}"
