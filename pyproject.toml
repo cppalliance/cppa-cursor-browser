@@ -34,6 +34,7 @@ dev = [
     "pytest-benchmark>=4,<5",
     "mypy>=1.10,<2",
     "hypothesis>=6.100,<7",
+    "playwright==1.50.0",
 ]
 
 [tool.pytest.ini_options]
@@ -43,6 +44,7 @@ addopts = "--benchmark-skip"
 testpaths = ["tests"]
 markers = [
     "benchmark: performance benchmarks (pytest-benchmark)",
+    "browser: headless browser tests (Playwright)",
 ]
 
 [project.scripts]

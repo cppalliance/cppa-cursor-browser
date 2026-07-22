@@ -9,13 +9,15 @@ The frontend must:
      (workspace.html → innerHTML) or a downloadable HTML blob (download.js).
   4. Never call marked.parse(...) without a DOMPurify.sanitize(...) wrap.
 
-These checks are static-source assertions — there is no JS test runner in
-this repo, but a future regression that re-introduces a bare marked.parse
-call would slip past every dynamic test even if one existed. Source-grep
-guards are the cheapest backstop.
+These checks are static-source assertions — a future regression that
+re-introduces a bare marked.parse call would slip past the headless browser
+suite if nobody exercised that path. Source-grep guards are the cheap backstop;
+authoritative execution checks live in tests/test_xss_browser.py (Playwright).
 
 Run:
     python -m unittest tests.test_xss_sanitization -v
+    playwright install chromium
+    pytest -q tests/test_xss_browser.py
 """
 
 import glob
