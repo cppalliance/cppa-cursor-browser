@@ -7,7 +7,7 @@ blinker==1.9.0            # via flask
 click==8.5.0              # via flask
 defusedxml==0.7.1         # via fpdf2
 flask==3.1.3              # via -r requirements.txt
-fonttools==4.68.0         # via fpdf2
+fonttools==4.65.0         # via -r requirements.txt, fpdf2
 fpdf2==2.8.9              # via -r requirements.txt
 itsdangerous==2.2.0       # via flask
 jinja2==3.1.6             # via flask

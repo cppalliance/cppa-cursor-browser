@@ -18,6 +18,9 @@ requires-python = ">=3.10"
 dependencies = [
     "flask>=3.0,<4",
     "fpdf2>=2.7,<3",
+    # fonttools 4.66+ requires Python >=3.11. The single lock must still
+    # install on the 3.10 matrix jobs.
+    "fonttools>=4.34,<4.66",
     # Security floor: fpdf2 allows Pillow>=8.3.2 (no upper cap); pin 12.x to avoid
     # known high-severity CVEs in Pillow 10.x (e.g. CVE-2024-28219 and later advisories).
     "pillow>=12.2.0,<13",
