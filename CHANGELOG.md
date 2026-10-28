@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Cursor 3 conversation index**: export, search, and workspace tabs read
+  `composerConvHeaders` when `fullConversationHeadersOnly` is empty, and keep
+  bubble ids that contain colons (`{uuid}/s:0`).
+
 ## [0.2.1] - 2026-07-30
 
 ### Added

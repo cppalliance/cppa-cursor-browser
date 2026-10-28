@@ -120,6 +120,20 @@ class TestSearchIndexBuild:
         with patches[0], patches[1], patches[2]:
             assert index_is_usable(indexed_storage["ws_root"], []) is True
 
+    def test_stale_index_version_rebuilds(self, indexed_storage):
+        patches = _index_patches(indexed_storage["cache_dir"])
+        with patches[0], patches[1], patches[2]:
+            with sqlite3.connect(indexed_storage["index_path"]) as conn:
+                conn.execute(
+                    "UPDATE index_meta SET value = ? WHERE key = 'version'",
+                    ("1",),
+                )
+                conn.commit()
+            assert index_is_usable(indexed_storage["ws_root"], []) is False
+            rebuilt = build_search_index(indexed_storage["ws_root"], [], force=False)
+            assert rebuilt is True
+            assert index_is_usable(indexed_storage["ws_root"], []) is True
+
     def test_bubble_fts_finds_term(self, indexed_storage):
         patches = _index_patches(indexed_storage["cache_dir"])
         with patches[0], patches[1], patches[2]:

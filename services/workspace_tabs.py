@@ -10,6 +10,7 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
+from utils.conversation_index import load_conv_header_map, load_conv_headers_for_composer
 from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
@@ -380,11 +381,15 @@ def _iter_assigned_workspace_composers(
     invalid_workspace_aliases: dict[str, str],
     matching_ws_ids: set[str],
     bubble_map: Mapping[str, Bubble],
+    conv_header_map: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> Iterator[tuple[Composer, str]]:
     """Yield composers assigned to the requested workspace, skipping parse failures."""
     for row in composer_rows:
         composer = parse_composer_data_row(
-            row["key"], row["value"], parse_warnings=parse_warnings,
+            row["key"],
+            row["value"],
+            parse_warnings=parse_warnings,
+            conv_header_map=conv_header_map,
         )
         if composer is None:
             continue
@@ -575,6 +580,7 @@ def _build_workspace_tab_summaries_uncached(
         project_layouts_map = load_project_layouts_map(global_db)
 
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
+        conv_header_map = load_conv_header_map(global_db)
 
         ctx = with_invalid_workspace_aliases(
             ctx,
@@ -598,6 +604,7 @@ def _build_workspace_tab_summaries_uncached(
             invalid_workspace_aliases=invalid_workspace_aliases,
             matching_ws_ids=matching_ws_ids,
             bubble_map={},
+            conv_header_map=conv_header_map,
         ):
             if is_composer_excluded(
                 rules,
@@ -683,8 +690,12 @@ def assemble_single_tab(
             return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         row = rows[0]
+        conv_header_map = load_conv_headers_for_composer(global_db, composer_id)
         composer = parse_composer_data_row(
-            row["key"], row["value"], parse_warnings=parse_warnings,
+            row["key"],
+            row["value"],
+            parse_warnings=parse_warnings,
+            conv_header_map=conv_header_map,
         )
         if composer is None:
             return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
@@ -822,6 +833,7 @@ def assemble_workspace_tabs(
                         project_layouts_map[chat_id].append(layout["rootPath"])
 
         composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
+        conv_header_map = load_conv_header_map(global_db)
 
         ctx = with_invalid_workspace_aliases(
             ctx,
@@ -845,6 +857,7 @@ def assemble_workspace_tabs(
             invalid_workspace_aliases=invalid_workspace_aliases,
             matching_ws_ids=matching_ws_ids,
             bubble_map={},
+            conv_header_map=conv_header_map,
         ):
             tab = _safe_assemble_tab_from_composer_data(
                 composer_id=composer_id,

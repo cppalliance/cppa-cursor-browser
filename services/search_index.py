@@ -57,7 +57,10 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
-INDEX_VERSION = 1
+# Bumped when the indexed composer set changes. Version 2 includes composers
+# whose inline fullConversationHeadersOnly list is empty (Cursor 3.x stores
+# the index in composerConvHeaders instead).
+INDEX_VERSION = 2
 SEARCH_INDEX_POINTER_FILE = CACHE_DIR / "search_index.active"
 # Legacy single-file path (pre-pointer builds); still honored when no pointer exists.
 SEARCH_INDEX_FILE = CACHE_DIR / "search_index.sqlite"
@@ -224,7 +227,10 @@ def build_search_index(
     *,
     force: bool = False,
 ) -> bool:
-    """Rebuild search index when fingerprint differs. Returns True if rebuilt."""
+    """Rebuild search index when the fingerprint or stored version differs.
+
+    Returns True if rebuilt.
+    """
     if not index_search_enabled():
         return False
 
@@ -237,10 +243,8 @@ def build_search_index(
         active_path = _resolve_active_index_db_path()
         if not force and active_path is not None:
             with _index_db_conn(readonly=True) as existing:
-                if existing is not None:
-                    stored = _read_stored_fingerprint(existing)
-                    if stored is not None and _fingerprints_match(stored, fingerprint):
-                        return False
+                if existing is not None and not _index_needs_rebuild(existing, fingerprint):
+                    return False
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         new_path = CACHE_DIR / f"search_index.{uuid.uuid4().hex[:12]}.sqlite"
@@ -362,8 +366,7 @@ def ensure_search_index(workspace_path: str, rules: list[RuleTokens]) -> None:
         if conn is None:
             build_search_index(workspace_path, rules)
             return
-        stored = _read_stored_fingerprint(conn)
-        if stored is None or not _fingerprints_match(stored, fingerprint):
+        if _index_needs_rebuild(conn, fingerprint):
             build_search_index(workspace_path, rules)
 
 
@@ -541,13 +544,35 @@ def query_composer_rows_in_window(
         return {row["composer_id"]: row for row in rows}
 
 
+def _index_needs_rebuild(
+    conn: sqlite3.Connection,
+    fingerprint: dict[str, Any],
+) -> bool:
+    """True when the stored fingerprint or index version is not current."""
+    stored = _read_stored_fingerprint(conn)
+    if stored is None or not _fingerprints_match(stored, fingerprint):
+        return True
+    return _stored_index_version(conn) != str(INDEX_VERSION)
+
+
+def _stored_index_version(conn: sqlite3.Connection) -> str | None:
+    try:
+        row = conn.execute(
+            "SELECT value FROM index_meta WHERE key = 'version'"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or row[0] is None:
+        return None
+    return str(row[0])
+
+
 def index_is_usable(workspace_path: str, rules: list[RuleTokens]) -> bool:
-    """True when the on-disk index matches the current Cursor storage fingerprint."""
+    """True when the on-disk index matches the storage fingerprint and INDEX_VERSION."""
     if not index_search_enabled() or _resolve_active_index_db_path() is None:
         return False
     fingerprint = _storage_fingerprint(workspace_path, rules)
     with _index_db_conn(readonly=True) as conn:
         if conn is None:
             return False
-        stored = _read_stored_fingerprint(conn)
-        return stored is not None and _fingerprints_match(stored, fingerprint)
+        return not _index_needs_rebuild(conn, fingerprint)
