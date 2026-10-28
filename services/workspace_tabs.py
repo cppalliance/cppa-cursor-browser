@@ -10,7 +10,7 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-from utils.conversation_index import load_conv_header_map
+from utils.conversation_index import load_conv_header_map, load_conv_headers_for_composer
 from utils.path_helpers import (
     get_workspace_folder_paths,
     normalize_file_path,
@@ -690,7 +690,7 @@ def assemble_single_tab(
             return {"error": ERR_CONVERSATION_NOT_FOUND, "code": CODE_CONVERSATION_NOT_FOUND}, 404
 
         row = rows[0]
-        conv_header_map = load_conv_header_map(global_db)
+        conv_header_map = load_conv_headers_for_composer(global_db, composer_id)
         composer = parse_composer_data_row(
             row["key"],
             row["value"],

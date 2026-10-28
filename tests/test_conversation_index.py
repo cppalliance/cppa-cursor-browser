@@ -9,6 +9,7 @@ from utils.conversation_index import (
     bubble_id_from_kv_key,
     composer_data_with_headers,
     load_conv_header_map,
+    load_conv_headers_for_composer,
 )
 
 
@@ -57,6 +58,57 @@ class TestConvHeaderMap(unittest.TestCase):
         self.assertEqual(
             [item["bubbleId"] for item in merged[composer_id]],
             ["parent", "parent/s:0"],
+        )
+
+    def test_non_string_bubble_id_is_omitted(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+        composer_id = "cmp-bad-id"
+        payload = [
+            {"bubbleId": "parent", "type": 1},
+            {"bubbleId": [], "type": 2},
+            {"type": 2},
+        ]
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (f"composerConvHeaders:{composer_id}:000000", json.dumps(payload)),
+        )
+        conn.commit()
+
+        merged = load_conv_header_map(conn)
+        self.assertEqual(
+            [item["bubbleId"] for item in merged[composer_id]],
+            ["parent"],
+        )
+
+    def test_scoped_loader_returns_one_composer_in_suffix_order(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE cursorDiskKV ([key] TEXT PRIMARY KEY, value TEXT)")
+        wanted = "cmp-wanted"
+        other = "cmp-other"
+        rows = [
+            (f"composerConvHeaders:{wanted}:000001", [{"bubbleId": "second", "type": 2}]),
+            (f"composerConvHeaders:{wanted}:000000", [{"bubbleId": "first", "type": 1}]),
+            (f"composerConvHeaders:{other}:000000", [{"bubbleId": "elsewhere", "type": 1}]),
+            (
+                "composerConvHeaders:cmp_wanted:000000",
+                [{"bubbleId": "underscore-neighbor", "type": 1}],
+            ),
+        ]
+        for key, payload in rows:
+            conn.execute(
+                "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+                (key, json.dumps(payload)),
+            )
+        conn.commit()
+
+        scoped = load_conv_headers_for_composer(conn, wanted)
+        self.assertEqual(list(scoped), [wanted])
+        self.assertEqual(
+            [item["bubbleId"] for item in scoped[wanted]],
+            ["first", "second"],
         )
 
     def test_inline_headers_win(self) -> None:

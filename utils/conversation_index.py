@@ -59,24 +59,24 @@ def _json_object(value: object) -> object | None:
     return parsed
 
 
-def load_conv_header_map(
-    conn: sqlite3.Connection,
-) -> dict[str, list[dict[str, Any]]]:
-    """Load ``composerConvHeaders:*`` chunks into ``{composer_id: headers}``.
+def _string_bubble_headers(parsed: object) -> list[dict[str, Any]] | None:
+    """Return header dicts whose ``bubbleId`` is a string.
 
-    Chunks for one composer are concatenated in suffix order (``000000``,
-    then ``000001``, …). Malformed rows are skipped.
+    A list or dict id is unhashable and would raise ``TypeError`` in
+    ``bubble_map.get``. Non-list rows are rejected so the caller can log them.
     """
-    grouped: dict[str, list[tuple[str, list[dict[str, Any]]]]] = {}
-    try:
-        rows = conn.execute(
-            "SELECT key, value FROM cursorDiskKV"
-            " WHERE key LIKE 'composerConvHeaders:%'"
-        ).fetchall()
-    except sqlite3.Error as exc:
-        _logger.debug("Could not read composerConvHeaders: %s", exc)
-        return {}
+    if not isinstance(parsed, list):
+        return None
+    return [
+        item
+        for item in parsed
+        if isinstance(item, dict) and isinstance(item.get("bubbleId"), str)
+    ]
 
+
+def _merge_header_rows(rows: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    """Concatenate header chunks in suffix order."""
+    grouped: dict[str, list[tuple[str, list[dict[str, Any]]]]] = {}
     for row in rows:
         key = row["key"]
         parts = _conv_header_key_parts(key if isinstance(key, str) else "")
@@ -84,10 +84,10 @@ def load_conv_header_map(
             continue
         composer_id, chunk = parts
         parsed = _json_object(row["value"])
-        if not isinstance(parsed, list):
+        headers = _string_bubble_headers(parsed)
+        if headers is None:
             _logger.debug("Skipping non-list composerConvHeaders row %s", key)
             continue
-        headers = [item for item in parsed if isinstance(item, dict)]
         grouped.setdefault(composer_id, []).append((chunk, headers))
 
     merged: dict[str, list[dict[str, Any]]] = {}
@@ -99,6 +99,70 @@ def load_conv_header_map(
         if combined:
             merged[composer_id] = combined
     return merged
+
+
+def _conv_header_like_pattern(composer_id: str) -> str:
+    """Return a ``LIKE`` pattern for one composer's header chunks.
+
+    ``%`` and ``_`` in *composer_id* are escaped for ``ESCAPE '\\'``.
+    """
+    escaped = (
+        composer_id
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"{_CONV_HEADER_KEY_PREFIX}{escaped}:%"
+
+
+def load_conv_header_map(
+    conn: sqlite3.Connection,
+) -> dict[str, list[dict[str, Any]]]:
+    """Load ``composerConvHeaders:*`` chunks into ``{composer_id: headers}``.
+
+    Chunks for one composer are concatenated in suffix order (``000000``,
+    then ``000001``, …). Malformed rows and entries whose ``bubbleId`` is
+    not a string are skipped.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM cursorDiskKV"
+            " WHERE key LIKE 'composerConvHeaders:%'"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        _logger.debug("Could not read composerConvHeaders: %s", exc)
+        return {}
+    return _merge_header_rows(rows)
+
+
+def load_conv_headers_for_composer(
+    conn: sqlite3.Connection,
+    composer_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Load header chunks for one composer.
+
+    Returns ``{composer_id: headers}`` when that composer has string
+    ``bubbleId`` entries, otherwise ``{}``. Chunks are concatenated in
+    suffix order.
+    """
+    if not composer_id:
+        return {}
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM cursorDiskKV"
+            " WHERE key LIKE ? ESCAPE '\\'",
+            (_conv_header_like_pattern(composer_id),),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        _logger.debug(
+            "Could not read composerConvHeaders for %s: %s", composer_id, exc,
+        )
+        return {}
+    merged = _merge_header_rows(rows)
+    headers = merged.get(composer_id)
+    if not headers:
+        return {}
+    return {composer_id: headers}
 
 
 def composer_data_with_headers(
