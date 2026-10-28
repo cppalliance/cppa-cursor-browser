@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
@@ -35,6 +35,7 @@ from utils.cli_chat_reader import (
     messages_to_bubbles,
     traverse_blobs,
 )
+from utils.conversation_index import composer_data_with_headers, load_conv_header_map
 from utils.cursor_md_exporter import (
     cursor_cli_session_to_markdown,
     cursor_ide_chat_to_markdown,
@@ -97,6 +98,7 @@ class GlobalDbExportData:
     code_block_diff_map: dict[str, list[Any]]
     ide_composer_rows: list[sqlite3.Row]
     invalid_workspace_aliases: dict[str, str]
+    conv_header_map: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 def json_dump_safe(value: object) -> str:
@@ -186,6 +188,7 @@ def load_global_db_export_data(
         project_layouts_map = enriched.project_layouts_map
         bubble_map = enriched.bubble_map
         code_block_diff_map = load_code_block_diff_map(global_db)
+        conv_header_map = load_conv_header_map(global_db)
         ide_composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
 
         invalid_workspace_aliases = resolve_invalid_workspace_aliases_cached(
@@ -203,6 +206,7 @@ def load_global_db_export_data(
         code_block_diff_map=code_block_diff_map,
         ide_composer_rows=ide_composer_rows,
         invalid_workspace_aliases=invalid_workspace_aliases,
+        conv_header_map=conv_header_map,
     )
 
 
@@ -245,6 +249,7 @@ def _collect_ide_export_entries(
             )
             continue
 
+        cd = composer_data_with_headers(cd, composer_id, db_data.conv_header_map)
         headers = cd.get("fullConversationHeadersOnly") or []
         if not isinstance(headers, list) or not headers:
             continue

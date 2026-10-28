@@ -7,6 +7,7 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
+from utils.conversation_index import load_conv_header_map
 from utils.cli_chat_reader import list_cli_projects
 from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.path_helpers import (
@@ -120,6 +121,7 @@ def _build_workspace_projects_uncached(
         if global_db:
             try:
                 composer_rows = safe_fetchall(global_db, COMPOSER_ROWS_WITH_HEADERS_SQL)
+                conv_header_map = load_conv_header_map(global_db)
                 project_layouts_map = load_project_layouts_map(global_db)
 
                 bubble_map: dict[str, Bubble] = {}
@@ -134,7 +136,10 @@ def _build_workspace_projects_uncached(
 
                 for row in composer_rows:
                     composer = parse_composer_data_row(
-                        row["key"], row["value"], parse_warnings=parse_warnings,
+                        row["key"],
+                        row["value"],
+                        parse_warnings=parse_warnings,
+                        conv_header_map=conv_header_map,
                     )
                     if composer is None:
                         continue

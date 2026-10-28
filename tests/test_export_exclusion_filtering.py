@@ -145,6 +145,58 @@ class TestExportExclusionFiltering(unittest.TestCase):
         self.assertIn("roadmap", content)
         self.assertNotIn("kwd", content)
 
+    def test_exports_when_headers_live_in_conv_chunks(self):
+        # Cursor 3.x leaves fullConversationHeadersOnly empty and stores the
+        # ordered index in composerConvHeaders, with bubble ids that contain
+        # colons. A draft with neither source must stay out of the export.
+        parent_id = "11111111-1111-1111-1111-111111111111"
+        sub_id = f"{parent_id}/s:0"
+        self._insert_bubble(
+            "cmp-new", parent_id, {"type": "user", "text": "user turn alpha"},
+        )
+        self._insert_bubble(
+            "cmp-new", sub_id, {"type": "assistant", "text": "assistant turn beta"},
+        )
+        self._insert_composer("cmp-draft", "Empty draft should stay hidden", "gpt-4.1", [])
+        conn = sqlite3.connect(self.global_db_path)
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                "composerData:cmp-new",
+                json.dumps({
+                    "name": "Chunked chat",
+                    "modelConfig": {"modelName": "gpt-4.1"},
+                    "fullConversationHeadersOnly": [],
+                    "lastUpdatedAt": 1739300000000,
+                    "createdAt": 1739200000000,
+                }),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                "composerConvHeaders:cmp-new:000001",
+                json.dumps([{"bubbleId": sub_id, "type": 2}]),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO cursorDiskKV ([key], value) VALUES (?, ?)",
+            (
+                "composerConvHeaders:cmp-new:000000",
+                json.dumps([{"bubbleId": parent_id, "type": 1}]),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        out_dir = self._run_export("kwd\n")
+        md_files = self._collect_exported_markdown(out_dir)
+        self.assertEqual(len(md_files), 1)
+        content = md_files[0].read_text(encoding="utf-8")
+        self.assertIn("user turn alpha", content)
+        self.assertIn("assistant turn beta", content)
+        self.assertNotIn("Empty draft should stay hidden", content)
+
     def test_writes_manifest_to_global_state_dir(self):
         self._insert_bubble("cmp-safe", "b-safe-4", {"type": "assistant", "text": "General roadmap update."})
         self._insert_composer("cmp-safe", "Roadmap", "gpt-4.1-mini", ["b-safe-4"])

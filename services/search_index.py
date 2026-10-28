@@ -57,7 +57,10 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
-INDEX_VERSION = 1
+# Bumped when the indexed composer set changes. Version 2 includes composers
+# whose inline fullConversationHeadersOnly list is empty (Cursor 3.x stores
+# the index in composerConvHeaders instead).
+INDEX_VERSION = 2
 SEARCH_INDEX_POINTER_FILE = CACHE_DIR / "search_index.active"
 # Legacy single-file path (pre-pointer builds); still honored when no pointer exists.
 SEARCH_INDEX_FILE = CACHE_DIR / "search_index.sqlite"
@@ -541,6 +544,18 @@ def query_composer_rows_in_window(
         return {row["composer_id"]: row for row in rows}
 
 
+def _stored_index_version(conn: sqlite3.Connection) -> str | None:
+    try:
+        row = conn.execute(
+            "SELECT value FROM index_meta WHERE key = 'version'"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or row[0] is None:
+        return None
+    return str(row[0])
+
+
 def index_is_usable(workspace_path: str, rules: list[RuleTokens]) -> bool:
     """True when the on-disk index matches the current Cursor storage fingerprint."""
     if not index_search_enabled() or _resolve_active_index_db_path() is None:
@@ -550,4 +565,6 @@ def index_is_usable(workspace_path: str, rules: list[RuleTokens]) -> bool:
         if conn is None:
             return False
         stored = _read_stored_fingerprint(conn)
-        return stored is not None and _fingerprints_match(stored, fingerprint)
+        if stored is None or not _fingerprints_match(stored, fingerprint):
+            return False
+        return _stored_index_version(conn) == str(INDEX_VERSION)

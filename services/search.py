@@ -51,6 +51,7 @@ from services.workspace_db import (
 )
 from services.workspace_resolver import infer_invalid_workspace_aliases
 from utils.cli_chat_reader import list_cli_projects, messages_to_bubbles, traverse_blobs
+from utils.conversation_index import composer_data_with_headers, load_conv_header_map
 from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from utils.text_extract import extract_text_from_bubble
 from utils.path_helpers import (
@@ -506,6 +507,11 @@ def _search_global_storage_via_index(
                 workspace_path, workspace_entries, rules,
             )
 
+        with open_global_db(workspace_path) as (header_db, _):
+            conv_header_map = (
+                load_conv_header_map(header_db) if header_db is not None else {}
+            )
+
         composers_in_window = query_composer_rows_in_window(since_ms)
         if since_ms is not None and not composers_in_window:
             return results
@@ -551,8 +557,9 @@ def _search_global_storage_via_index(
                 continue
 
             try:
+                cd = composer_data_with_headers(cd, composer_id, conv_header_map)
                 headers = cd.get("fullConversationHeadersOnly") or []
-                if not headers:
+                if not isinstance(headers, list) or not headers:
                     continue
 
                 title = composer_row["title"] or cd.get("name") or ""
@@ -677,6 +684,7 @@ def _search_global_storage_live_scan(
                 return results
 
             composer_rows = conn.execute(COMPOSER_ROWS_WITH_HEADERS_SQL).fetchall()
+            conv_header_map = load_conv_header_map(conn)
 
             window_composer_ids: set[str] | None = None
             if since_ms is not None:
@@ -726,8 +734,9 @@ def _search_global_storage_live_scan(
                     continue
 
                 try:
+                    cd = composer_data_with_headers(cd, composer_id, conv_header_map)
                     headers = cd.get("fullConversationHeadersOnly") or []
-                    if not headers:
+                    if not isinstance(headers, list) or not headers:
                         continue
 
                     title = cd.get("name") or ""

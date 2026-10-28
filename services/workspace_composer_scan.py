@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from models import Bubble, Composer, ParseWarningCollector, SchemaError
+from utils.conversation_index import composer_data_with_headers
 from utils.exclusion_rules import RuleTokens, build_searchable_text, is_excluded_by_rules
 from services.workspace_resolver import determine_project_for_conversation
 
@@ -23,11 +24,15 @@ def parse_composer_data_row(
     raw_value: object | None,
     *,
     parse_warnings: ParseWarningCollector,
+    conv_header_map: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> Composer | None:
     """Parse a ``composerData:*`` KV row into a :class:`Composer`.
 
     Returns ``None`` for null/placeholder payloads (e.g. ``empty-state-draft``)
     without emitting decode warnings. Logs and records skips for malformed JSON.
+    When ``fullConversationHeadersOnly`` is empty, headers are taken from
+    *conv_header_map* (``composerConvHeaders`` chunks). A composer with no
+    resolved headers is omitted.
     """
     if not row_key.startswith("composerData:"):
         return None
@@ -53,6 +58,7 @@ def parse_composer_data_row(
     if not isinstance(cd, dict):
         parse_warnings.record_composer_skipped()
         return None
+    cd = composer_data_with_headers(cd, composer_id, conv_header_map or {})
     try:
         composer = Composer.from_dict(cd, composer_id=composer_id)
     except SchemaError as e:

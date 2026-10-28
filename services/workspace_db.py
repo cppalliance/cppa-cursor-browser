@@ -15,6 +15,7 @@ from utils.exclusion_rules import RuleTokens
 _logger = logging.getLogger(__name__)
 
 from models import Bubble, ParseWarningCollector, SchemaError
+from utils.conversation_index import bubble_id_from_kv_key
 from utils.path_helpers import get_workspace_folder_paths
 from utils.workspace_descriptor import read_json_file
 
@@ -44,11 +45,14 @@ def _parse_bubble_kv_row(
     *,
     parse_warnings: ParseWarningCollector | None = None,
 ) -> tuple[str, Bubble] | None:
-    """Parse one ``bubbleId:…`` row; return ``(bubble_id, Bubble)`` or skip."""
-    parts = row_key.split(":")
-    if len(parts) < 3:
+    """Parse one ``bubbleId:…`` row; return ``(bubble_id, Bubble)`` or skip.
+
+    Bubble ids may contain colons (``{uuid}/s:0``). The id is the key tail
+    after ``bubbleId:{composerId}:``.
+    """
+    bid = bubble_id_from_kv_key(row_key)
+    if not bid:
         return None
-    bid = parts[2]
     try:
         parsed = json.loads(row_value)
         bubble = Bubble.from_dict(parsed, bubble_id=bid)
@@ -344,13 +348,14 @@ def collect_invalid_workspace_ids(workspace_entries: list[dict[str, Any]]) -> se
     return invalid
 
 
-# Composers that have at least one header entry (list/summary paths).
+# Composers that store a conversation index field. Cursor 3.x leaves
+# fullConversationHeadersOnly as [] and writes the ordered headers to
+# composerConvHeaders:{id}:{chunk}. Callers resolve that fallback and skip
+# composers whose resolved header list is still empty (drafts).
 COMPOSER_ROWS_WITH_HEADERS_SQL = (
     "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
     " AND LENGTH(value) > 10"
     " AND value LIKE '%fullConversationHeadersOnly%'"
-    " AND value NOT LIKE '%fullConversationHeadersOnly\":[]%'"
-    " AND value NOT LIKE '%fullConversationHeadersOnly\": []%'"
 )
 
 
