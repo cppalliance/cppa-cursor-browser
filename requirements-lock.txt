@@ -4,7 +4,7 @@
 # Run periodically (e.g. via the "Update dependency lock file" CI workflow) to pick up
 # upstream patch / security releases within the bounded ranges in requirements.txt.
 blinker==1.9.0            # via flask
-click==8.5.0              # via flask
+click==8.5.1              # via flask
 defusedxml==0.7.1         # via fpdf2
 flask==3.1.3              # via -r requirements.txt
 fonttools==4.65.0         # via -r requirements.txt, fpdf2
